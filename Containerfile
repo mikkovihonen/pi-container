@@ -1,0 +1,83 @@
+FROM node:26.3.1-trixie-slim AS builder
+
+ENV PYTHON_VERSION=3.14.6
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libssl-dev \
+    zlib1g-dev \
+    libncurses5-dev \
+    libncursesw5-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libgdbm-dev \
+    libdb5.3-dev \
+    libbz2-dev \
+    libexpat1-dev \
+    liblzma-dev \
+    libffi-dev \
+    uuid-dev \
+    wget \
+    curl
+
+RUN wget https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz \
+ && tar -xf Python-${PYTHON_VERSION}.tgz \
+ && cd Python-${PYTHON_VERSION} \
+ && ./configure --enable-optimizations \
+ && make -j $(nproc) \
+ && make install \
+ && ln -sf /usr/local/bin/python3.14 /usr/local/bin/python \
+ && ln -sf /usr/local/bin/pip3.14 /usr/local/bin/pip \
+ && ln -sf /usr/local/bin/idle3.14 /usr/local/bin/idle \
+ && ln -sf /usr/local/bin/pydoc3.14 /usr/local/bin/pydoc \
+ && ln -sf /usr/local/bin/python3.14-config /usr/local/bin/python-config
+
+FROM node:26.3.1-trixie-slim AS runner
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ripgrep \
+    ca-certificates \
+    iproute2 \
+    locales \
+    libssl3 \
+    libsqlite3-0 \
+    make \
+    gettext \
+    gosu \
+    rsync \
+    fd-find \
+    && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
+    && locale-gen en_US.UTF-8
+
+# Copy python tooling from builder and official uv image
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /usr/local/lib /usr/local/lib
+COPY --from=builder /usr/local/include /usr/local/include
+COPY --from=builder /usr/local/share /usr/local/share
+
+# Copy from official uv image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# Copy entrypoint.sh
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# Install global npm tools for pi
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
+ARG PI_UID=1000
+ARG PI_GID=1000
+
+RUN userdel --remove node 2>/dev/null || true \
+ && groupdel node 2>/dev/null || true \
+ && groupadd --gid ${PI_GID} pi \
+ && useradd --uid ${PI_UID} --gid ${PI_GID} --create-home --shell /bin/bash pi
+
+ENV VIRTUAL_ENV=/home/pi/.venv
+ENV UV_PROJECT_ENVIRONMENT=/home/pi/.venv
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+WORKDIR /workspace
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

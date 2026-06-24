@@ -1,0 +1,37 @@
+# MacOS
+.DS_Store
+.localized
+__MACOS__
+.AppleDouble
+.LSOverride
+Icon[]
+
+# Python
+__pycache__/
+*.py[cod]
+.env
+.venv
+env/
+venv/
+
+# llama.cpp
+models/
+logs/
+
+# Pi
+pi-home/.pi/agent/bin
+pi-home/.pi/agent/sessions
+pi-home/.pi/models.json
+
+# System
+pi-home/.venv
+pi-home/.cache
+pi-home/.local
+pi-home/.bash_history
+pi-home/.pi/agent/models.json
+
+# Environment
+.llama_server_refcount
+.llama_server_refcount.lock
+.llama_server.pid
+.model_download.lock

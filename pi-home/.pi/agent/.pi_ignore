@@ -1,0 +1,96 @@
+# ==============================================================================
+# OPTIMIZED .PI_IGNORE TEMPLATE FOR LARGE CONTEXT LOCAL INFRASTRUCTURE
+# ==============================================================================
+
+# --- Standard Package Dependencies ---
+node_modules/
+bower_components/
+jspm_packages/
+.pnpm-store/
+.yarn/
+vendor/
+packages/
+
+# --- Python Environments & Packages ---
+.venv/
+venv/
+env/
+ENV/
+python_env/
+.tox/
+.nox/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.poetry/
+.pdm-build/
+
+# --- Compilation, Build & Distribution Directories ---
+dist/
+build/
+out/
+target/
+bin/
+obj/
+.next/
+.nuxt/
+.docusaurus/
+.turbo/
+.cache/
+.parcel-cache/
+htmlcov/
+.nyc_output/
+
+# --- Heavy IDE, Editor & Tool Metrics ---
+.git/
+.github/
+.gitlab/
+.svn/
+.hf/
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# --- Media, High-Density Binaries & Database Assets ---
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ico
+*.webp
+*.mp4
+*.mp3
+*.pdf
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+*.sqlite
+*.db
+*.sql
+*.dump
+
+# --- Log Streams, Temporary Runtime Dumps & Locks ---
+*.log
+logs/
+.omlx/cache/
+pi-config/
+tmp/
+temp/
+.npm/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lockb
+poetry.lock
+Gemfile.lock
