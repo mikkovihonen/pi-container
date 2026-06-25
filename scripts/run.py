@@ -172,7 +172,7 @@ def start_server():
         print(f"Warning: Failed to start socat: {e}")
 
     with open(SERVER_PID_FILE, "w") as pf:
-        pf.write(f"{process.pid}\n{port}")
+        pf.write(f"{process.pid}\n{port}\n")
         if socat_process:
             pf.write(f"{socat_process.pid}\n")
 
@@ -248,6 +248,7 @@ def main():
     # 2. Manage llama-server lifecycle
     port = None
     server_pid = None
+    is_first_instance = False
 
     # Use a lock to manage the reference count
     with open(SERVER_LOCK_FILE, "w") as lock_f:
@@ -266,8 +267,11 @@ def main():
             # First instance: start server
             port, server_pid = start_server()
             if not wait_for_server(port):
+                stop_server()
+                SERVER_REF_COUNT_FILE.unlink(missing_ok=True)
                 sys.exit(1)
             ref_count = 1
+            is_first_instance = True
         else:
             # Subsequent instance: find existing server
             if not SERVER_PID_FILE.exists():
@@ -295,15 +299,10 @@ def main():
 
         SERVER_REF_COUNT_FILE.write_text(str(ref_count))
 
-    # Now that we have incremented the count, we release the lock for others
-    # but the lock must be held by the process if we want to use it for reference counting.
-    # Wait, I am releasing it here because I want other instances to be able to enter this block.
-    # But we need to make sure the server doesn't die before we're done.
-    # Since I'm using a refcount file, as long as ref_count > 0, the server stays alive.
-    # The last one to decrement ref_count to 0 will call stop_server().
 
     try:
         # 3. Run container
+        env_extras = ["--env", "UPDATE_MODEL=1"] if is_first_instance else []
         container_cmd = [
             "container", "run",
             "--rm",
@@ -323,9 +322,10 @@ def main():
             "--env", f"MODEL_MAX_TOKENS={MODEL_BATCH_SIZE}",
             "--env", f"MODEL_TEMPERATURE={MODEL_TEMPERATURE}",
             "--env", f"MODEL_TOP_P={MODEL_TOP_P}",
-            IMAGE_TAG
+            *env_extras,
+            IMAGE_TAG,
+            *sys.argv[1:]
         ]
-        container_cmd.extend(sys.argv[1:])
 
         result = subprocess.run(container_cmd)
         sys.exit(result.returncode)
