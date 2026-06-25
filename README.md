@@ -1,4 +1,4 @@
-# Pi-Container Pi-Coding-Agent Environment
+# pi-container
 
 A containerized environment for running the `pi-coding-agent` on macOS.
 
