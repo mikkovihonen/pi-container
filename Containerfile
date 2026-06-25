@@ -47,6 +47,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \
     rsync \
     fd-find \
+    tree \
+    jq \
+    yq \
     && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
     && locale-gen en_US.UTF-8
 

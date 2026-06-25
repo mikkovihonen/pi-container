@@ -58,7 +58,7 @@ pi --session 1234abcd-ef56-78ab-cd90-1234abcd56ef
 
 Once the server is ready, you can interact with the agent through the terminal. The current directory is mounted to `/workspace` inside the container, allowing the agent to read and write files in your project.
 
-Agent looks for `dependencies/apt/packages.txt` under the directory it was started in and prompts the user to install the packages listed in the file.
+Agent looks for `.pi/dependencies/apt/packages.txt` under the directory it was started in and prompts the user to install the packages listed in the file.
 
 ## Environment Configuration
 
@@ -95,10 +95,31 @@ The following environment variables can be tuned in your `.env` file to customiz
 
 ## Project Structure
 
+### Root Directory
+- `.env.example`: Template for environment variable configuration.
+- `.gitignore`: Specifies files and directories for Git to ignore.
 - `Containerfile`: Defines the container image (Node.js base, Python 3.14, `pi-coding-agent`).
-- `models/`: Contains the GGUF model files (Main and Draft).
-- `pi-home/`: Contains configuration templates and model substitution scripts.
-- `scripts/`:
-  - `build.sh`: Builds the container image.
-  - `run.sh`: Orchestrates model downloads, `llama-server`, and container execution.
-  - `entrypoint.sh`: Container entrypoint that sets up the Python environment.
+- `README.md`: Project documentation.
+- `entrypoint.sh`: The script executed when the container starts.
+
+### `pi-home/`
+Contains configuration templates and scripts used by the agent inside the container.
+- `.pi/agent/`: Internal configuration and extensions for the `pi-coding-agent`.
+  - `AGENTS.md`: Agent configuration/documentation.
+  - `auth.json`: Authentication settings.
+  - `config.json`: General agent configuration.
+  - `models.json.tpl`: Template file for model configuration.
+  - `settings.json`: Agent settings.
+  - `.pi_ignore`: Internal ignore file used by the agent.
+  - `extensions/`: Directory containing custom agent extensions.
+    - `plan-mode/`: Extension for task planning.
+    - `terminal-beautifier/`: Extension for enhancing terminal output.
+- `substitute-models.sh`: Script used to substitute model paths in configuration templates.
+
+### `scripts/`
+Utility and orchestration scripts for managing the container environment.
+- `build.sh`: Shell script to build the container image.
+- `build.py`: Python version of the build script.
+- `run.sh`: Shell script to orchestrate model downloads, `llama-server`, and container execution.
+- `run.py`: Python version of the run script.
+- `util.py`: Common utility functions used by the scripts.
