@@ -1,12 +1,6 @@
-# Gemma 4 Pi-Coding-Agent Environment
+# Pi-Container Pi-Coding-Agent Environment
 
 A containerized environment for running the `pi-coding-agent` on macOS.
-
-## Features
-
-- **Gemma 4 Support**: Optimized for Gemma 4 26B models.
-- **Speculative Decoding**: Uses a draft model (`gemma4-26b-mtp`) to accelerate the main model (`gemma-4-26B-A4B-it-qat-GGUF`) via `llama-server`.
-- **Containerized**: Provides a consistent environment with `Node 26.3.1`, `Python 3.14.6`, `uv`, and `pi-coding-agent` pre-installed.
 
 ## Prerequisites
 
