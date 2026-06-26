@@ -5,6 +5,7 @@ import socket
 import time
 import fcntl
 import signal
+import json
 from pathlib import Path
 
 # Add scripts directory to sys.path so we can import from util
@@ -29,48 +30,46 @@ SERVER_LOCK_FILE = REPO_ROOT / ".llama_server_refcount.lock"
 SERVER_PID_FILE = REPO_ROOT / ".llama_server.pid"
 DOWNLOAD_LOCK_FILE = REPO_ROOT / ".model_download.lock"
 
-# ─── Model locations & HuggingFace source ────────────────────────────────────
+pi_conf_model = {}
+server_flags : list[str] = []
 
-MAIN_MODEL_DIR = MODELS_DIR / "gemma-4-26B-A4B-it-qat-GGUF"
-MAIN_MODEL = MAIN_MODEL_DIR / "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf"
-MAIN_MODEL_HF_REPO = os.environ.get("MAIN_MODEL_HF_REPO", "unsloth/gemma-4-26B-A4B-it-qat-GGUF")
-MAIN_MODEL_HF_FILE = os.environ.get("MAIN_MODEL_HF_FILE", "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf")
+try:
+    # Open the file in read mode
+    with open(REPO_ROOT / "pi-home" / ".pi" / "agent" / "models.json", 'r') as file:
+        data = json.load(file)
+        if len(data["providers"]["llama-local"]["models"]) != 1:
+            print("define exactly 1 model under llama-local in pi models.json")
+            exit()
+        pi_conf_model = data["providers"]["llama-local"]["models"][0]
 
-DRAFT_MODEL_DIR = MODELS_DIR / "gemma4-26b-mtp"
-DRAFT_MODEL = DRAFT_MODEL_DIR / "mtp-gemma-4-26B-A4B-it.gguf"
-DRAFT_MODEL_HF_REPO = os.environ.get("DRAFT_MODEL_HF_REPO", "unsloth/gemma-4-26B-A4B-it-qat-GGUF")
-DRAFT_MODEL_HF_FILE = os.environ.get("DRAFT_MODEL_HF_FILE", "mtp-gemma-4-26B-A4B-it.gguf")
+        for flag in pi_conf_model["serverCustomParameters"]["flags"]:
+            server_flags.append(f"--{flag}")
+        for (key, value) in pi_conf_model["serverCustomParameters"]["options"].items():
+            server_flags.append(f"--{key}")
+            server_flags.append(f"{str(value)}")
 
-# ─── Settings ────────────────────────────────────
+    hf_model = pi_conf_model["serverCustomParameters"]["hf-model"]
 
-MODEL_ID = os.environ.get("MODEL_ID", "gemma-4-26b-a4b-it-qat-ud-q4_k_xl")
-MODEL_CTX_SIZE = int(os.environ.get("MODEL_CTX_SIZE", 131072))
-MODEL_COMPACTION_THRESHOLD = int(os.environ.get("MODEL_COMPACTION_THRESHOLD", 128000))
-MODEL_BATCH_SIZE = int(os.environ.get("MODEL_BATCH_SIZE", 4096))
-MODEL_TEMPERATURE = float(os.environ.get("MODEL_TEMPERATURE", 0.2))
-MODEL_TOP_P = float(os.environ.get("MODEL_TOP_P", 0.95))
-MODEL_GPU_LAYERS = int(os.environ.get("MODEL_GPU_LAYERS", 999))
-MODEL_THREADS = int(os.environ.get("MODEL_THREADS", 8))
-MODEL_THREADS_BATCH = int(os.environ.get("MODEL_THREADS_BATCH", 8))
-MODEL_SPEC_TYPE = os.environ.get("MODEL_SPEC_TYPE", "draft-mtp")
-MODEL_SPEC_DRAFT_N_MAX = int(os.environ.get("MODEL_SPEC_DRAFT_N_MAX", 4))
-MODEL_SPEC_DRAFT_N_MIN = int(os.environ.get("MODEL_SPEC_DRAFT_N_MIN", 1))
-MODEL_PARALLEL = int(os.environ.get("MODEL_PARALLEL", 1))
-MODEL_U_BATCH_SIZE = int(os.environ.get("MODEL_U_BATCH_SIZE", 512))
-MODEL_FLASH_ATTN = os.environ.get("MODEL_FLASH_ATTN", "on")
-MODEL_CTX_CHECKPOINTS = int(os.environ.get("MODEL_CTX_CHECKPOINTS", 32))
-MODEL_CHECKPOINT_MIN_STEP = int(os.environ.get("MODEL_CHECKPOINT_MIN_STEP", 256))
-MODEL_PRIO = int(os.environ.get("MODEL_PRIO", 2))
+    MAIN_MODEL_HF_FILE = hf_model["main-model-hf-file"].strip()
+    MAIN_MODEL_DIR = MODELS_DIR / hf_model["main-model-dir"]
+    MAIN_MODEL = MAIN_MODEL_DIR / MAIN_MODEL_HF_FILE
+    MAIN_MODEL_HF_REPO = hf_model["main-model-hf-repo"]
 
-def download_if_missing(label, path, directory, repo, file):
+    DRAFT_MODEL_HF_FILE = hf_model["draft-model-hf-file"].strip()
+    DRAFT_MODEL_DIR = MODELS_DIR / hf_model["draft-model-dir"]
+    DRAFT_MODEL = DRAFT_MODEL_DIR / DRAFT_MODEL_HF_FILE
+    DRAFT_MODEL_HF_REPO = hf_model["draft-model-hf-repo"]
+
+    MODEL_ID = pi_conf_model["id"]
+
+except Exception as e:
+    print(f"unexpected error occurred: {e}")
+    sys.exit(1)
+
+def download_if_missing(label: str, path: Path, directory: Path, repo: str, file: Path):
     if path.exists():
         print(f"[{label}] Found: {path}")
         return
-
-    if not repo:
-        print(f"[{label}] Model missing and HF repo not configured: {path}")
-        print("  Set the matching *_HF_REPO variable in this script.")
-        sys.exit(1)
 
     print(f"[{label}] Downloading {file} from {repo} ...")
     directory.mkdir(parents=True, exist_ok=True)
@@ -125,35 +124,16 @@ def start_server():
     port = get_free_port()
     print(f"Allocated port {port} for llama-server")
     LLAMA_LOG.parent.mkdir(parents=True, exist_ok=True)
-
     cmd = [
         LLAMA_BIN,
         "--model", str(MAIN_MODEL),
-        "--alias", MODEL_ID,
+        "--model-draft", str(DRAFT_MODEL),
+        "--alias", str(MODEL_ID),
         "--host", "127.0.0.1",
         "--port", str(port),
-        "--ctx-size", str(MODEL_CTX_SIZE),
-        "--n-gpu-layers", str(MODEL_GPU_LAYERS),
-        "--threads", str(MODEL_THREADS),
-        "--threads-batch", str(MODEL_THREADS_BATCH),
-        "--model-draft", str(DRAFT_MODEL),
-        "--spec-type", MODEL_SPEC_TYPE,
-        "--spec-draft-n-max", str(MODEL_SPEC_DRAFT_N_MAX),
-        "--spec-draft-n-min", str(MODEL_SPEC_DRAFT_N_MIN),
-        "--parallel", str(MODEL_PARALLEL),
-        "--batch-size", str(MODEL_BATCH_SIZE),
-        "--ubatch-size", str(MODEL_U_BATCH_SIZE),
-        "--flash-attn", str(MODEL_FLASH_ATTN),
-        "--no-mmap",
-        "--mlock",
-        "--kv-offload",
-        "--jinja",
-        "--ctx-checkpoints", str(MODEL_CTX_CHECKPOINTS),
-        "--checkpoint-min-step", str(MODEL_CHECKPOINT_MIN_STEP),
-        "--prio", str(MODEL_PRIO),
-        "--log-file", str(LLAMA_LOG)
+        "--log-file", str(LLAMA_LOG),
+        *server_flags
     ]
-
     # Redirect stdout/stderr to null as in bash script
     process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -197,12 +177,9 @@ def stop_server():
                             except OSError:
                                 break
                         else:
-                            # Still running, try SIGKILL
                             os.kill(pid, signal.SIGKILL)
                     except OSError:
                         pass
-
-                    # Stop socat if it was running
                     if len(lines) >= 3:
                         try:
                             socat_pid = int(lines[2].strip())
@@ -302,7 +279,6 @@ def main():
 
     try:
         # 3. Run container
-        env_extras = ["--env", "UPDATE_MODEL=1"] if is_first_instance else []
         container_cmd = [
             "container", "run",
             "--rm",
@@ -310,19 +286,13 @@ def main():
             "--tty",
             "--volume", f"{REPO_ROOT}/pi-home:/home/pi",
             "--volume", f"{PROJECT_DIR}:/workspace",
+            "--tmpfs", "/home/pi/.gitconfig",
             "--tmpfs", "/home/pi/.cache",
             "--tmpfs", "/home/pi/.local",
             "--tmpfs", "/home/pi/.venv",
             "--tmpfs", "/home/pi/.pi/agent/bin",
             "--workdir", "/workspace",
             "--env", f"LLAMA_PORT={port}",
-            "--env", f"MODEL_ID={MODEL_ID}",
-            "--env", f"MODEL_CTX_WINDOW={MODEL_CTX_SIZE}",
-            "--env", f"MODEL_COMPACTION_THRESHOLD={MODEL_COMPACTION_THRESHOLD}",
-            "--env", f"MODEL_MAX_TOKENS={MODEL_BATCH_SIZE}",
-            "--env", f"MODEL_TEMPERATURE={MODEL_TEMPERATURE}",
-            "--env", f"MODEL_TOP_P={MODEL_TOP_P}",
-            *env_extras,
             IMAGE_TAG,
             *sys.argv[1:]
         ]

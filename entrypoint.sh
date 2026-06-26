@@ -10,12 +10,11 @@ if [ -f /workspace/.pi/dependencies/apt/packages.txt ]; then
     }  >/dev/null 2>&1
 fi
 
-GATEWAY_IP=$(ip route | awk '/default/ {print $3}')
-export GATEWAY_IP
+export GATEWAY_IP=$(ip route | awk '/default/ {print $3}')
 
 exec gosu pi bash -c '
+    socat TCP-LISTEN:9999,fork,reuseaddr TCP:${GATEWAY_IP}:${LLAMA_PORT} &
     uv venv --python /usr/local/bin/python3 --no-managed-python "$UV_PROJECT_ENVIRONMENT"
     source /home/pi/.venv/bin/activate
-    /home/pi/substitute-models.sh
     exec pi "$@"
 ' -- "$@"
