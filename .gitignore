@@ -31,7 +31,6 @@ pi-home/.venv
 pi-home/.cache
 pi-home/.local
 pi-home/.bash_history
-pi-home/.pi/agent/models.json
 
 # Environment
 .llama_server_refcount

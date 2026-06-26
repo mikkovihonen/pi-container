@@ -11,9 +11,15 @@ if [ -f /workspace/.pi/dependencies/apt/packages.txt ]; then
 fi
 
 export GATEWAY_IP=$(ip route | awk '/default/ {print $3}')
+export PARSED_PAIRS=$(echo "$LLAMA_PORTS" | jq -r '.[] | "\(.cp):\(.hp)"')
 
 exec gosu pi bash -c '
-    socat TCP-LISTEN:9999,fork,reuseaddr TCP:${GATEWAY_IP}:${LLAMA_PORT} &
+    shift 2
+    for pair in $PARSED_PAIRS; do
+        cp="${pair%%:*}"
+        hp="${pair##*:}"
+        socat "TCP-LISTEN:${cp},fork,reuseaddr" "TCP:${GATEWAY_IP}:${hp}" &
+    done
     uv venv --python /usr/local/bin/python3 --no-managed-python "$UV_PROJECT_ENVIRONMENT"
     source /home/pi/.venv/bin/activate
     exec pi "$@"

@@ -24,58 +24,19 @@ load_dotenv(DOTENV_PATH)
 IMAGE_TAG = os.environ.get("IMAGE_TAG", "pi-coding-agent:local")
 LLAMA_BIN = os.environ.get("LLAMA_BIN", "/opt/homebrew/bin/llama-server")
 MODELS_DIR = REPO_ROOT / "models"
-LLAMA_LOG = REPO_ROOT / "logs/llama-server.log"
-SERVER_REF_COUNT_FILE = REPO_ROOT / ".llama_server_refcount"
-SERVER_LOCK_FILE = REPO_ROOT / ".llama_server_refcount.lock"
-SERVER_PID_FILE = REPO_ROOT / ".llama_server.pid"
-DOWNLOAD_LOCK_FILE = REPO_ROOT / ".model_download.lock"
+LLAMA_SERVER_LOCK_DIR = REPO_ROOT / ".llama-server.locks"
 
-pi_conf_model = {}
-server_flags : list[str] = []
-
-try:
-    # Open the file in read mode
-    with open(REPO_ROOT / "pi-home" / ".pi" / "agent" / "models.json", 'r') as file:
-        data = json.load(file)
-        if len(data["providers"]["llama-local"]["models"]) != 1:
-            print("define exactly 1 model under llama-local in pi models.json")
-            exit()
-        pi_conf_model = data["providers"]["llama-local"]["models"][0]
-
-        for flag in pi_conf_model["serverCustomParameters"]["flags"]:
-            server_flags.append(f"--{flag}")
-        for (key, value) in pi_conf_model["serverCustomParameters"]["options"].items():
-            server_flags.append(f"--{key}")
-            server_flags.append(f"{str(value)}")
-
-    hf_model = pi_conf_model["serverCustomParameters"]["hf-model"]
-
-    MAIN_MODEL_HF_FILE = hf_model["main-model-hf-file"].strip()
-    MAIN_MODEL_DIR = MODELS_DIR / hf_model["main-model-dir"]
-    MAIN_MODEL = MAIN_MODEL_DIR / MAIN_MODEL_HF_FILE
-    MAIN_MODEL_HF_REPO = hf_model["main-model-hf-repo"]
-
-    DRAFT_MODEL_HF_FILE = hf_model["draft-model-hf-file"].strip()
-    DRAFT_MODEL_DIR = MODELS_DIR / hf_model["draft-model-dir"]
-    DRAFT_MODEL = DRAFT_MODEL_DIR / DRAFT_MODEL_HF_FILE
-    DRAFT_MODEL_HF_REPO = hf_model["draft-model-hf-repo"]
-
-    MODEL_ID = pi_conf_model["id"]
-
-except Exception as e:
-    print(f"unexpected error occurred: {e}")
-    sys.exit(1)
-
-def download_if_missing(label: str, path: Path, directory: Path, repo: str, file: Path):
+def download_if_missing(label: str, repo: str, directory: Path, file: Path):
+    path = MODELS_DIR / directory / file
     if path.exists():
         print(f"[{label}] Found: {path}")
         return
 
     print(f"[{label}] Downloading {file} from {repo} ...")
-    directory.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     try:
         # Using 'hf' command as in the original script
-        subprocess.run(["hf", "download", repo, file, "--local-dir", str(directory)], check=True)
+        subprocess.run(["hf", "download", repo, str(file), "--local-dir", str(MODELS_DIR / directory)], check=True)
         print(f"[{label}] Done.")
     except subprocess.CalledProcessError as e:
         print(f"[{label}] Failed to download: {e}")
@@ -120,24 +81,24 @@ def get_bridge_ip(interface='bridge100'):
            return None
        return None
 
-def start_server():
+def start_server(server_id: str, server_flags: list[str]):
+
+    SERVER_PID_FILE = REPO_ROOT / ".llama-server.locks" / server_id / ".llama_server.pid"
+    LLAMA_LOG = REPO_ROOT / "logs" / server_id / "llama-server.log"
+
     port = get_free_port()
-    print(f"Allocated port {port} for llama-server")
+    print(f"Allocated port {port} for {server_id}")
+
     LLAMA_LOG.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         LLAMA_BIN,
-        "--model", str(MAIN_MODEL),
-        "--model-draft", str(DRAFT_MODEL),
-        "--alias", str(MODEL_ID),
         "--host", "127.0.0.1",
         "--port", str(port),
         "--log-file", str(LLAMA_LOG),
         *server_flags
     ]
-    # Redirect stdout/stderr to null as in bash script
-    process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
-    # Start socat to forward traffic from bridge to localhost
     bridge_ip = get_bridge_ip('bridge100')
     socat_cmd = [
         "socat",
@@ -145,6 +106,7 @@ def start_server():
         f"TCP:127.0.0.1:{port}"
     ]
     socat_process = None
+
     try:
         socat_process = subprocess.Popen(socat_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print(f"socat started (pid {socat_process.pid}) listening on {bridge_ip}:{port}")
@@ -156,20 +118,21 @@ def start_server():
         if socat_process:
             pf.write(f"{socat_process.pid}\n")
 
-    print(f"llama-server started (pid {process.pid}) — log: {LLAMA_LOG}")
+    print(f"llama-server {server_id} started (pid {process.pid}) — log: {LLAMA_LOG}")
     return port, process.pid
 
-def stop_server():
+def stop_server(server_id: str):
+    SERVER_PID_FILE = REPO_ROOT / ".llama-server.locks" / server_id / ".llama_server.pid"
+
     if SERVER_PID_FILE.exists():
         try:
             with open(SERVER_PID_FILE, "r") as pf:
                 lines = pf.readlines()
                 if len(lines) >= 1:
                     pid = int(lines[0].strip())
-                    print(f"Stopping llama-server (pid {pid}) ...")
+                    print(f"Stopping {server_id} (pid {pid}) ...")
                     try:
                         os.kill(pid, signal.SIGTERM)
-                        # Wait a bit for it to shut down
                         for _ in range(10):
                             try:
                                 os.kill(pid, 0)
@@ -203,78 +166,105 @@ def stop_server():
             print(f"Error stopping server: {e}")
 
 def main():
-    # Check dependencies
     if not os.path.exists(LLAMA_BIN):
         print(f"llama-server not found at {LLAMA_BIN} — install with: brew install llama.cpp")
         sys.exit(1)
-
     try:
         hf_check = subprocess.run(["which", "hf"], capture_output=True)
         if hf_check.returncode != 0:
             print("hf not found — install with: pip install huggingface_hub[cli]")
             sys.exit(1)
-    except Exception:
-        pass
+    except Exception as e:
+        raise e
 
-    # 1. Download models (with lock)
-    with open(DOWNLOAD_LOCK_FILE, "w") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        download_if_missing("main", MAIN_MODEL, MAIN_MODEL_DIR, MAIN_MODEL_HF_REPO, MAIN_MODEL_HF_FILE)
-        download_if_missing("draft", DRAFT_MODEL, DRAFT_MODEL_DIR, DRAFT_MODEL_HF_REPO, DRAFT_MODEL_HF_FILE)
+    local_lama_servers = []
 
-    # 2. Manage llama-server lifecycle
-    port = None
-    server_pid = None
-    is_first_instance = False
+    try:
+        with open(REPO_ROOT / "pi-home" / ".pi" / "agent" / "models.json", 'r') as file:
+            data = json.load(file)
 
-    # Use a lock to manage the reference count
-    with open(SERVER_LOCK_FILE, "w") as lock_f:
-        fcntl.flock(lock_f, fcntl.LOCK_EX)
+            local_lama_servers = [
+                val for val in data["providers"].values()
+                if isinstance(val, dict) and "serverCustomParameters" in val
+            ]
 
-        # Read ref count
-        if SERVER_REF_COUNT_FILE.exists():
-            try:
-                ref_count = int(SERVER_REF_COUNT_FILE.read_text().strip())
-            except ValueError:
-                ref_count = 0
-        else:
-            ref_count = 0
+            for index, server in enumerate(local_lama_servers):
+                SERVER_ID = server["serverCustomParameters"]["id"]
+                DOWNLOAD_LOCK_FILE = LLAMA_SERVER_LOCK_DIR / SERVER_ID / ".model_download.lock"
+                SERVER_LOCK_FILE = LLAMA_SERVER_LOCK_DIR / SERVER_ID / ".llama_server_refcount.lock"
+                SERVER_REF_COUNT_FILE = LLAMA_SERVER_LOCK_DIR / SERVER_ID / ".llama_server_refcount"
+                SERVER_PID_FILE = LLAMA_SERVER_LOCK_DIR / SERVER_ID/ ".llama_server.pid"
 
-        if ref_count == 0:
-            # First instance: start server
-            port, server_pid = start_server()
-            if not wait_for_server(port):
-                stop_server()
-                SERVER_REF_COUNT_FILE.unlink(missing_ok=True)
-                sys.exit(1)
-            ref_count = 1
-            is_first_instance = True
-        else:
-            # Subsequent instance: find existing server
-            if not SERVER_PID_FILE.exists():
-                print("Error: Server is supposed to be running but PID file is missing.")
-                sys.exit(1)
+                server_flags = list(map(str,server["serverCustomParameters"]["flags"]))
+                server_flags.extend(["--alias", SERVER_ID])
+                hf_models = server["serverCustomParameters"]["hf-models"]
+                try:
+                    server_flags.extend(["--model", MODELS_DIR / hf_models["main"]["dir"] / hf_models["main"]["file"]])
+                except:
+                    print("no main model defined")
+                    exit()
+                try:
+                    server_flags.extend(["--model-draft", MODELS_DIR / hf_models["draft"]["dir"] / hf_models["draft"]["file"]])
+                except:
+                    pass
 
-            with open(SERVER_PID_FILE, "r") as pf:
-                lines = pf.readlines()
-                if len(lines) < 2:
-                    print("Error: Malformed PID file.")
-                    sys.exit(1)
-                server_pid = int(lines[0].strip())
-                port = int(lines[1].strip())
+                DOWNLOAD_LOCK_FILE.parent.mkdir(exist_ok=True, parents=True)
+                with open(DOWNLOAD_LOCK_FILE, "w") as f:
+                    fcntl.flock(f, fcntl.LOCK_EX)
+                    for (model, model_conf) in hf_models.items():
+                        download_if_missing(model, model_conf["repo"], model_conf["dir"], model_conf["file"])
 
-            # Check if process is alive
-            try:
-                os.kill(server_pid, 0)
-            except OSError:
-                print("Error: Server process in PID file is not running. Cleaning up and restarting...")
-                SERVER_PID_FILE.unlink(missing_ok=True)
-                SERVER_REF_COUNT_FILE.unlink(missing_ok=True)
-                sys.exit(1)
+                port = None
+                server_pid = None
 
-            ref_count += 1
+                with open(SERVER_LOCK_FILE, "w") as lock_f:
+                    fcntl.flock(lock_f, fcntl.LOCK_EX)
 
-        SERVER_REF_COUNT_FILE.write_text(str(ref_count))
+                    if SERVER_REF_COUNT_FILE.exists():
+                        try:
+                            ref_count = int(SERVER_REF_COUNT_FILE.read_text().strip())
+                        except ValueError:
+                            ref_count = 0
+                    else:
+                        ref_count = 0
+
+                    if ref_count == 0:
+                        port, server_pid = start_server(SERVER_ID, server_flags)
+                        if not wait_for_server(port):
+                            stop_server(SERVER_ID)
+                            SERVER_REF_COUNT_FILE.unlink(missing_ok=True)
+                            sys.exit(1)
+                        ref_count = 1
+                    else:
+                        if not SERVER_PID_FILE.exists():
+                            print("Error: Server is supposed to be running but PID file is missing.")
+                            sys.exit(1)
+
+                        with open(SERVER_PID_FILE, "r") as pf:
+                            lines = pf.readlines()
+                            if len(lines) < 2:
+                                print("Error: Malformed PID file.")
+                                sys.exit(1)
+                            server_pid = int(lines[0].strip())
+                            port = int(lines[1].strip())
+
+                        # Check if process is alive
+                        try:
+                            os.kill(server_pid, 0)
+                        except OSError:
+                            print("Error: Server process in PID file is not running. Cleaning up...")
+                            SERVER_PID_FILE.unlink(missing_ok=True)
+                            SERVER_REF_COUNT_FILE.unlink(missing_ok=True)
+                            sys.exit(1)
+
+                        ref_count += 1
+
+                    SERVER_REF_COUNT_FILE.write_text(str(ref_count))
+                    local_lama_servers[index]["hostPort"] = port
+
+
+    except Exception as e:
+        raise e
 
 
     try:
@@ -292,7 +282,11 @@ def main():
             "--tmpfs", "/home/pi/.venv",
             "--tmpfs", "/home/pi/.pi/agent/bin",
             "--workdir", "/workspace",
-            "--env", f"LLAMA_PORT={port}",
+            "--env", f"LLAMA_PORTS={
+                json.dumps(
+                    [{"cp":server["serverCustomParameters"]["port-in-container"],"hp":server["hostPort"]} for server in local_lama_servers]
+                )
+            }",
             IMAGE_TAG,
             *sys.argv[1:]
         ]
@@ -301,29 +295,45 @@ def main():
         sys.exit(result.returncode)
 
     finally:
-        # 4. Decrement ref count
-        with open(SERVER_LOCK_FILE, "w") as lock_f:
-            fcntl.flock(lock_f, fcntl.LOCK_EX)
+        for server in local_lama_servers:
+            SERVER_ID = server["serverCustomParameters"]["id"]
+            DOWNLOAD_LOCK_FILE = LLAMA_SERVER_LOCK_DIR / SERVER_ID / ".model_download.lock"
+            SERVER_LOCK_FILE = LLAMA_SERVER_LOCK_DIR / SERVER_ID / ".llama_server_refcount.lock"
+            SERVER_REF_COUNT_FILE = LLAMA_SERVER_LOCK_DIR / SERVER_ID / ".llama_server_refcount"
+            SERVER_PID_FILE = LLAMA_SERVER_LOCK_DIR / SERVER_ID/ ".llama_server.pid"
 
-            if SERVER_REF_COUNT_FILE.exists():
-                try:
-                    ref_count = int(SERVER_REF_COUNT_FILE.read_text().strip())
-                except ValueError:
-                    ref_count = 0
-            else:
-                ref_count = 0
+            # 4. Decrement ref count
+            with open(SERVER_LOCK_FILE, "w") as lock_f:
+                fcntl.flock(lock_f, fcntl.LOCK_EX)
 
-            ref_count -= 1
-
-            if ref_count <= 0:
-                stop_server()
-                ref_count = 0
                 if SERVER_REF_COUNT_FILE.exists():
-                    SERVER_REF_COUNT_FILE.unlink()
-                if SERVER_PID_FILE.exists():
-                    SERVER_PID_FILE.unlink()
-            else:
-                SERVER_REF_COUNT_FILE.write_text(str(ref_count))
+                    try:
+                        ref_count = int(SERVER_REF_COUNT_FILE.read_text().strip())
+                    except ValueError:
+                        ref_count = 0
+                else:
+                    ref_count = 0
+
+                ref_count -= 1
+
+                if ref_count <= 0:
+                    stop_server(SERVER_ID)
+                    ref_count = 0
+                    if SERVER_REF_COUNT_FILE.exists():
+                        SERVER_REF_COUNT_FILE.unlink()
+                    if SERVER_PID_FILE.exists():
+                        SERVER_PID_FILE.unlink()
+                    if SERVER_LOCK_FILE.exists():
+                        SERVER_LOCK_FILE.unlink()
+                    if DOWNLOAD_LOCK_FILE.exists():
+                        DOWNLOAD_LOCK_FILE.unlink()
+                    if SERVER_LOCK_FILE.parent.exists():
+                        try:
+                            SERVER_LOCK_FILE.parent.rmdir()
+                        except Exception as e:
+                            print(f"lock directory removal failed: {e}")
+                else:
+                    SERVER_REF_COUNT_FILE.write_text(str(ref_count))
 
 if __name__ == "__main__":
     main()

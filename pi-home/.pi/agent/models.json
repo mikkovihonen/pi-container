@@ -1,0 +1,86 @@
+{
+  "providers": {
+    "local-gemma": {
+        "baseUrl": "http://127.0.0.1:9999/v1",
+        "api": "openai-completions",
+        "apiKey": "not-required",
+        "models": [
+            {
+                "id": "gemma-4-26b-a4b-it-qat-ud-q4-k-xl",
+                "name": "gemma-4-26b-a4b-it-qat-ud-q4-k-xl",
+                "contextWindow": 131072,
+                "compactionThreshold": 128000,
+                "maxTokens": 4096,
+                "input": ["text","image"],
+                "options": {
+                    "temperature": 0.2,
+                    "top-p": 0.9
+                }
+            }
+        ],
+        "serverCustomParameters": {
+            "id": "local-gemma",
+            "port-in-container": 9999,
+            "hf-models": {
+                "main": {
+                    "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+                    "file": "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+                    "dir":"gemma-4-26B-A4B-it-qat-GGUF"
+                },
+                "draft": {
+                    "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+                    "file": "mtp-gemma-4-26B-A4B-it.gguf",
+                    "dir":"gemma4-26b-mtp"
+                }
+            },
+            "flags":[
+                "--no-mmap",
+                "--mlock",
+                "--kv-offload",
+                "--jinja",
+                "--threads", 8,
+                "--threads-batch", 8,
+                "--spec-type", "draft-mtp",
+                "--spec-draft-n-min", 1,
+                "--spec-draft-n-max", 4,
+                "--parallel", 1,
+                "--batch-size", 4096,
+                "--ubatch-size", 512,
+                "--flash-attn", "on",
+                "--ctx-size", 131072,
+                "--ctx-checkpoints", 32,
+                "--checkpoint-min-step", 256,
+                "--prio", 2
+            ]
+        }
+    },
+    "local-qwen": {
+        "baseUrl": "http://127.0.0.1:9998/v1",
+        "api": "openai-completions",
+        "apiKey": "not-required",
+        "models": [
+            {
+                "id": "Qwen2.5-Coder-3B-Instruct-GGUF",
+                "name": "Qwen2.5-Coder-3B-Instruct-GGUF",
+                "context_window": 32768,
+                "max_tokens": 4096
+            }
+        ],
+        "serverCustomParameters": {
+            "id": "local-qwen",
+            "port-in-container": 9998,
+            "hf-models": {
+                "main": {
+                    "repo": "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF",
+                    "file": "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+                    "dir":"Qwen2.5-Coder-3B-Instruct-GGUF"
+                }
+            },
+            "flags":[
+                "--ctx-size", 32768,
+                "--batch-size", 4096
+            ]
+        }
+    }
+  }
+}

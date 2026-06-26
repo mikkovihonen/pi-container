@@ -1,4 +1,10 @@
 {
   "lastChangelogVersion": "0.80.2",
-  "theme": "dark"
+  "theme": "dark",
+  "defaultProvider": "local-qwen",
+  "defaultModel": "Qwen2.5-Coder-3B-Instruct-GGUF",
+  "compat": {
+    "supportsDeveloperRole": false,
+    "forceSystemAsUser": false
+  }
 }
