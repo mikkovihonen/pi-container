@@ -70,28 +70,15 @@ cp .env.example .env
 
 Then, edit `.env` to include your specific configuration.
 
-The following environment variables can be tuned in your `.env` file to customize model behavior:
+### Run Configuration
+
+The following environment variables are used by `scripts/run.py` to configure the container runtime and the `llama-server`:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MAIN_MODEL_HF_REPO` | Main model Hugging Face repository | `unsloth/gemma-4-26B-A4B-it-qat-GGUF` |
-| `MAIN_MODEL_HF_FILE` | Main model Hugging Face file | `gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf` |
-| `DRAFT_MODEL_HF_REPO` | Draft model Hugging Face repository | `unsloth/gemma-4-26B-A4B-it-qat-GGUF` |
-| `DRAFT_MODEL_HF_FILE` | Draft model Hugging Face file | `mtp-gemma-4-26B-A4B-it.gguf` |
-| `MODEL_ID` | The alias used by the llama-server | `gemma-4-26b-a4b-it-qat-ud-q4_k_xl` |
-| `MODEL_CTX_SIZE` | Context window size | `131072` |
-| `MODEL_COMPACTION_THRESHOLD` | Threshold for context compaction | `128000` |
-| `MODEL_BATCH_SIZE` | Batch size for processing | `4096` |
-| `MODEL_TEMPERATURE` | Sampling temperature | `0.2` |
-| `MODEL_TOP_P` | Nucleus sampling parameter | `0.95` |
-| `MODEL_SPEC_DRAFT_N_MAX` | Max number of speculative tokens | `4` |
-| `MODEL_SPEC_DRAFT_N_MIN` | Min number of speculative tokens | `1` |
-| `MODEL_PARALLEL` | Number of parallel sequences | `1` |
-| `MODEL_U_BATCH_SIZE` | Unbatched batch size | `512` |
-| `MODEL_FLASH_ATTN` | Enable flash attention (on/off) | `on` |
-| `MODEL_CTX_CHECKPOINTS` | Number of context checkpoints | `32` |
-| `MODEL_CHECKPOINT_MIN_STEP` | Min steps between checkpoints | `256` |
-| `MODEL_PRIO` | Priority for the server | `2` |
+| `IMAGE_TAG` | The tag of the container image to run | `pi-coding-agent:local` |
+| `LLAMA_BIN` | Path to the `llama-server` executable | `llama-server` or `/opt/homebrew/bin/llama-server` |
+| `BRIDGE_INTERFACE` | The network interface for the `socat` bridge | `bridge100` |
 
 ## Project Structure
 
@@ -104,17 +91,16 @@ The following environment variables can be tuned in your `.env` file to customiz
 
 ### `pi-home/`
 Contains configuration templates and scripts used by the agent inside the container.
-- `.pi/agent/`: Internal configuration and extensions for the `pi-coding-agent`.
-  - `AGENTS.md`: Agent configuration/documentation.
-  - `auth.json`: Authentication settings.
-  - `config.json`: General agent configuration.
-  - `models.json.tpl`: Template file for model configuration.
-  - `settings.json`: Agent settings.
-  - `.pi_ignore`: Internal ignore file used by the agent.
-  - `extensions/`: Directory containing custom agent extensions.
-    - `plan-mode/`: Extension for task planning.
-    - `terminal-beautifier/`: Extension for enhancing terminal output.
-- `substitute-models.sh`: Script used to substitute model paths in configuration templates.
+- `.pi/`: Internal configuration for the `pi-coding-agent`.
+  - `agent/`:
+    - `AGENTS.md`: Agent configuration/documentation.
+    - `auth.json`: Authentication settings.
+    - `config.json`: General agent configuration.
+    - `models.json`: Model and provider configurations.
+    - `settings.json`: Agent settings.
+    - `.pi_ignore`: Internal ignore file used by the agent.
+    - `extensions/`: Directory containing custom agent extensions (e.g., `plan-mode`, `terminal-beautifier`).
+- `.gitconfig`: Git configuration for the container user.
 
 ### `scripts/`
 Utility and orchestration scripts for managing the container environment.
