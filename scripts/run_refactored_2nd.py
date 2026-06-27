@@ -7,7 +7,9 @@ import fcntl
 import signal
 import json
 import errno
+import shutil
 from pathlib import Path
+from contextlib import ExitStack
 
 # Add scripts directory to sys.path so we can import from util
 sys.path.append(str(Path(__file__).resolve().parent))
@@ -23,7 +25,7 @@ DOTENV_PATH = REPO_ROOT / ".env"
 load_dotenv(DOTENV_PATH)
 
 IMAGE_TAG = os.environ.get("IMAGE_TAG", "pi-coding-agent:local")
-LLAMA_BIN = os.environ.get("LLAMA_BIN", "/opt/homebrew/bin/llama-server")
+LLAMA_BIN = os.environ.get("LLAMA_BIN") or shutil.which("llama-server") or "/opt/homebrew/bin/llama-server"
 MODELS_DIR = REPO_ROOT / "models"
 LLAMA_SERVER_LOCK_DIR = REPO_ROOT / ".llama-server.locks"
 BRIDGE_INTERFACE = os.environ.get("BRIDGE_INTERFACE", "bridge100")
@@ -34,13 +36,26 @@ def validate_environment(llama_bin):
     if not os.path.exists(llama_bin):
         print(f"[ERROR] llama-server not found at {llama_bin}. Install via: brew install llama.cpp")
         sys.exit(1)
-    try:
-        hf_check = subprocess.run(["which", "hf"], capture_output=True)
-        if hf_check.returncode != 0:
-            print("[ERROR] hf not found. Install via: pip install huggingface_hub[cli]")
-            sys.exit(1)
-    except Exception as e:
-        raise e
+    
+    if shutil.which("hf") is None:
+        print("[ERROR] hf not found. Install via: pip install huggingface_hub[cli]")
+        sys.exit(1)
+
+    if shutil.which("socat") is None:
+        print("[ERROR] socat not found. Install via: brew install socat")
+        sys.exit(1)
+
+    runtime = None
+    if shutil.which("docker") is not None:
+        runtime = "docker"
+    elif shutil.which("podman") is not None:
+        runtime = "podman"
+    
+    if runtime is None:
+        print("[ERROR] No supported container runtime found (docker or podman).")
+        sys.exit(1)
+        
+    return runtime
 
 def get_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -128,9 +143,16 @@ class Server:
                 self.models_dir
             )
 
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
+
     def _ensure_models_downloaded(self):
         self.paths["download_lock"].parent.mkdir(exist_ok=True, parents=True)
-        with open(self.paths["download_lock"], "w") as f:
+        with open(self.paths["download_lock"], "a") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
             for model in self.models.values():
                 model.download()
@@ -236,8 +258,8 @@ class Server:
                 if e.errno == errno.ESRCH:
                     print(f"\n[ERROR] [Server: {self.server_id}] Process died during startup.")
                     return False
-                # Other OSErrors (like permission issues) can be ignored or handled
-
+                # Other OSErrors (like permission issues) can be ignored and handled by health check
+            
             # 2. Check if the service is responding to HTTP
             try:
                 # Check health using curl
@@ -262,7 +284,7 @@ class Server:
         self._ensure_models_downloaded()
         server_flags = self._get_server_flags()
 
-        with open(self.paths["ref_count_lock"], "w") as lock_f:
+        with open(self.paths["ref_count_lock"], "a") as lock_f:
             fcntl.flock(lock_f, fcntl.LOCK_EX)
 
             ref_count = 0
@@ -272,37 +294,41 @@ class Server:
                 except ValueError:
                     ref_count = 0
 
+            if ref_count > 0:
+                # Check if existing process is actually running
+                is_running = False
+                if self.paths["pid_file"].exists():
+                    with open(self.paths["pid_file"], "r") as pf:
+                        lines = pf.readlines()
+                        if len(lines) >= 2:
+                            try:
+                                self.server_pid = int(lines[0].strip())
+                                self.port = int(lines[1].strip())
+                                os.kill(self.server_pid, 0) # Check if running
+                                is_running = True
+                            except (OSError, ValueError, IndexError):
+                                pass
+                
+                if not is_running:
+                    print(f"[WARN] [Server: {self.server_id}] Server is supposed to be running but process is not found. Cleaning up stale files...")
+                    self._stop_completely()
+                    ref_count = 0
+                else:
+                    ref_count += 1
+            
+            # If ref_count is 0, we must start a new process
             if ref_count == 0:
                 self.port, self.server_pid = self._start_server_process(server_flags)
                 if not self.wait_for_server():
                     self._stop_completely()
                     raise Exception(f"Failed to start server {self.server_id}")
                 ref_count = 1
-            else:
-                if not self.paths["pid_file"].exists():
-                    raise Exception(f"Server {self.server_id} is supposed to be running but PID file is missing.")
-
-                with open(self.paths["pid_file"], "r") as pf:
-                    lines = pf.readlines()
-                    if len(lines) < 2:
-                        raise Exception(f"Malformed PID file for {self.server_id}.")
-                    self.server_pid = int(lines[0].strip())
-                    self.port = int(lines[1].strip())
-
-                try:
-                    os.kill(self.server_pid, 0)
-                except OSError:
-                    print(f"[ERROR] [Server: {self.server_id}] Server process in PID file is not running. Cleaning up...")
-                    self._stop_completely()
-                    raise Exception(f"Server {self.server_id} process is not running.")
-
-                ref_count += 1
-
+            
             self.paths["ref_count_file"].write_text(str(ref_count))
         return self.port
 
     def stop(self):
-        with open(self.paths["ref_count_lock"], "w") as lock_f:
+        with open(self.paths["ref_count_lock"], "a") as lock_f:
             fcntl.flock(lock_f, fcntl.LOCK_EX)
 
             ref_count = 0
@@ -322,69 +348,63 @@ class Server:
 # ─── Main ──────────────────────────────────────────────────────────────────
 
 def main():
-    validate_environment(LLAMA_BIN)
-    servers = []
+    container_runtime = validate_environment(LLAMA_BIN)
 
-    try:
-        # 1. Load configuration and create servers
-        config_path = REPO_ROOT / "pi-home" / ".pi" / "agent" / "models.json"
-        if not config_path.exists():
-             print(f"[ERROR] Config file not found: {config_path}")
-             sys.exit(1)
+    config_path = REPO_ROOT / "pi-home" / ".pi" / "agent" / "models.json"
+    if not config_path.exists():
+         print(f"[ERROR] Config file not found: {config_path}")
+         sys.exit(1)
 
-        with open(config_path, 'r') as file:
-            data = json.load(file)
-            server_configs = [
-                val for val in data["providers"].values()
-                if isinstance(val, dict) and "serverCustomParameters" in val
-            ]
-
-        for config in server_configs:
-            server = Server(
-                config["serverCustomParameters"],
-                MODELS_DIR,
-                LLAMA_BIN,
-                BRIDGE_INTERFACE,
-                LLAMA_SERVER_LOCK_DIR,
-                REPO_ROOT
-            )
-            server.start()
-            servers.append(server)
-
-        # 2. Run container
-        llama_ports_json = json.dumps(
-            [{"cp":server.config["port-in-container"],"hp":server.port} for server in servers]
-        )
-        container_cmd = [
-            "container", "run",
-            "--rm",
-            "--interactive",
-            "--tty",
-            "--volume", f"{REPO_ROOT}/pi-home:/home/pi",
-            "--volume", f"{PROJECT_DIR}:/workspace",
-            "--tmpfs", "/home/pi/.gitconfig",
-            "--tmpfs", "/home/pi/.cache",
-            "--tmpfs", "/home/pi/.local",
-            "--tmpfs", "/home/pi/.venv",
-            "--tmpfs", "/home/pi/.pi/agent/bin",
-            "--workdir", "/workspace",
-            "--env", f"LLAMA_PORTS={llama_ports_json}",
-            IMAGE_TAG,
-            *sys.argv[1:]
+    with open(config_path, 'r') as file:
+        data = json.load(file)
+        server_configs = [
+            val for val in data["providers"].values()
+            if isinstance(val, dict) and "serverCustomParameters" in val
         ]
 
-        result = subprocess.run(container_cmd)
-        sys.exit(result.returncode)
+    try:
+        with ExitStack() as stack:
+            servers = []
+            for config in server_configs:
+                server = Server(
+                    config["serverCustomParameters"],
+                    MODELS_DIR,
+                    LLAMA_BIN,
+                    BRIDGE_INTERFACE,
+                    LLAMA_SERVER_LOCK_DIR,
+                    REPO_ROOT
+                )
+                stack.enter_context(server)
+                servers.append(server)
+
+            # 2. Run container
+            llama_ports_json = json.dumps(
+                [{"cp":server.config["port-in-container"],"hp":server.port} for server in servers]
+            )
+            container_cmd = [
+                container_runtime, "run",
+                "--rm",
+                "--interactive",
+                "--tty",
+                "--volume", f"{REPO_ROOT}/pi-home:/home/pi",
+                "--volume", f"{PROJECT_DIR}:/workspace",
+                "--tmpfs", "/home/pi/.gitconfig",
+                "--tmpfs", "/home/pi/.cache",
+                "--tmpfs", "/home/pi/.local",
+                "--tmpfs", "/home/pi/.venv",
+                "--tmpfs", "/home/pi/.pi/agent/bin",
+                "--workdir", "/workspace",
+                "--env", f"LLAMA_PORTS={llama_ports_json}",
+                IMAGE_TAG,
+                *sys.argv[1:]
+            ]
+
+            result = subprocess.run(container_cmd)
+            sys.exit(result.returncode)
 
     except Exception as e:
         print(f"[ERROR] An error occurred: {e}")
         raise e
-    finally:
-        for server in servers:
-            try:
-                server.stop()
-            except Exception as e:
-                print(f"[ERROR] [Server: {server.server_id}] Error stopping server: {e}")
 
 if __name__ == "__main__":
     main()
