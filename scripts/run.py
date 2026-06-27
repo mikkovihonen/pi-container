@@ -8,9 +8,14 @@ import signal
 import json
 import errno
 import shutil
+import logging
 from pathlib import Path
 from contextlib import ExitStack
 from typing import Any, Dict, List, Optional, Type, Tuple
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 # Add scripts directory to sys.path so we can import from util
 sys.path.append(str(Path(__file__).resolve().parent))
@@ -35,15 +40,15 @@ BRIDGE_INTERFACE: str = os.environ.get("BRIDGE_INTERFACE", "bridge100")
 
 def validate_environment(llama_bin: Optional[str]) -> str:
     if llama_bin is None or not os.path.exists(llama_bin):
-        print(f"[ERROR] llama-server not found at {llama_bin}. Install via: brew install llama.cpp")
+        logger.error(f"llama-server not found at {llama_bin}. Install via: brew install llama.cpp")
         sys.exit(1)
 
     if shutil.which("hf") is None:
-        print("[ERROR] hf not found. Install via: pip install huggingface_hub[cli]")
+        logger.error("hf not found. Install via: pip install huggingface_hub[cli]")
         sys.exit(1)
 
     if shutil.which("socat") is None:
-        print("[ERROR] socat not found. Install via: brew install socat")
+        logger.error("socat not found. Install via: brew install socat")
         sys.exit(1)
 
     runtime: Optional[str] = None
@@ -55,7 +60,7 @@ def validate_environment(llama_bin: Optional[str]) -> str:
         runtime = "podman"
 
     if runtime is None:
-        print("[ERROR] No supported container runtime found (container, docker or podman).")
+        logger.error("No supported container runtime found (container, docker or podman).")
         sys.exit(1)
 
     return runtime
@@ -67,14 +72,14 @@ def get_free_port() -> int:
 
 def handle_signal(signum: int, frame: Any) -> None:
     signame: str = signal.Signals(signum).name
-    print(f"\n[INFO] Received {signame}. Initiating clean shutdown...")
+    logger.info(f"Received {signame}. Initiating clean shutdown...")
     raise SystemExit
 
 
 def stop_process_gracefully(pid: Optional[int], name: str) -> None:
     if pid is None:
         return
-    print(f"[INFO] Stopping {name} (pid {pid})...")
+    logger.info(f"Stopping {name} (pid {pid})...")
     try:
         os.kill(pid, signal.SIGTERM)
         for _ in range(10):
@@ -101,17 +106,17 @@ class Model:
 
     def download(self) -> None:
         if self.path.exists():
-            print(f"[INFO] [Model: {self.label}] Found existing model: {self.path}")
+            logger.info(f"[Model: {self.label}] Found existing model: {self.path}")
             return
 
-        print(f"[INFO] [Model: {self.label}] Downloading {self.file} from {self.repo}...")
+        logger.info(f"[Model: {self.label}] Downloading {self.file} from {self.repo}...")
         self.path.parent.mkdir(exist_ok=True, parents=True)
         try:
             # Using 'hf' command as in the original script
             subprocess.run(["hf", "download", self.repo, str(self.file), "--local-dir", str(self.models_dir / self.directory)], check=True)
-            print(f"[INFO] [Model: {self.label}] Download complete.")
+            logger.info(f"[Model: {self.label}] Download complete.")
         except subprocess.CalledProcessError as e:
-            print(f"[ERROR] [Model: {self.label}] Download failed: {e}")
+            logger.error(f"[Model: {self.label}] Download failed: {e}")
             sys.exit(1)
 
 # ─── Server Class ──────────────────────────────────────────────────────────
@@ -213,7 +218,7 @@ class Server:
                         except (ValueError, IndexError):
                             pass
             except Exception as e:
-                print(f"[ERROR] [Server: {self.server_id}] Error during complete stop: {e}")
+                logger.error(f"[Server: {self.server_id}] Error during complete stop: {e}")
             finally:
                 self.paths["pid_file"].unlink(missing_ok=True)
                 self.paths["ref_count_file"].unlink(missing_ok=True)
@@ -222,11 +227,11 @@ class Server:
                 try:
                     self.paths["lock_dir"].rmdir()
                 except Exception as e:
-                    print(f"[ERROR] [Server: {self.server_id}] Could not remove lock directory: {e}")
+                    logger.error(f"[Server: {self.server_id}] Could not remove lock directory: {e}")
 
     def _start_server_process(self, server_flags: List[str]) -> Tuple[int, int]:
         port: int = get_free_port()
-        print(f"[INFO] [Server: {self.server_id}] Allocated port {port}")
+        logger.info(f"[Server: {self.server_id}] Allocated port {port}")
 
         self.paths["log_file"].parent.mkdir(parents=True, exist_ok=True)
         cmd: List[str] = [
@@ -248,11 +253,11 @@ class Server:
             ]
             try:
                 socat_process = subprocess.Popen(socat_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                print(f"[INFO] [Server: {self.server_id}] socat started (pid {socat_process.pid}) listening on {bridge_ip}:{port}")
+                logger.info(f"[Server: {self.server_id}] socat started (pid {socat_process.pid}) listening on {bridge_ip}:{port}")
             except Exception as e:
-                print(f"[WARN] [Server: {self.server_id}] Failed to start socat: {e}")
+                logger.warning(f"[Server: {self.server_id}] Failed to start socat: {e}")
         elif self.bridge_interface:
-            print(f"[WARN] [Server: {self.server_id}] Could not find IP for {self.bridge_interface}, skipping socat.")
+            logger.warning(f"[Server: {self.server_id}] Could not find IP for {self.bridge_interface}, skipping socat.")
 
         with open(self.paths["pid_file"], "w") as pf:
             pf.write(f"{process.pid}\n{port}\n")
@@ -262,7 +267,7 @@ class Server:
         return port, process.pid
 
     def wait_for_server(self, timeout: int = 180) -> bool:
-        print(f"[INFO] [Server: {self.server_id}] Waiting for llama-server", end="", flush=True)
+        logger.info(f"[Server: {self.server_id}] Waiting for llama-server")
         elapsed: int = 0
         while elapsed < timeout:
             try:
@@ -272,7 +277,7 @@ class Server:
                     return False
             except OSError as e:
                 if e.errno == errno.ESRCH:
-                    print(f"\n[ERROR] [Server: {self.server_id}] Process died during startup.")
+                    logger.error(f"[Server: {self.server_id}] Process died during startup.")
                     return False
                 # Other OSErrors (like permission issues) can be ignored and handled by health check
 
@@ -283,28 +288,28 @@ class Server:
                     capture_output=True, text=True
                 )
                 if result.stdout and '"status":"ok"' in result.stdout:
-                    print(" [OK]", flush=True)
+                    logger.info(" [OK]")
                     return True
             except Exception:
                 pass
 
             time.sleep(2)
             elapsed += 2
-            print(".", end="", flush=True)
+            logger.info(".")
 
-        print(f"\n[ERROR] [Server: {self.server_id}] Timed out waiting for llama-server")
+        logger.error(f"[Server: {self.server_id}] Timed out waiting for llama-server")
 
         log_file: Path = self.paths["log_file"]
         if log_file.exists():
-            print(f"[INFO] [Server: {self.server_id}] Last 20 lines of {log_file}:")
+            logger.info(f"[Server: {self.server_id}] Last 20 lines of {log_file}:")
             try:
                 with open(log_file, 'r') as f:
                     lines: List[str] = f.readlines()
                     last_lines: List[str] = lines[-20:] if len(lines) > 20 else lines
                     for line in last_lines:
-                        print(f"  {line.strip()}")
+                        logger.info(f"  {line.strip()}")
             except Exception as e:
-                print(f"[ERROR] [Server: {self.server_id}] Could not read log file: {e}")
+                logger.error(f"[Server: {self.server_id}] Could not read log file: {e}")
         return False
 
     def start(self) -> int:
@@ -340,7 +345,7 @@ class Server:
                                 pass
 
                 if not is_running:
-                    print(f"[WARN] [Server: {self.server_id}] Server is supposed to be running but process is not found. Cleaning up stale files...")
+                    logger.warning(f"[Server: {self.server_id}] Server is supposed to be running but process is not found. Cleaning up stale files...")
                     self._stop_completely()
                     ref_count = 0
                 else:
@@ -381,7 +386,7 @@ def main() -> None:
 
     config_path: Path = REPO_ROOT / "pi-home" / ".pi" / "agent" / "models.json"
     if not config_path.exists():
-         print(f"[ERROR] Config file not found: {config_path}")
+         logger.error(f"Config file not found: {config_path}")
          sys.exit(1)
 
     with open(config_path, 'r') as file:
@@ -440,7 +445,7 @@ def main() -> None:
         # ExitStack will have already cleaned up servers due to the 'with' block
         sys.exit(0)
     except Exception as e:
-        print(f"[ERROR] An error occurred: {e}")
+        logger.error(f"An error occurred: {e}")
         raise e
 
 if __name__ == "__main__":
