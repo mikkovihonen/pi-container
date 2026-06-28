@@ -22,7 +22,7 @@ def main():
     cmd = [
         "container", "build",
         "--tag", IMAGE_TAG,
-        "--file", str(REPO_ROOT / "Containerfile"),
+        "--file", str(REPO_ROOT / "pi-coding-agent" / "Containerfile"),
         str(REPO_ROOT)
     ]
 

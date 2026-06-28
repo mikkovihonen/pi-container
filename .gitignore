@@ -26,5 +26,11 @@ llama-server/logs
 llama-server/logs/**
 
 # Pi
-pi-home/.pi/agent/bin
-pi-home/.pi/agent/sessions
+pi-coding-agent/logs
+pi-coding-agent/logs/**
+pi-coding-agent/home/.pi/agent/bin
+pi-coding-agent/home/.pi/agent/sessions
+
+# Proxy
+transparent-proxy/logs
+transparent-proxy/logs/**

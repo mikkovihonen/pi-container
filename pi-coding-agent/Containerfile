@@ -66,7 +66,7 @@ COPY --from=builder /usr/local/share /usr/local/share
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 # Copy entrypoint.sh
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY pi-coding-agent/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Install global npm tools for pi
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent

@@ -76,7 +76,7 @@
                 "--no-mmap",
                 "--mlock",
                 "--kv-offload",
-                "--threads", 8,
+                "--threads", 10,
                 "--threads-batch", 8,
                 "--parallel", 1,
                 "--batch-size", 4096,

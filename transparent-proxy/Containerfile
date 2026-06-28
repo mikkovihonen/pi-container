@@ -1,0 +1,18 @@
+FROM debian:bullseye-slim
+
+RUN apt-get update && apt-get install -y \
+    iptables \
+    redsocks \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Gost
+RUN curl -L https://github.com/go-gost/gost/releases/download/v3.0.0-rc10/gost_3.0.0-rc10_linux_amd64.tar.gz | tar -xz && \
+    mv gost /usr/local/bin/gost && \
+    chmod +x /usr/local/bin/gost
+
+COPY redsocks.conf /etc/redsocks.conf
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
