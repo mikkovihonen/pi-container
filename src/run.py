@@ -159,7 +159,7 @@ class Server:
 
     def _ensure_models_downloaded(self) -> None:
         self.paths["download_lock"].parent.mkdir(exist_ok=True, parents=True)
-        with open(self.paths["download_lock"], "a") as f:
+        with self.paths["download_lock"].open("a") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
             for model in self.models.values():
                 model.download()
@@ -247,6 +247,9 @@ class Server:
         if self.paths["pid_file"].exists():
             self.paths["pid_file"].unlink(missing_ok=True)
 
+        self.paths["ref_count_file"].unlink(missing_ok=True)
+        self.paths["download_lock"].unlink(missing_ok=True)
+
     def wait_for_server(self, timeout: int = 180) -> bool:
         logger.info(f"[Server: {self.server_id}] Waiting for llama-server on port {self.port}")
         elapsed: int = 0
@@ -280,7 +283,7 @@ class Server:
     def start(self) -> int:
         self._ensure_models_downloaded()
 
-        with open(self.paths["ref_count_lock"], "a") as lock_file:
+        with self.paths["ref_count_lock"].open("a") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
             ref_count = self._get_current_ref_count()
@@ -317,12 +320,11 @@ class Server:
             return False, None, None
 
         try:
-            with open(self.paths["pid_file"], "r") as pf:
-                lines = pf.read().splitlines()
-                if len(lines) < 2:
-                    return False, None, None
-                pid = int(lines[0])
-                port = int(lines[1])
+            lines = self.paths["pid_file"].read_text().splitlines()
+            if len(lines) < 2:
+                return False, None, None
+            pid = int(lines[0])
+            port = int(lines[1])
         except (ValueError, IndexError):
             return False, None, None
 
@@ -378,8 +380,7 @@ class Server:
                 except Exception as e:
                     logger.warning(f"[Server: {self.server_id}] Failed to start socat: {e}")
 
-            with open(self.paths["pid_file"], "w") as pf:
-                pf.write(f"{process.pid}\n{port}\n")
+            self.paths["pid_file"].write_text(f"{process.pid}\n{port}\n")
 
             if self.wait_for_server():
                 return
@@ -391,7 +392,7 @@ class Server:
 
     def stop(self) -> None:
         if self.paths["ref_count_file"].exists():
-            with open(self.paths["ref_count_lock"], "a") as lock_file:
+            with self.paths["ref_count_lock"].open("a") as lock_file:
                 fcntl.flock(lock_file, fcntl.LOCK_EX)
 
                 ref_count: int = 0
@@ -422,7 +423,7 @@ def main() -> None:
          logger.error(f"Config file not found: {config_path}")
          sys.exit(1)
 
-    with open(config_path, 'r') as file:
+    with config_path.open('r') as file:
         data = json.load(file)
         server_configs = []
         for name, val in data["providers"].items():
