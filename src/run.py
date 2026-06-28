@@ -63,10 +63,31 @@ class ModelConfig:
     directory: Path
     additional_server_flags: List[Any]
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ModelConfig':
+        return cls(
+            file_flag=data["fileFlag"],
+            repo=data["repo"],
+            file=data["file"],
+            directory=Path(data["dir"]),
+            additional_server_flags=data.get("additionalServerFlags", [])
+        )
+
 @dataclass(frozen=True)
 class ServerConfig:
     hf_models: Dict[str, ModelConfig]
     flags: List[Any]
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ServerConfig':
+        hf_models = {
+            label: ModelConfig.from_dict(m_info)
+            for label, m_info in data.get("hfModels", {}).items()
+        }
+        return cls(
+            hf_models=hf_models,
+            flags=data.get("flags", [])
+        )
 
 # ─── Model Class ──────────────────────────────────────────────────────────
 
@@ -148,16 +169,14 @@ class Server:
                 model.download()
 
     def _get_server_flags(self) -> List[str]:
-        flags: List[str] = list(map(str, self.config.flags))
-        flags.extend(["--alias", self.server_id])
-        if self.models.get("main") == None:
+        if self.models.get("main") is None:
             raise ValueError(f"[{self.server_id}] No main model defined in config.")
-        else:
-            for model in self.models.values():
-                flags.extend([str(model.config.file_flag), str(model.path)])
-                flags.extend(
-                    [str(flag) for flag in model.config.additional_server_flags]
-                )
+
+        flags: List[str] = [str(flag) for flag in self.config.flags]
+        flags.extend(["--alias", self.server_id])
+        for model in self.models.values():
+            flags.extend([str(model.config.file_flag), str(model.path)])
+            flags.extend([str(flag) for flag in model.config.additional_server_flags])
         return flags
 
     def _get_bridge_ip(self) -> Optional[str]:
@@ -177,12 +196,12 @@ class Server:
 
         return None
 
-    def _stop_completely(self, pid_to_kill: Optional[int] = None) -> None:
-        """Stops a process group and cleans up local files for this server instance."""
+    def _cleanup(self, pid_to_kill: Optional[int] = None, full_cleanup: bool = False) -> None:
+        """Stops processes and cleans up local files for this server instance."""
         target_pid = pid_to_kill or self.server_pid
         if target_pid:
             logger.info(f"[Server: {self.server_id}] Stopping server process group (pid {target_pid})...")
-            stop_process_group(target_pid, f"llama-server group {self.server_id}", logger=logger)
+            stop_process_group(target_pid, f"llama-server {'attempt' if not full_cleanup else 'group'} {self.server_id}", logger=logger)
             if target_pid == self.server_pid:
                 self.server_pid = None
 
@@ -201,33 +220,14 @@ class Server:
         self.paths["ref_count_file"].unlink(missing_ok=True)
         self.paths["download_lock"].unlink(missing_ok=True)
 
-        try:
-            self.paths["lock_dir"].rmdir()
-            if self.lock_dir.exists() and not any(self.lock_dir.iterdir()):
-                logger.info(f"[Server: {self.server_id}] .locks directory is empty, deleting {self.lock_dir}")
-                self.lock_dir.rmdir()
-        except OSError:
-            pass
-
-    def _cleanup_attempt(self) -> None:
-        """Cleans up only the current process attempt, used for retries."""
-        if self.server_pid:
-            stop_process_group(self.server_pid, f"llama-server attempt {self.server_id}", logger=logger)
-            self.server_pid = None
-
-        if self.socat_process and self.socat_process.poll() is None:
-            self.socat_process.terminate()
+        if full_cleanup:
             try:
-                self.socat_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.socat_process.kill()
-            self.socat_process = None
-
-        if self.paths["pid_file"].exists():
-            self.paths["pid_file"].unlink(missing_ok=True)
-
-        self.paths["ref_count_file"].unlink(missing_ok=True)
-        self.paths["download_lock"].unlink(missing_ok=True)
+                self.paths["lock_dir"].rmdir()
+                if self.lock_dir.exists() and not any(self.lock_dir.iterdir()):
+                    logger.info(f"[Server: {self.server_id}] .locks directory is empty, deleting {self.lock_dir}")
+                    self.lock_dir.rmdir()
+            except OSError:
+                pass
 
     def wait_for_server(self, timeout: int = 180) -> bool:
         logger.info(f"[Server: {self.server_id}] Waiting for llama-server on port {self.port}")
@@ -273,7 +273,7 @@ class Server:
                     logger.info(f"[Server: {self.server_id}] Attaching to existing healthy server on port {port}")
                 else:
                     logger.warning(f"[Server: {self.server_id}] Existing server is not healthy or stale. Cleaning up and restarting...")
-                    self._stop_completely(pid)
+                    self._cleanup(pid_to_kill=pid, full_cleanup=True)
                     ref_count = 1
                     self._start_new_server_process()
             else:
@@ -366,7 +366,7 @@ class Server:
                 return
             else:
                 logger.warning(f"[Server: {self.server_id}] Attempt {attempt + 1}/{MAX_STARTUP_ATTEMPTS} failed to start on port {port}. Retrying...")
-                self._cleanup_attempt()
+                self._cleanup(full_cleanup=False)
 
         raise Exception(f"Failed to start server {self.server_id} after {MAX_STARTUP_ATTEMPTS} attempts.")
 
@@ -385,7 +385,7 @@ class Server:
                 ref_count -= 1
 
                 if ref_count <= 0:
-                    self._stop_completely()
+                    self._cleanup(full_cleanup=True)
                 else:
                     self.paths["ref_count_file"].write_text(str(ref_count))
 
@@ -408,21 +408,7 @@ def main() -> None:
         server_configs = []
         for name, val in data["providers"].items():
             if isinstance(val, dict) and "serverCustomParameters" in val:
-                params = val["serverCustomParameters"]
-                hf_models_dict = {}
-                for label, m_info in params.get("hfModels", {}).items():
-                    hf_models_dict[label] = ModelConfig(
-                        file_flag=m_info["fileFlag"],
-                        repo=m_info["repo"],
-                        file=m_info["file"],
-                        directory=Path(m_info["dir"]),
-                        additional_server_flags=m_info["additionalServerFlags"]
-                    )
-
-                server_config = ServerConfig(
-                    hf_models=hf_models_dict,
-                    flags=params.get("flags", [])
-                )
+                server_config = ServerConfig.from_dict(val["serverCustomParameters"])
                 server_configs.append({
                     "name": name,
                     "config": server_config,
