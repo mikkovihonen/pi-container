@@ -134,8 +134,8 @@ class Model:
                     local_dir_use_symlinks=False
                 )
                 logger.info(f"[Model: {self.label}] Download complete.")
-            except Exception as e:
-                logger.error(f"[Model: {self.label}] Download failed: {e}")
+            except Exception:
+                logger.exception(f"[Model: {self.label}] Download failed")
                 raise
 
 # ─── Server Class ──────────────────────────────────────────────────────────
@@ -477,9 +477,8 @@ def main() -> None:
 
     except SystemExit:
         sys.exit(0)
-    except Exception as e:
-        logger.error(f"An error occurred: {e}")
-        traceback.print_exc()
+    except Exception:
+        logger.exception("An error occurred")
         sys.exit(1)
 
 if __name__ == "__main__":
