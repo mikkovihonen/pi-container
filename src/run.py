@@ -12,9 +12,7 @@ import shutil
 import logging
 import urllib.request
 import re
-import importlib.util
 from urllib.parse import urlparse
-import traceback
 from pathlib import Path
 from contextlib import ExitStack
 from typing import Any, Dict, List, Optional, Type
@@ -212,35 +210,35 @@ class Server:
 
     def _cleanup(self, pid_to_kill: Optional[int] = None, full_cleanup: bool = False) -> None:
         """Stops processes and cleans up local files for this server instance."""
-        target_pid = pid_to_kill or self.server_pid
-        if target_pid:
-            logger.info(f"[Server: {self.server_id}] Stopping server process group (pid {target_pid})...")
-            stop_process_group(target_pid, f"llama-server {'attempt' if not full_cleanup else 'group'} {self.server_id}", logger=logger)
-            if target_pid == self.server_pid:
-                self.server_pid = None
+        try:
+            target_pid = pid_to_kill or self.server_pid
+            if target_pid:
+                logger.info(f"[Server: {self.server_id}] Stopping server process group (pid {target_pid})...")
+                stop_process_group(target_pid, f"llama-server {'attempt' if not full_cleanup else 'group'} {self.server_id}", logger=logger)
+                if target_pid == self.server_pid:
+                    self.server_pid = None
 
-        if self.socat_process and self.socat_process.poll() is None:
-            logger.info(f"[Server: {self.server_id}] Stopping socat process (pid {self.socat_process.pid})...")
-            self.socat_process.terminate()
-            try:
-                self.socat_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.socat_process.kill()
-            self.socat_process = None
+            if self.socat_process and self.socat_process.poll() is None:
+                logger.info(f"[Server: {self.server_id}] Stopping socat process (pid {self.socat_process.pid})...")
+                self.socat_process.terminate()
+                try:
+                    self.socat_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.socat_process.kill()
+                self.socat_process = None
 
-        if self.paths["pid_file"].exists():
+        finally:
             self.paths["pid_file"].unlink(missing_ok=True)
+            self.paths["ref_count_file"].unlink(missing_ok=True)
 
-        self.paths["ref_count_file"].unlink(missing_ok=True)
-
-        if full_cleanup:
-            try:
-                self.paths["lock_dir"].rmdir()
-                if self.lock_dir.exists() and not any(self.lock_dir.iterdir()):
-                    logger.info(f"[Server: {self.server_id}] .locks directory is empty, deleting {self.lock_dir}")
-                    self.lock_dir.rmdir()
-            except OSError:
-                pass
+            if full_cleanup:
+                self.paths["ref_count_lock"].unlink(missing_ok=True)
+                try:
+                    self.paths["lock_dir"].rmdir()
+                    if self.lock_dir.exists() and not any(self.lock_dir.iterdir()):
+                        self.lock_dir.rmdir()
+                except OSError:
+                    pass
 
     def wait_for_server(self, timeout: int = 180) -> bool:
         logger.info(f"[Server: {self.server_id}] Waiting for llama-server on port {self.port}")
@@ -273,6 +271,11 @@ class Server:
     def start(self) -> int:
         self._ensure_models_downloaded()
 
+        self.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
+
+        should_start_new = False
+        pid_to_cleanup = None
+
         with self.paths["ref_count_lock"].open("a") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
@@ -284,16 +287,20 @@ class Server:
                     self.port = port
                     ref_count += 1
                     logger.info(f"[Server: {self.server_id}] Attaching to existing healthy server on port {port}")
+                    self.paths["ref_count_file"].write_text(str(ref_count))
                 else:
                     logger.warning(f"[Server: {self.server_id}] Existing server is not healthy or stale. Cleaning up and restarting...")
-                    self._cleanup(pid_to_kill=pid, full_cleanup=True)
-                    ref_count = 1
-                    self._start_new_server_process()
+                    pid_to_cleanup = pid
+                    should_start_new = True
+                    self.paths["ref_count_file"].write_text("1")
             else:
                 ref_count = 1
-                self._start_new_server_process()
+                should_start_new = True
+                self.paths["ref_count_file"].write_text("1")
 
-            self.paths["ref_count_file"].write_text(str(ref_count))
+        if should_start_new:
+            self._cleanup(pid_to_kill=pid_to_cleanup, full_cleanup=True)
+            self._start_new_server_process()
 
         return self.port if self.port is not None else -1
 
@@ -335,6 +342,7 @@ class Server:
             port = get_free_port()
             self.port = port
 
+            self.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
             self.paths["log_file"].parent.mkdir(parents=True, exist_ok=True)
             cmd: List[str] = [
                 self.llama_bin,
@@ -347,15 +355,14 @@ class Server:
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
                 start_new_session=True
             )
             self.server_pid = process.pid
 
             try:
                 if process.poll() is not None:
-                    err = process.stderr.read().decode() if process.stderr else "Unknown error"
-                    raise Exception(f"llama-server died immediately: {err}")
+                    raise Exception("llama-server died immediately")
 
                 bridge_ip = self._get_bridge_ip()
                 if bridge_ip:
@@ -376,6 +383,7 @@ class Server:
                 self.paths["pid_file"].write_text(f"{process.pid}\n{port}\n")
 
                 if self.wait_for_server():
+                    self.paths["ref_count_file"].write_text("1")
                     return  # Success!
                 else:
                     raise Exception(f"Timed out waiting for llama-server on port {port}")
@@ -388,6 +396,7 @@ class Server:
         raise Exception(f"Failed to start server {self.server_id} after {MAX_STARTUP_ATTEMPTS} attempts. Last error: {last_exception}")
 
     def stop(self) -> None:
+        should_full_cleanup = False
         if self.paths["ref_count_file"].exists():
             with self.paths["ref_count_lock"].open("a") as lock_file:
                 fcntl.flock(lock_file, fcntl.LOCK_EX)
@@ -402,9 +411,12 @@ class Server:
                 ref_count -= 1
 
                 if ref_count <= 0:
-                    self._cleanup(full_cleanup=True)
+                    should_full_cleanup = True
                 else:
                     self.paths["ref_count_file"].write_text(str(ref_count))
+
+        if should_full_cleanup:
+            self._cleanup(full_cleanup=True)
 
 # ─── Main ──────────────────────────────────────────────────────────────────
 
