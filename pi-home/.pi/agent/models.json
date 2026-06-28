@@ -24,6 +24,8 @@
                     "high",
                     "xhigh"
                 ],
+                "reasoning": false,
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
                 "input": ["text","image"],
                 "options": {
                     "temperature": 0.2,
@@ -43,14 +45,18 @@
                 "draft": {
                     "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
                     "file": "mtp-gemma-4-26B-A4B-it.gguf",
-                    "dir":"gemma4-26b-mtp"
+                    "dir":"gemma-4-26B-A4B-it-qat-GGUF"
+                },
+                "mmproj": {
+                    "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+                    "file": "mmproj-F16.gguf",
+                    "dir":"gemma-4-26B-A4B-it-qat-GGUF"
                 }
             },
             "flags":[
                 "--no-mmap",
                 "--mlock",
                 "--kv-offload",
-                "--jinja",
                 "--threads", 8,
                 "--threads-batch", 8,
                 "--spec-type", "draft-mtp",
@@ -63,7 +69,13 @@
                 "--ctx-size", 131072,
                 "--ctx-checkpoints", 32,
                 "--checkpoint-min-step", 256,
-                "--prio", 2
+                "--repeat-penalty", 1.0,
+                "--top_p", 0.95,
+                "--top_k", 64,
+                "--prio", 2,
+                "--jinja",
+                "--chat-template-file", "llama-server/chat-templates/google-gemma-4-31B-it-interleaved.jinja",
+                "--chat-template-kwargs", "{\"enable_thinking\":false}"
             ]
         }
     }

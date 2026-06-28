@@ -9,6 +9,7 @@ import json
 import errno
 import shutil
 import logging
+import urllib.request
 from pathlib import Path
 from contextlib import ExitStack
 from typing import Any, Dict, List, Optional, Type, Tuple
@@ -112,10 +113,15 @@ class Model:
         logger.info(f"[Model: {self.label}] Downloading {self.file} from {self.repo}...")
         self.path.parent.mkdir(exist_ok=True, parents=True)
         try:
-            # Using 'hf' command as in the original script
-            subprocess.run(["hf", "download", self.repo, str(self.file), "--local-dir", str(self.models_dir / self.directory)], check=True)
+            from huggingface_hub import hf_hub_download
+            hf_hub_download(
+                repo_id=self.repo,
+                filename=str(self.file),
+                local_dir=str(self.models_dir / self.directory),
+                local_dir_use_symlinks=False
+            )
             logger.info(f"[Model: {self.label}] Download complete.")
-        except subprocess.CalledProcessError as e:
+        except Exception as e:
             logger.error(f"[Model: {self.label}] Download failed: {e}")
             sys.exit(1)
 
@@ -132,7 +138,7 @@ class Server:
         self.repo_root: Path = repo_root
         self.port: Optional[int] = None
         self.server_pid: Optional[int] = None
-        self.socat_pid: Optional[int] = None
+        self.socat_pid: Optional[subprocess.Popen] = None
         self.models: Dict[str, Model] = {}
 
         # Paths
@@ -282,14 +288,13 @@ class Server:
                 # Other OSErrors (like permission issues) can be ignored and handled by health check
 
             try:
-                # Check health using curl
-                result: subprocess.CompletedProcess[str] = subprocess.run(
-                    ["curl", "-sf", f"http://127.0.0.1:{self.port}/health"],
-                    capture_output=True, text=True
-                )
-                if result.stdout and '"status":"ok"' in result.stdout:
-                    logger.info(" [OK]")
-                    return True
+                # Check health using urllib instead of curl
+                with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/health", timeout=2) as response:
+                    if response.status == 200:
+                        data = json.loads(response.read().decode("utf-8"))
+                        if data.get("status") == "ok":
+                            logger.info(" [OK]")
+                            return True
             except Exception:
                 pass
 

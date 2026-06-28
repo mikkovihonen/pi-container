@@ -18,6 +18,7 @@ venv/
 .npm
 
 # llama.cpp
+.llama_server.locks/**
 models/
 logs/
 
