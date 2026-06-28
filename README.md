@@ -34,7 +34,7 @@ To run this environment comfortably, especially when utilizing the full 128k con
 Build the environment image using the provided script:
 
 ```zsh
-./scripts/build.sh
+./build.sh
 ```
 
 By default, this builds an image tagged as `pi-coding-agent:local`.
@@ -45,7 +45,7 @@ By default, this builds an image tagged as `pi-coding-agent:local`.
 On macOS the script is meant to be aliased as `pi` in `~/.zshrc`
 
 ``` zsh
-alias pi="~/workspace/pi-container/scripts/run.sh"
+alias pi="~/workspace/pi-container/run.sh"
 ```
 
 After the aliasing, the script can be run in your project directory and it will mount the project directory in a Linux container with `npm` and `python` available to `pi`.
@@ -72,7 +72,7 @@ Then, edit `.env` to include your specific configuration.
 
 ### Run Configuration
 
-The following environment variables are used by `scripts/run.py` to configure the container runtime and the `llama-server`:
+The following environment variables are used by `run.sh` to configure the container runtime and the `llama-server`:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -83,6 +83,8 @@ The following environment variables are used by `scripts/run.py` to configure th
 ## Project Structure
 
 ### Root Directory
+- `build.sh`: Shell script to build the container image.
+- `run.sh`: Shell script to orchestrate model downloads, `llama-server`, and container execution.
 - `.env.example`: Template for environment variable configuration.
 - `.gitignore`: Specifies files and directories for Git to ignore.
 - `Containerfile`: Defines the container image (Node.js base, Python 3.14, `pi-coding-agent`).
@@ -102,10 +104,8 @@ Contains configuration templates and scripts used by the agent inside the contai
     - `extensions/`: Directory containing custom agent extensions (e.g., `plan-mode`, `terminal-beautifier`).
 - `.gitconfig`: Git configuration for the container user.
 
-### `scripts/`
-Utility and orchestration scripts for managing the container environment.
-- `build.sh`: Shell script to build the container image.
+### `src/`
+Python orchestration scripts for managing the container environment.
 - `build.py`: Python version of the build script.
-- `run.sh`: Shell script to orchestrate model downloads, `llama-server`, and container execution.
 - `run.py`: Python version of the run script.
 - `util.py`: Common utility functions used by the scripts.
