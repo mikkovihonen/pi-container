@@ -10,13 +10,13 @@ export default function (pi: any) {
     name: "edit",
     label: "Edit",
     description: "Edit a file by providing its absolute path and full content.",
-    promptSnippet: "Provide the absolute path (in parameter pi_coding_agent_edit_file_path) and full content of the file (in parameter content) to edit it. You MUST provide both required parameters: pi_coding_agent_edit_file_path and content. You MUST NOT leave out pi_coding_agent_edit_file_path parameter.",
+    promptSnippet: "Provide the absolute path of the edited file and its full content as parameters. Tool call MUST include both mandatory parameters: path and content. Set path before you set content.",
     parameters: Type.Object({
-      pi_coding_agent_edit_file_path: Type.String(),
+      path: Type.String(),
       content: Type.String(),
     }),
     async execute(toolCallId: string, params: any, signal: AbortSignal, onUpdate: any, ctx: any) {
-      const absolutePath = resolve(ctx.cwd, params.pi_coding_agent_edit_file_path);
+      const absolutePath = resolve(ctx.cwd, params.path);
       const uuid = randomUUID();
       const tempFullFilePath = `/tmp/${uuid}.full`;
       const tempPatchFilePath = `/tmp/${uuid}.patch`;
@@ -29,7 +29,7 @@ export default function (pi: any) {
         if (!existsSync(absolutePath)) {
           await writeFile(absolutePath, params.content, "utf8");
           return {
-            content: [{ type: "text", text: `File ${params.pi_coding_agent_edit_file_path} did not exist. Created it with the provided content.` }],
+            content: [{ type: "text", text: `File ${params.path} did not exist. Created it with the provided content.` }],
           };
         }
 
@@ -45,7 +45,7 @@ export default function (pi: any) {
 
         if (!diffOutput.trim()) {
           return {
-            content: [{ type: "text", text: `No changes detected for ${params.pi_coding_agent_edit_file_path}.` }],
+            content: [{ type: "text", text: `No changes detected for ${params.path}.` }],
           };
         }
 
@@ -59,7 +59,7 @@ export default function (pi: any) {
         execSync(`patch "${absolutePath}" < "${tempPatchFilePath}"`);
 
         return {
-          content: [{ type: "text", text: `Successfully applied changes to ${params.pi_coding_agent_edit_file_path} using diff/patch.` }],
+          content: [{ type: "text", text: `Successfully applied changes to ${params.path} using diff/patch.` }],
           details: {
             diff: diffOutput,
             tempFullFile: tempFullFilePath,

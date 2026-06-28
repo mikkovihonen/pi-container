@@ -14,8 +14,9 @@ from urllib.parse import urlparse
 import traceback
 from pathlib import Path
 from contextlib import ExitStack
-from typing import Any, Dict, List, Optional, Type, Tuple
+from typing import Any, Dict, List, Optional, Type
 from huggingface_hub import hf_hub_download
+from dataclasses import dataclass, field
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -43,6 +44,19 @@ LLAMA_BIN: Optional[str] = os.environ.get("LLAMA_BIN") or shutil.which("llama-se
 MODELS_DIR: Path = REPO_ROOT / "llama-server" / "models"
 LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / "llama-server" / ".locks"
 BRIDGE_INTERFACE: str = os.environ.get("BRIDGE_INTERFACE", "bridge100")
+
+# ─── Configuration Dataclasses ───────────────────────────────────────────
+
+@dataclass(frozen=True)
+class ModelConfig:
+    repo: str
+    file: str
+    directory: Path
+
+@dataclass(frozen=True)
+class ServerConfig:
+    hf_models: Dict[str, ModelConfig]
+    flags: List[Any]
 
 # ─── Utility Functions ─────────────────────────────────────────────────────
 
@@ -109,27 +123,28 @@ def stop_process_group(pid: int, name: str) -> None:
 
 # ─── Model Class ───────────────────────────────────────────────────────────
 
+@dataclass(frozen=True)
 class Model:
-    def __init__(self, label: str, repo: str, directory: Path, file: Path, models_dir: Path) -> None:
-        self.label: str = label
-        self.repo: str = repo
-        self.directory: Path = directory
-        self.file: Path = file
-        self.models_dir: Path = models_dir
-        self.path: Path = models_dir / directory / file
+    label: str
+    config: ModelConfig
+    models_dir: Path
+
+    @property
+    def path(self) -> Path:
+        return self.models_dir / self.config.directory / self.config.file
 
     def download(self) -> None:
         if self.path.exists():
             logger.info(f"[Model: {self.label}] Found existing model: {self.path}")
             return
 
-        logger.info(f"[Model: {self.label}] Downloading {self.file} from {self.repo}...")
+        logger.info(f"[Model: {self.label}] Downloading {self.config.file} from {self.config.repo}...")
         self.path.parent.mkdir(exist_ok=True, parents=True)
         try:
             hf_hub_download(
-                repo_id=self.repo,
-                filename=str(self.file),
-                local_dir=str(self.models_dir / self.directory),
+                repo_id=self.config.repo,
+                filename=self.config.file,
+                local_dir=str(self.models_dir / self.config.directory),
                 local_dir_use_symlinks=False
             )
             logger.info(f"[Model: {self.label}] Download complete.")
@@ -140,8 +155,8 @@ class Model:
 # ─── Server Class ──────────────────────────────────────────────────────────
 
 class Server:
-    def __init__(self, config: Dict[str, Any], models_dir: Path, llama_bin: Optional[str], bridge_interface: str, lock_dir: Path, repo_root: Path, server_id: str, container_port: Optional[int] = None) -> None:
-        self.config: Dict[str, Any] = config
+    def __init__(self, config: ServerConfig, models_dir: Path, llama_bin: Optional[str], bridge_interface: str, lock_dir: Path, repo_root: Path, server_id: str, container_port: Optional[int] = None) -> None:
+        self.config: ServerConfig = config
         self.server_id: str = server_id
         self.models_dir: Path = models_dir
         self.llama_bin: str = llama_bin or ""
@@ -164,14 +179,11 @@ class Server:
             "log_file": self.repo_root / "llama-server" / "logs" / self.server_id / "llama-server.log"
         }
 
-        hf_models_conf: Dict[str, Any] = self.config.get("hf-models", {})
-        for label, model_conf in hf_models_conf.items():
+        for label, model_config in self.config.hf_models.items():
             self.models[label] = Model(
-                label,
-                model_conf["repo"],
-                model_conf["dir"],
-                model_conf["file"],
-                self.models_dir
+                label=label,
+                config=model_config,
+                models_dir=self.models_dir
             )
 
     def __enter__(self) -> 'Server':
@@ -189,7 +201,7 @@ class Server:
                 model.download()
 
     def _get_server_flags(self) -> List[str]:
-        flags: List[str] = list(map(str, self.config["flags"]))
+        flags: List[str] = list(map(str, self.config.flags))
         flags.extend(["--alias", self.server_id])
 
         main_model: Optional[Model] = self.models.get("main")
@@ -322,9 +334,9 @@ class Server:
                                         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/health", timeout=2) as resp:
                                             if resp.status == 200:
                                                 is_running = True
-                                                self.server_pid = potential_pid
                                     except Exception:
                                         logger.warning(f"[Server: {self.server_id}] Process {potential_pid} is alive but /health is not responding. Cleaning up...")
+                                        is_running = False
                                 except OSError:
                                     is_running = False
                                 except Exception as e:
@@ -334,7 +346,7 @@ class Server:
                                 is_running = False
                     except (ValueError, IndexError):
                         is_running = False
-                
+
                 if not is_running:
                     logger.warning(f"[Server: {self.server_id}] Server is supposed to be running but process is not found or not healthy. Cleaning up...")
                     self._stop_completely()
@@ -387,10 +399,8 @@ class Server:
                     self._stop_completely()
                     raise Exception(f"Failed to start server {self.server_id}")
 
-                ref_count = 1
-
             self.paths["ref_count_file"].write_text(str(ref_count))
-        
+
         return self.port if self.port is not None else -1
 
     def stop(self) -> None:
@@ -431,7 +441,24 @@ def main() -> None:
         server_configs = []
         for name, val in data["providers"].items():
             if isinstance(val, dict) and "serverCustomParameters" in val:
-                server_configs.append({"name": name, "val": val})
+                params = val["serverCustomParameters"]
+                hf_models_dict = {}
+                for label, m_info in params.get("hf-models", {}).items():
+                    hf_models_dict[label] = ModelConfig(
+                        repo=m_info["repo"],
+                        file=m_info["file"],
+                        directory=Path(m_info["dir"])
+                    )
+
+                server_config = ServerConfig(
+                    hf_models=hf_models_dict,
+                    flags=params.get("flags", [])
+                )
+                server_configs.append({
+                    "name": name,
+                    "config": server_config,
+                    "baseUrl": val.get("baseUrl")
+                })
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
@@ -440,11 +467,11 @@ def main() -> None:
         with ExitStack() as stack:
             servers: List[Server] = []
             for item in server_configs:
-                base_url = item["val"].get("baseUrl")
+                base_url = item["baseUrl"]
                 container_port = urlparse(base_url).port if base_url else None
 
                 server = Server(
-                    config=item["val"]["serverCustomParameters"],
+                    config=item["config"],
                     models_dir=MODELS_DIR,
                     llama_bin=LLAMA_BIN,
                     bridge_interface=BRIDGE_INTERFACE,
