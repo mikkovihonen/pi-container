@@ -18,9 +18,9 @@ venv/
 .npm
 
 # llama.cpp
-.llama_server.locks/**
-models/
-logs/
+llama-server/.locks/**
+llama-server/models/**
+llama-server/logs/**
 
 # Pi
 pi-home/.pi/agent/bin
@@ -33,9 +33,3 @@ pi-home/.venv
 pi-home/.cache
 pi-home/.local
 pi-home/.bash_history
-
-# Environment
-.llama_server_refcount
-.llama_server_refcount.lock
-.llama_server.pid
-.model_download.lock

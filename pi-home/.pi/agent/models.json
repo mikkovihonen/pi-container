@@ -5,11 +5,13 @@
         "api": "openai-completions",
         "apiKey": "not-required",
         "compat": {
+            "supportsStore": false,
             "supportsDeveloperRole": false,
             "supportsReasoningEffort": false,
             "supportsUsageInStreaming": false,
-            "maxTokensField": "max_tokens",
-            "thinkingFormat": "chat-template"
+            "supportsStrictMode": false,
+            "supportsLongCacheRetention": false,
+            "maxTokensField": "max_tokens"
         },
         "models": [
             {
@@ -18,11 +20,21 @@
                 "contextWindow": 131072,
                 "compactionThreshold": 128000,
                 "maxTokens": 4096,
-                "thinking": true,
                 "streaming": true,
                 "toolCalling": true,
                 "vision": true,
                 "reasoning": true,
+                "thinkingLevelMap": {
+                    "minimal": "MINIMAL",
+                    "low": null,
+                    "medium": null,
+                    "high": "HIGH",
+                    "xhigh": null
+                },
+                "thinkingFormat": "chat-template",
+                "chat_template_kwargs": {
+                    "$var": "thinking.effort"
+                },
                 "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
                 "input": ["text","image"],
                 "options": {
@@ -32,8 +44,6 @@
             }
         ],
         "serverCustomParameters": {
-            "id": "local-gemma",
-            "port-in-container": 9999,
             "hf-models": {
                 "main": {
                     "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
@@ -72,8 +82,7 @@
                 "--top_k", 64,
                 "--prio", 2,
                 "--jinja",
-                "--chat-template-file", "llama-server/chat-templates/google-gemma-4-31B-it-interleaved.jinja",
-                "--chat-template-kwargs", "{\"enable_thinking\":true}"
+                "--chat-template-file", "llama-server/chat-templates/gemma-4-26B-A4B-it/chat_template.jinja"
             ]
         }
     }

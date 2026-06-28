@@ -10,6 +10,7 @@ import errno
 import shutil
 import logging
 import urllib.request
+from urllib.parse import urlparse
 import traceback
 from pathlib import Path
 from contextlib import ExitStack
@@ -38,8 +39,8 @@ load_dotenv(DOTENV_PATH)
 
 IMAGE_TAG: str = os.environ.get("IMAGE_TAG", "pi-coding-agent:local")
 LLAMA_BIN: Optional[str] = os.environ.get("LLAMA_BIN") or shutil.which("llama-server") or "/opt/homebrew/bin/llama-server"
-MODELS_DIR: Path = REPO_ROOT / "models"
-LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / ".llama-server.locks"
+MODELS_DIR: Path = REPO_ROOT / "llama-server" / "models"
+LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / "llama-server" / ".locks"
 BRIDGE_INTERFACE: str = os.environ.get("BRIDGE_INTERFACE", "bridge100")
 
 # ─── Utility Functions ─────────────────────────────────────────────────────
@@ -139,9 +140,9 @@ class Model:
 # ─── Server Class ──────────────────────────────────────────────────────────
 
 class Server:
-    def __init__(self, config: Dict[str, Any], models_dir: Path, llama_bin: Optional[str], bridge_interface: str, lock_dir: Path, repo_root: Path) -> None:
+    def __init__(self, config: Dict[str, Any], models_dir: Path, llama_bin: Optional[str], bridge_interface: str, lock_dir: Path, repo_root: Path, server_id: str) -> None:
         self.config: Dict[str, Any] = config
-        self.server_id: str = config["id"]
+        self.server_id: str = server_id
         self.models_dir: Path = models_dir
         self.llama_bin: str = llama_bin or ""
         self.bridge_interface: str = bridge_interface
@@ -159,7 +160,7 @@ class Server:
             "ref_count_lock": server_lock_dir / ".llama_server_refcount.lock",
             "ref_count_file": server_lock_dir / ".llama_server_refcount",
             "pid_file": server_lock_dir / ".llama_server.pid",
-            "log_file": self.repo_root / "logs" / self.server_id / "llama-server.log"
+            "log_file": self.repo_root / "llama-server" / "logs" / self.server_id / "llama-server.log"
         }
 
         hf_models_conf: Dict[str, Any] = self.config.get("hf-models", {})
@@ -233,7 +234,7 @@ class Server:
         self.paths["ref_count_file"].unlink(missing_ok=True)
         self.paths["ref_count_lock"].unlink(missing_ok=True)
         self.paths["download_lock"].unlink(missing_ok=True)
-        
+
         try:
             self.paths["lock_dir"].rmdir()
         except OSError:
@@ -310,7 +311,7 @@ class Server:
         if ref_count == 0:
             port = get_free_port()
             self.port = port
-            
+
             self.paths["log_file"].parent.mkdir(parents=True, exist_ok=True)
             cmd: List[str] = [
                 self.llama_bin,
@@ -319,7 +320,7 @@ class Server:
                 "--log-file", str(self.paths["log_file"]),
                 *server_flags
             ]
-            
+
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
@@ -351,7 +352,7 @@ class Server:
             if not self.wait_for_server():
                 self._stop_completely()
                 raise Exception(f"Failed to start server {self.server_id}")
-            
+
             ref_count = 1
 
         self.paths["ref_count_file"].write_text(str(ref_count))
@@ -391,10 +392,10 @@ def main() -> None:
 
     with open(config_path, 'r') as file:
         data = json.load(file)
-        server_configs = [
-            val for val in data["providers"].values()
-            if isinstance(val, dict) and "serverCustomParameters" in val
-        ]
+        server_configs = []
+        for name, val in data["providers"].items():
+            if isinstance(val, dict) and "serverCustomParameters" in val:
+                server_configs.append({"name": name, "val": val})
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
@@ -402,22 +403,23 @@ def main() -> None:
     try:
         with ExitStack() as stack:
             servers: List[Server] = []
-            for config in server_configs:
+            for item in server_configs:
                 server = Server(
-                    config["serverCustomParameters"],
+                    item["val"]["serverCustomParameters"],
                     MODELS_DIR,
                     LLAMA_BIN,
                     BRIDGE_INTERFACE,
                     LLAMA_SERVER_LOCK_DIR,
-                    REPO_ROOT
+                    REPO_ROOT,
+                    item["name"]
                 )
                 stack.enter_context(server)
                 servers.append(server)
 
             llama_ports_json = json.dumps(
-                [{"cp": server.config["port-in-container"], "hp": server.port} for server in servers]
+                [{"cp": urlparse(item["val"]["baseUrl"]).port, "hp": server.port} for item, server in zip(server_configs, servers)]
             )
-            
+
             container_cmd = [
                 container_runtime, "run",
                 "--rm",

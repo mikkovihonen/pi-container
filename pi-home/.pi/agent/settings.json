@@ -1,10 +1,8 @@
 {
   "lastChangelogVersion": "0.80.2",
   "theme": "dark",
-  "defaultProvider": "local-qwen",
-  "defaultModel": "Qwen2.5-Coder-3B-Instruct-GGUF",
-  "compat": {
-    "supportsDeveloperRole": false,
-    "forceSystemAsUser": false
-  }
+  "defaultProvider": "local-gemma",
+  "defaultModel": "gemma-4-26b-a4b-it-qat-ud-q4-k-xl",
+  "enableAnalytics": false,
+  "enableInstallTelemetry": false
 }
