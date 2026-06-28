@@ -17,6 +17,7 @@ import traceback
 from pathlib import Path
 from contextlib import ExitStack
 from typing import Any, Dict, List, Optional, Type
+import contextlib
 from huggingface_hub import hf_hub_download
 from dataclasses import dataclass, field
 from util import (
@@ -161,22 +162,18 @@ class Server:
 
     def _get_bridge_ip(self) -> Optional[str]:
         # Try 'ip addr' first (Linux)
-        try:
-            result = subprocess.check_output(['ip', 'addr', 'show', self.bridge_interface], text=True, stderr=subprocess.DEVNULL)
+        with contextlib.suppress(subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            result = subprocess.check_output(['ip', 'addr', 'show', self.bridge_interface], text=True, stderr=subprocess.DEVNULL, timeout=5)
             match = re.search(r'inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+', result)
             if match:
                 return match.group(1)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
 
         # Fallback to 'ifconfig' (macOS / older Linux)
-        try:
-            result = subprocess.check_output(['ifconfig', self.bridge_interface], text=True, stderr=subprocess.DEVNULL)
+        with contextlib.suppress(subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            result = subprocess.check_output(['ifconfig', self.bridge_interface], text=True, stderr=subprocess.DEVNULL, timeout=5)
             match = re.search(r'inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', result)
             if match:
                 return match.group(1)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
 
         return None
 
@@ -245,15 +242,13 @@ class Server:
             else:
                 return False
 
-            try:
+            with contextlib.suppress(Exception):
                 with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/health", timeout=2) as response:
                     if response.status == 200:
                         data = json.loads(response.read().decode("utf-8"))
                         if data.get("status") == "ok":
                             logger.info(f"[Server: {self.server_id}] [OK]")
                             return True
-            except Exception:
-                pass
 
             time.sleep(2)
             elapsed += 2
@@ -312,12 +307,10 @@ class Server:
 
         try:
             os.kill(pid, 0)
-            try:
+            with contextlib.suppress(Exception):
                 with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as resp:
                     if resp.status == 200:
                         return True, pid, port
-            except Exception:
-                pass
         except OSError:
             pass
 
@@ -340,10 +333,15 @@ class Server:
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE,
                 start_new_session=True
             )
             self.server_pid = process.pid
+
+            if process.poll() is not None:
+                err = process.stderr.read().decode() if process.stderr else "Unknown error"
+                logger.error(f"[Server: {self.server_id}] Process died immediately: {err}")
+                raise Exception(f"Failed to start llama-server: {err}")
 
             bridge_ip = self._get_bridge_ip()
             if bridge_ip:
