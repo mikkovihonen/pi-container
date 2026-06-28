@@ -330,6 +330,7 @@ class Server:
         return False, pid, port
 
     def _start_new_server_process(self) -> None:
+        last_exception = None
         for attempt in range(MAX_STARTUP_ATTEMPTS):
             port = get_free_port()
             self.port = port
@@ -351,37 +352,40 @@ class Server:
             )
             self.server_pid = process.pid
 
-            if process.poll() is not None:
-                err = process.stderr.read().decode() if process.stderr else "Unknown error"
-                logger.error(f"[Server: {self.server_id}] Process died immediately: {err}")
-                raise Exception(f"Failed to start llama-server: {err}")
+            try:
+                if process.poll() is not None:
+                    err = process.stderr.read().decode() if process.stderr else "Unknown error"
+                    raise Exception(f"llama-server died immediately: {err}")
 
-            bridge_ip = self._get_bridge_ip()
-            if bridge_ip:
-                socat_cmd = [
-                    "socat",
-                    f"TCP-LISTEN:{port},fork,reuseaddr,bind={bridge_ip}",
-                    f"TCP:127.0.0.1:{port}"
-                ]
-                try:
-                    self.socat_process = subprocess.Popen(
-                        socat_cmd,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL
-                    )
-                    logger.info(f"[Server: {self.server_id}] socat started (pid {self.socat_process.pid}) listening on {bridge_ip}:{port}")
-                except Exception as e:
-                    logger.warning(f"[Server: {self.server_id}] Failed to start socat: {e}")
+                bridge_ip = self._get_bridge_ip()
+                if bridge_ip:
+                    socat_cmd = [
+                        "socat",
+                        f"TCP-LISTEN:{port},fork,reuseaddr,bind={bridge_ip}",
+                        f"TCP:127.0.0.1:{port}"
+                    ]
+                    try:
+                        self.socat_process = subprocess.Popen(
+                            socat_cmd,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL
+                        )
+                    except Exception as e:
+                        raise Exception(f"Failed to start socat: {e}")
 
-            self.paths["pid_file"].write_text(f"{process.pid}\n{port}\n")
+                self.paths["pid_file"].write_text(f"{process.pid}\n{port}\n")
 
-            if self.wait_for_server():
-                return
-            else:
-                logger.warning(f"[Server: {self.server_id}] Attempt {attempt + 1}/{MAX_STARTUP_ATTEMPTS} failed to start on port {port}. Retrying...")
+                if self.wait_for_server():
+                    return  # Success!
+                else:
+                    raise Exception(f"Timed out waiting for llama-server on port {port}")
+
+            except Exception as e:
+                last_exception = e
+                logger.warning(f"[Server: {self.server_id}] Attempt {attempt + 1}/{MAX_STARTUP_ATTEMPTS} failed: {e}")
                 self._cleanup(full_cleanup=False)
 
-        raise Exception(f"Failed to start server {self.server_id} after {MAX_STARTUP_ATTEMPTS} attempts.")
+        raise Exception(f"Failed to start server {self.server_id} after {MAX_STARTUP_ATTEMPTS} attempts. Last error: {last_exception}")
 
     def stop(self) -> None:
         if self.paths["ref_count_file"].exists():
