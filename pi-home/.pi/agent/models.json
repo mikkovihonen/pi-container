@@ -45,21 +45,31 @@
             }
         ],
         "serverCustomParameters": {
-            "hf-models": {
+            "hfModels": {
                 "main": {
+                    "fileFlag": "--model",
                     "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
                     "file": "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
-                    "dir":"gemma-4-26B-A4B-it-qat-GGUF"
+                    "dir":"gemma-4-26B-A4B-it-qat-GGUF",
+                    "additionalServerFlags": []
                 },
                 "draft": {
+                    "fileFlag": "--model-draft",
                     "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
                     "file": "mtp-gemma-4-26B-A4B-it.gguf",
-                    "dir":"gemma-4-26B-A4B-it-qat-GGUF"
+                    "dir":"gemma-4-26B-A4B-it-qat-GGUF",
+                    "additionalServerFlags": [
+                        "--spec-type", "draft-mtp",
+                        "--spec-draft-n-min", 1,
+                        "--spec-draft-n-max", 4
+                    ]
                 },
                 "mmproj": {
+                    "fileFlag": "--mmproj",
                     "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
                     "file": "mmproj-F16.gguf",
-                    "dir":"gemma-4-26B-A4B-it-qat-GGUF"
+                    "dir":"gemma-4-26B-A4B-it-qat-GGUF",
+                    "additionalServerFlags": []
                 }
             },
             "flags":[
@@ -68,9 +78,6 @@
                 "--kv-offload",
                 "--threads", 8,
                 "--threads-batch", 8,
-                "--spec-type", "draft-mtp",
-                "--spec-draft-n-min", 1,
-                "--spec-draft-n-max", 4,
                 "--parallel", 1,
                 "--batch-size", 4096,
                 "--ubatch-size", 512,

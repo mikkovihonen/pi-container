@@ -10,6 +10,8 @@ import errno
 import shutil
 import logging
 import urllib.request
+import re
+import importlib.util
 from urllib.parse import urlparse
 import traceback
 from pathlib import Path
@@ -22,25 +24,36 @@ from dataclasses import dataclass, field
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# Add scripts directory to sys.path so we can import from util
-sys.path.append(str(Path(__file__).resolve().parent))
-try:
-    from util import load_dotenv
-except ImportError:
-    def load_dotenv(path: Path):
-        pass
+# ─── Module Loading ──────────────────────────────────────────────────────
+
+def _import_util_module(script_dir: Path) -> Optional[Any]:
+    """Robustly imports util.py from the same directory without modifying sys.path."""
+    util_path = script_dir / "util.py"
+    if not util_path.exists():
+        return None
+
+    spec = importlib.util.spec_from_file_location("util", str(util_path))
+    if spec and spec.loader:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    return None
+
+SCRIPT_DIR: Path = Path(__file__).resolve().parent
+util_module = _import_util_module(SCRIPT_DIR)
+load_dotenv = getattr(util_module, "load_dotenv", lambda _: None)
 
 # ─── Constants ─────────────────────────────────────────────────────────────
 
-SCRIPT_DIR: Path = Path(__file__).resolve().parent
 REPO_ROOT: Path = SCRIPT_DIR.parent
-PROJECT_DIR: Path = Path(os.environ.get("PROJECT_DIR", os.getcwd()))
+PROJECT_DIR: Path = Path(os.environ.get("PROJECT_DIR", Path.cwd()))
 DOTENV_PATH: Path = REPO_ROOT / ".env"
 
 load_dotenv(DOTENV_PATH)
 
 IMAGE_TAG: str = os.environ.get("IMAGE_TAG", "pi-coding-agent:local")
-LLAMA_BIN: Optional[str] = os.environ.get("LLAMA_BIN") or shutil.which("llama-server") or "/opt/homebrew/bin/llama-server"
+LLAMA_BIN: Optional[str] = os.environ.get("LLAMA_BIN") or shutil.which("llama-server")
+MAX_STARTUP_ATTEMPTS: int =  int(os.environ.get("MAX_STARTUP_ATTEMPTS", 2))
 MODELS_DIR: Path = REPO_ROOT / "llama-server" / "models"
 LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / "llama-server" / ".locks"
 BRIDGE_INTERFACE: str = os.environ.get("BRIDGE_INTERFACE", "bridge100")
@@ -49,9 +62,11 @@ BRIDGE_INTERFACE: str = os.environ.get("BRIDGE_INTERFACE", "bridge100")
 
 @dataclass(frozen=True)
 class ModelConfig:
+    file_flag: str
     repo: str
     file: str
     directory: Path
+    additional_server_flags: List[Any]
 
 @dataclass(frozen=True)
 class ServerConfig:
@@ -65,14 +80,14 @@ class EnvironmentError(Exception):
     pass
 
 def validate_environment(llama_bin: Optional[str]) -> str:
-    if llama_bin is None or not os.path.exists(llama_bin):
-        raise EnvironmentError(f"llama-server not found at {llama_bin}. Install via: brew install llama.cpp")
+    if llama_bin is None or not Path(llama_bin).exists():
+        raise EnvironmentError(f"llama-server not found. Please install it or set LLAMA_BIN.")
 
     if shutil.which("hf") is None:
         raise EnvironmentError("hf not found. Install via: pip install huggingface_hub[cli]")
 
     if shutil.which("socat") is None:
-        raise EnvironmentError("socat not found. Install via: brew install socat")
+        raise EnvironmentError("socat not found. Install via: brew install socat (macOS) or apt install socat (Linux)")
 
     runtime: Optional[str] = None
     if shutil.which("container") is not None:
@@ -100,7 +115,7 @@ def handle_signal(signum: int, frame: Any) -> None:
 
 def stop_process_group(pid: int, name: str) -> None:
     """Stops a process group to ensure all child processes are killed."""
-    logger.info(f"Stopping process group for {name} (pgid: {pid})...")
+    logger.info(f"Stopping process group for {name} (pid: {pid})...")
     try:
         pgid = os.getpgid(pid)
         os.killpg(pgid, signal.SIGTERM)
@@ -121,7 +136,7 @@ def stop_process_group(pid: int, name: str) -> None:
         if e.errno != errno.ESRCH:
             logger.error(f"Error stopping process group for {name}: {e}")
 
-# ─── Model Class ───────────────────────────────────────────────────────────
+# ─── Model Class ──────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
 class Model:
@@ -203,48 +218,39 @@ class Server:
     def _get_server_flags(self) -> List[str]:
         flags: List[str] = list(map(str, self.config.flags))
         flags.extend(["--alias", self.server_id])
-
-        main_model: Optional[Model] = self.models.get("main")
-        if main_model:
-            flags.extend(["--model", str(main_model.path)])
-        else:
+        if self.models.get("main") == None:
             raise ValueError(f"[{self.server_id}] No main model defined in config.")
-
-        draft_model: Optional[Model] = self.models.get("draft")
-        if draft_model:
-            flags.extend(["--model-draft", str(draft_model.path)])
-
+        else:
+            for model in self.models.values():
+                flags.extend([str(model.config.file_flag), str(model.path)])
+                flags.extend(
+                    [str(flag) for flag in model.config.additional_server_flags]
+                )
         return flags
 
     def _get_bridge_ip(self) -> Optional[str]:
         # Try 'ip addr' first (Linux)
         try:
             result = subprocess.check_output(['ip', 'addr', 'show', self.bridge_interface], text=True, stderr=subprocess.DEVNULL)
-            for line in result.splitlines():
-                if 'inet ' in line:
-                    # line is e.g., "    inet 192.168.1.10/24 brd ..."
-                    parts = line.split()
-                    if len(parts) > 1:
-                        ip_with_mask = parts[1]
-                        return ip_with_mask.split('/')[0]
+            match = re.search(r'inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+', result)
+            if match:
+                return match.group(1)
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
 
         # Fallback to 'ifconfig' (macOS / older Linux)
         try:
             result = subprocess.check_output(['ifconfig', self.bridge_interface], text=True, stderr=subprocess.DEVNULL)
-            for line in result.splitlines():
-                if 'inet ' in line:
-                    # line is e.g., "inet 192.168.1.10 netmask ..."
-                    parts = line.split()
-                    if len(parts) > 1:
-                        return parts[1]
+            match = re.search(r'inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', result)
+            if match:
+                return match.group(1)
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
 
         return None
 
     def _stop_completely(self, pid_to_kill: Optional[int] = None) -> None:
+        """Stops a process group and cleans up local files for this server instance."""
         target_pid = pid_to_kill or self.server_pid
         if target_pid:
             logger.info(f"[Server: {self.server_id}] Stopping server process group (pid {target_pid})...")
@@ -269,12 +275,28 @@ class Server:
 
         try:
             self.paths["lock_dir"].rmdir()
-            # If the parent .locks directory is now empty, delete it as well.
             if self.lock_dir.exists() and not any(self.lock_dir.iterdir()):
                 logger.info(f"[Server: {self.server_id}] .locks directory is empty, deleting {self.lock_dir}")
                 self.lock_dir.rmdir()
         except OSError:
             pass
+
+    def _cleanup_attempt(self) -> None:
+        """Cleans up only the current process attempt, used for retries."""
+        if self.server_pid:
+            stop_process_group(self.server_pid, f"llama-server attempt {self.server_id}")
+            self.server_pid = None
+
+        if self.socat_process and self.socat_process.poll() is None:
+            self.socat_process.terminate()
+            try:
+                self.socat_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.socat_process.kill()
+            self.socat_process = None
+
+        if self.paths["pid_file"].exists():
+            self.paths["pid_file"].unlink(missing_ok=True)
 
     def wait_for_server(self, timeout: int = 180) -> bool:
         logger.info(f"[Server: {self.server_id}] Waiting for llama-server on port {self.port}")
@@ -344,7 +366,7 @@ class Server:
     def _is_existing_server_healthy(self) -> tuple[bool, Optional[int], Optional[int]]:
         if not self.paths["pid_file"].exists():
             return False, None, None
-        
+
         try:
             with open(self.paths["pid_file"], "r") as pf:
                 lines = pf.read().splitlines()
@@ -356,10 +378,7 @@ class Server:
             return False, None, None
 
         try:
-            # Check if process is alive
             os.kill(pid, 0)
-            
-            # Check if server is responsive
             try:
                 with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as resp:
                     if resp.status == 200:
@@ -367,55 +386,59 @@ class Server:
             except Exception:
                 pass
         except OSError:
-            # Process is not alive
             pass
-            
+
         return False, pid, port
 
     def _start_new_server_process(self) -> None:
-        port = get_free_port()
-        self.port = port
+        for attempt in range(MAX_STARTUP_ATTEMPTS):
+            port = get_free_port()
+            self.port = port
 
-        self.paths["log_file"].parent.mkdir(parents=True, exist_ok=True)
-        cmd: List[str] = [
-            self.llama_bin,
-            "--host", "127.0.0.1",
-            "--port", str(port),
-            "--log-file", str(self.paths["log_file"]),
-            *self._get_server_flags()
-        ]
-
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
-            start_new_session=True
-        )
-        self.server_pid = process.pid
-
-        bridge_ip = self._get_bridge_ip()
-        if bridge_ip:
-            socat_cmd = [
-                "socat",
-                f"TCP-LISTEN:{port},fork,reuseaddr,bind={bridge_ip}",
-                f"TCP:127.0.0.1:{port}"
+            self.paths["log_file"].parent.mkdir(parents=True, exist_ok=True)
+            cmd: List[str] = [
+                self.llama_bin,
+                "--host", "127.0.0.1",
+                "--port", str(port),
+                "--log-file", str(self.paths["log_file"]),
+                *self._get_server_flags()
             ]
-            try:
-                self.socat_process = subprocess.Popen(
-                    socat_cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                logger.info(f"[Server: {self.server_id}] socat started (pid {self.socat_process.pid}) listening on {bridge_ip}:{port}")
-            except Exception as e:
-                logger.warning(f"[Server: {self.server_id}] Failed to start socat: {e}")
 
-        with open(self.paths["pid_file"], "w") as pf:
-            pf.write(f"{process.pid}\n{port}\n")
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
+                start_new_session=True
+            )
+            self.server_pid = process.pid
 
-        if not self.wait_for_server():
-            self._stop_completely()
-            raise Exception(f"Failed to start server {self.server_id}")
+            bridge_ip = self._get_bridge_ip()
+            if bridge_ip:
+                socat_cmd = [
+                    "socat",
+                    f"TCP-LISTEN:{port},fork,reuseaddr,bind={bridge_ip}",
+                    f"TCP:127.0.0.1:{port}"
+                ]
+                try:
+                    self.socat_process = subprocess.Popen(
+                        socat_cmd,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    logger.info(f"[Server: {self.server_id}] socat started (pid {self.socat_process.pid}) listening on {bridge_ip}:{port}")
+                except Exception as e:
+                    logger.warning(f"[Server: {self.server_id}] Failed to start socat: {e}")
+
+            with open(self.paths["pid_file"], "w") as pf:
+                pf.write(f"{process.pid}\n{port}\n")
+
+            if self.wait_for_server():
+                return
+            else:
+                logger.warning(f"[Server: {self.server_id}] Attempt {attempt + 1}/{MAX_STARTUP_ATTEMPTS} failed to start on port {port}. Retrying...")
+                self._cleanup_attempt()
+
+        raise Exception(f"Failed to start server {self.server_id} after {MAX_STARTUP_ATTEMPTS} attempts.")
 
     def stop(self) -> None:
         if self.paths["ref_count_file"].exists():
@@ -457,11 +480,13 @@ def main() -> None:
             if isinstance(val, dict) and "serverCustomParameters" in val:
                 params = val["serverCustomParameters"]
                 hf_models_dict = {}
-                for label, m_info in params.get("hf-models", {}).items():
+                for label, m_info in params.get("hfModels", {}).items():
                     hf_models_dict[label] = ModelConfig(
+                        file_flag=m_info["fileFlag"],
                         repo=m_info["repo"],
                         file=m_info["file"],
-                        directory=Path(m_info["dir"])
+                        directory=Path(m_info["dir"]),
+                        additional_server_flags=m_info["additionalServerFlags"]
                     )
 
                 server_config = ServerConfig(
@@ -508,7 +533,6 @@ def main() -> None:
                 "--tty",
                 "--volume", f"{REPO_ROOT}/pi-home:/home/pi",
                 "--volume", f"{PROJECT_DIR}:/workspace",
-                "--tmpfs", "/home/pi/.gitconfig",
                 "--tmpfs", "/home/pi/.cache",
                 "--tmpfs", "/home/pi/.local",
                 "--tmpfs", "/home/pi/.venv",
