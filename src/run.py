@@ -32,25 +32,7 @@ from util import (
 
 # ─── Module Loading ──────────────────────────────────────────────────────
 
-def _import_util_module(script_dir: Path) -> Optional[Any]:
-    """Robustly imports util.py from the same directory without modifying sys.path."""
-    util_path = script_dir / "util.py"
-    if not util_path.exists():
-        return None
-
-    spec = importlib.util.spec_from_file_location("util", str(util_path))
-    if spec and spec.loader:
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-    return None
-
 SCRIPT_DIR: Path = Path(__file__).resolve().parent
-util_module = _import_util_module(SCRIPT_DIR)
-load_dotenv = getattr(util_module, "load_dotenv", lambda _: None)
-
-# ─── Constants ─────────────────────────────────────────────────────────────
-
 REPO_ROOT: Path = SCRIPT_DIR.parent
 PROJECT_DIR: Path = Path(os.environ.get("PROJECT_DIR", Path.cwd()))
 DOTENV_PATH: Path = REPO_ROOT / ".env"
