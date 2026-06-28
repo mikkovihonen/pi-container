@@ -77,6 +77,27 @@ def handle_signal(signum: int, frame: Any) -> None:
     raise SystemExit
 
 
+def stop_process_group(pid: int, name: str) -> None:
+    """Stops a process group to ensure all child processes (like socat) are killed."""
+    logger.info(f"Stopping process group for {name} (pgid: {pid})...")
+    try:
+        # Send SIGTERM to the entire process group
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+
+        for _ in range(10):
+            try:
+                # Check if any process in the group still exists
+                os.killpg(os.getpgid(pid), 0)
+                time.sleep(0.5)
+            except OSError:
+                break
+        else:
+            # If still running, SIGKILL the group
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+    except OSError as e:
+        if e.errno != errno.ESRCH:
+            logger.error(f"Error stopping process group for {name}: {e}")
+
 def stop_process_gracefully(pid: Optional[int], name: str) -> None:
     if pid is None:
         return
@@ -210,18 +231,10 @@ class Server:
                 with open(self.paths["pid_file"], "r") as pf:
                     lines: List[str] = pf.readlines()
                     if len(lines) >= 1:
-                        server_pid_int: Optional[int] = None
                         try:
-                            server_pid_int = int(lines[0].strip())
-                        except ValueError:
-                            pass
-                        if server_pid_int is not None:
-                            stop_process_gracefully(server_pid_int, f"llama-server {self.server_id}")
-                    if len(lines) >= 3:
-                        try:
-                            socat_pid_int: int = int(lines[2].strip())
-                            stop_process_gracefully(socat_pid_int, f"socat for {self.server_id}")
-                        except (ValueError, IndexError):
+                            server_pid_int: int = int(lines[0].strip())
+                            stop_process_group(server_pid_int, f"llama-server group {self.server_id}")
+                        except (ValueError, ProcessLookupError):
                             pass
             except Exception as e:
                 logger.error(f"[Server: {self.server_id}] Error during complete stop: {e}")
@@ -247,7 +260,13 @@ class Server:
             "--log-file", str(self.paths["log_file"]),
             *server_flags
         ]
-        process: subprocess.Popen = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        # Use os.setpgrp to create a new process group for the server
+        process: subprocess.Popen = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+            preexec_fn=os.setpgrp
+        )
 
         bridge_ip: Optional[str] = self._get_bridge_ip()
         socat_process: Optional[subprocess.Popen] = None
@@ -262,8 +281,6 @@ class Server:
                 logger.info(f"[Server: {self.server_id}] socat started (pid {socat_process.pid}) listening on {bridge_ip}:{port}")
             except Exception as e:
                 logger.warning(f"[Server: {self.server_id}] Failed to start socat: {e}")
-        elif self.bridge_interface:
-            logger.warning(f"[Server: {self.server_id}] Could not find IP for {self.bridge_interface}, skipping socat.")
 
         with open(self.paths["pid_file"], "w") as pf:
             pf.write(f"{process.pid}\n{port}\n")
@@ -341,12 +358,17 @@ class Server:
                             try:
                                 pid_str: str = lines[0].strip()
                                 port_str: str = lines[1].strip()
-                                self.server_pid = int(pid_str)
+                                potential_pid: int = int(pid_str)
                                 self.port = int(port_str)
-                                if self.server_pid is not None:
-                                    os.kill(self.server_pid, 0) # Check if running
+
+                                # IMPROVEMENT: Validate that the process is actually running
+                                try:
+                                    os.kill(potential_pid, 0)
                                     is_running = True
-                            except (OSError, ValueError, IndexError):
+                                    self.server_pid = potential_pid
+                                except OSError:
+                                    is_running = False
+                            except (ValueError, IndexError):
                                 pass
 
                 if not is_running:

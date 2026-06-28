@@ -10,7 +10,7 @@ export default function (pi: any) {
     name: "edit",
     label: "Edit",
     description: "Edit a file by providing its absolute path and full content.",
-    promptSnippet: "Provide the absolute path and full content of the file to edit it. You must provide both required parameters: path and content.",
+    promptSnippet: "Provide the absolute path and full content of the file to edit it. You MUST provide both required parameters: path and content. You MUST NOT leave out path parameter.",
     parameters: Type.Object({
       path: Type.String(),
       content: Type.String(),
