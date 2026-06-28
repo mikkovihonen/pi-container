@@ -1,6 +1,7 @@
 import sys
 sys.dont_write_bytecode = True
 
+import hashlib
 import os
 import subprocess
 import time
@@ -106,19 +107,36 @@ class Model:
             logger.info(f"[Model: {self.label}] Found existing model: {self.path}")
             return
 
-        logger.info(f"[Model: {self.label}] Downloading {self.config.file} from {self.config.repo}...")
-        self.path.parent.mkdir(exist_ok=True, parents=True)
-        try:
-            hf_hub_download(
-                repo_id=self.config.repo,
-                filename=self.config.file,
-                local_dir=str(self.models_dir / self.config.directory),
-                local_dir_use_symlinks=False
-            )
-            logger.info(f"[Model: {self.label}] Download complete.")
-        except Exception as e:
-            logger.error(f"[Model: {self.label}] Download failed: {e}")
-            raise
+        # Create a shared lock directory for all models
+        shared_lock_dir: Path = self.models_dir.parent / ".model_download_locks"
+        shared_lock_dir.mkdir(exist_ok=True, parents=True)
+
+        # Create a unique lock filename based on repo and file
+        model_id = hashlib.sha256(f"{self.config.repo}:{self.config.file}".encode()).hexdigest()
+        lock_file_path = shared_lock_dir / f"{model_id}.lock"
+
+        logger.info(f"[Model: {self.label}] Acquiring lock for download...")
+        with lock_file_path.open("a") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+
+            # Re-check if exists after acquiring lock
+            if self.path.exists():
+                logger.info(f"[Model: {self.label}] Found existing model after acquiring lock: {self.path}")
+                return
+
+            logger.info(f"[Model: {self.label}] Downloading {self.config.file} from {self.config.repo}...")
+            self.path.parent.mkdir(exist_ok=True, parents=True)
+            try:
+                hf_hub_download(
+                    repo_id=self.config.repo,
+                    filename=self.config.file,
+                    local_dir=str(self.models_dir / self.config.directory),
+                    local_dir_use_symlinks=False
+                )
+                logger.info(f"[Model: {self.label}] Download complete.")
+            except Exception as e:
+                logger.error(f"[Model: {self.label}] Download failed: {e}")
+                raise
 
 # ─── Server Class ──────────────────────────────────────────────────────────
 
@@ -140,7 +158,6 @@ class Server:
         server_lock_dir: Path = self.lock_dir / self.server_id
         self.paths: Dict[str, Path] = {
             "lock_dir": server_lock_dir,
-            "download_lock": server_lock_dir / ".model_download.lock",
             "ref_count_lock": server_lock_dir / ".llama_server_refcount.lock",
             "ref_count_file": server_lock_dir / ".llama_server_refcount",
             "pid_file": server_lock_dir / ".llama_server.pid",
@@ -162,11 +179,8 @@ class Server:
         self.stop()
 
     def _ensure_models_downloaded(self) -> None:
-        self.paths["download_lock"].parent.mkdir(exist_ok=True, parents=True)
-        with self.paths["download_lock"].open("a") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            for model in self.models.values():
-                model.download()
+        for model in self.models.values():
+            model.download()
 
     def _get_server_flags(self) -> List[str]:
         if self.models.get("main") is None:
@@ -218,7 +232,6 @@ class Server:
             self.paths["pid_file"].unlink(missing_ok=True)
 
         self.paths["ref_count_file"].unlink(missing_ok=True)
-        self.paths["download_lock"].unlink(missing_ok=True)
 
         if full_cleanup:
             try:
