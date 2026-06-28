@@ -19,7 +19,15 @@ from contextlib import ExitStack
 from typing import Any, Dict, List, Optional, Type
 from huggingface_hub import hf_hub_download
 from dataclasses import dataclass, field
-from util import load_dotenv, validate_environment, get_free_port, handle_signal, stop_process_group, get_sanitized_git_config_json
+from util import (
+    load_dotenv,
+    validate_environment,
+    get_free_port,
+    handle_signal,
+    stop_process_group,
+    get_sanitized_git_config_json,
+    EnvironmentError,
+)
 
 
 # ─── Module Loading ──────────────────────────────────────────────────────
@@ -76,10 +84,6 @@ class ModelConfig:
 class ServerConfig:
     hf_models: Dict[str, ModelConfig]
     flags: List[Any]
-
-class EnvironmentError(Exception):
-    """Raised when the environment does not meet requirements."""
-    pass
 
 # ─── Model Class ──────────────────────────────────────────────────────────
 
