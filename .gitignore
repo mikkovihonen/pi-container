@@ -18,8 +18,11 @@ venv/
 .npm
 
 # llama.cpp
+llama-server/.locks
 llama-server/.locks/**
+llama-server/models
 llama-server/models/**
+llama-server/logs
 llama-server/logs/**
 
 # Pi

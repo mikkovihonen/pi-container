@@ -205,13 +205,31 @@ class Server:
         return flags
 
     def _get_bridge_ip(self) -> Optional[str]:
+        # Try 'ip addr' first (Linux)
         try:
-            result: str = subprocess.check_output(['ifconfig', self.bridge_interface], text=True)
+            result = subprocess.check_output(['ip', 'addr', 'show', self.bridge_interface], text=True, stderr=subprocess.DEVNULL)
             for line in result.splitlines():
                 if 'inet ' in line:
-                    return line.split()[1]
-        except (subprocess.CalledProcessError, IndexError, AttributeError):
-            return None
+                    # line is e.g., "    inet 192.168.1.10/24 brd ..."
+                    parts = line.split()
+                    if len(parts) > 1:
+                        ip_with_mask = parts[1]
+                        return ip_with_mask.split('/')[0]
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
+        # Fallback to 'ifconfig' (macOS / older Linux)
+        try:
+            result = subprocess.check_output(['ifconfig', self.bridge_interface], text=True, stderr=subprocess.DEVNULL)
+            for line in result.splitlines():
+                if 'inet ' in line:
+                    # line is e.g., "inet 192.168.1.10 netmask ..."
+                    parts = line.split()
+                    if len(parts) > 1:
+                        return parts[1]
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
         return None
 
     def _stop_completely(self) -> None:
@@ -425,6 +443,10 @@ def main() -> None:
                 stack.enter_context(server)
                 servers.append(server)
 
+            portconfig = json.dumps(
+                [{"cp": server.container_port, "hp": server.port} for server in servers]
+            )
+
             container_cmd = [
                 container_runtime, "run",
                 "--rm",
@@ -438,11 +460,7 @@ def main() -> None:
                 "--tmpfs", "/home/pi/.venv",
                 "--tmpfs", "/home/pi/.pi/agent/bin",
                 "--workdir", "/workspace",
-                "--env", f"LLAMA_PORTS={
-                    json.dumps(
-                        [{"cp": server.container_port, "hp": server.port} for server in servers]
-                    )
-                }",
+                "--env", f"LLAMA_PORTS={portconfig}",
                 IMAGE_TAG,
                 *sys.argv[1:]
             ]
