@@ -15,6 +15,7 @@ import traceback
 from pathlib import Path
 from contextlib import ExitStack
 from typing import Any, Dict, List, Optional, Type, Tuple
+from huggingface_hub import hf_hub_download
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -125,7 +126,6 @@ class Model:
         logger.info(f"[Model: {self.label}] Downloading {self.file} from {self.repo}...")
         self.path.parent.mkdir(exist_ok=True, parents=True)
         try:
-            from huggingface_hub import hf_hub_download
             hf_hub_download(
                 repo_id=self.repo,
                 filename=str(self.file),
@@ -140,7 +140,7 @@ class Model:
 # ─── Server Class ──────────────────────────────────────────────────────────
 
 class Server:
-    def __init__(self, config: Dict[str, Any], models_dir: Path, llama_bin: Optional[str], bridge_interface: str, lock_dir: Path, repo_root: Path, server_id: str) -> None:
+    def __init__(self, config: Dict[str, Any], models_dir: Path, llama_bin: Optional[str], bridge_interface: str, lock_dir: Path, repo_root: Path, server_id: str, container_port: Optional[int] = None) -> None:
         self.config: Dict[str, Any] = config
         self.server_id: str = server_id
         self.models_dir: Path = models_dir
@@ -149,6 +149,7 @@ class Server:
         self.lock_dir: Path = lock_dir
         self.repo_root: Path = repo_root
         self.port: Optional[int] = None
+        self.container_port: Optional[int] = container_port
         self.server_pid: Optional[int] = None
         self.socat_process: Optional[subprocess.Popen] = None
         self.models: Dict[str, Model] = {}
@@ -237,6 +238,10 @@ class Server:
 
         try:
             self.paths["lock_dir"].rmdir()
+            # If the parent .locks directory is now empty, delete it as well.
+            if self.lock_dir.exists() and not any(self.lock_dir.iterdir()):
+                logger.info(f"[Server: {self.server_id}] .locks directory is empty, deleting {self.lock_dir}")
+                self.lock_dir.rmdir()
         except OSError:
             pass
 
@@ -258,14 +263,14 @@ class Server:
                     if response.status == 200:
                         data = json.loads(response.read().decode("utf-8"))
                         if data.get("status") == "ok":
-                            logger.info(" [OK]")
+                            logger.info(f"[Server: {self.server_id}] [OK]")
                             return True
             except Exception:
                 pass
 
             time.sleep(2)
             elapsed += 2
-            logger.info(".")
+            logger.info(f"[Server: {self.server_id}] Waiting... ({elapsed}s elapsed)")
 
         logger.error(f"[Server: {self.server_id}] Timed out waiting for llama-server")
         return False
@@ -404,21 +409,21 @@ def main() -> None:
         with ExitStack() as stack:
             servers: List[Server] = []
             for item in server_configs:
+                base_url = item["val"].get("baseUrl")
+                container_port = urlparse(base_url).port if base_url else None
+
                 server = Server(
-                    item["val"]["serverCustomParameters"],
-                    MODELS_DIR,
-                    LLAMA_BIN,
-                    BRIDGE_INTERFACE,
-                    LLAMA_SERVER_LOCK_DIR,
-                    REPO_ROOT,
-                    item["name"]
+                    config=item["val"]["serverCustomParameters"],
+                    models_dir=MODELS_DIR,
+                    llama_bin=LLAMA_BIN,
+                    bridge_interface=BRIDGE_INTERFACE,
+                    lock_dir=LLAMA_SERVER_LOCK_DIR,
+                    repo_root=REPO_ROOT,
+                    server_id=item["name"],
+                    container_port=container_port
                 )
                 stack.enter_context(server)
                 servers.append(server)
-
-            llama_ports_json = json.dumps(
-                [{"cp": urlparse(item["val"]["baseUrl"]).port, "hp": server.port} for item, server in zip(server_configs, servers)]
-            )
 
             container_cmd = [
                 container_runtime, "run",
@@ -433,7 +438,11 @@ def main() -> None:
                 "--tmpfs", "/home/pi/.venv",
                 "--tmpfs", "/home/pi/.pi/agent/bin",
                 "--workdir", "/workspace",
-                "--env", f"LLAMA_PORTS={llama_ports_json}",
+                "--env", f"LLAMA_PORTS={
+                    json.dumps(
+                        [{"cp": server.container_port, "hp": server.port} for server in servers]
+                    )
+                }",
                 IMAGE_TAG,
                 *sys.argv[1:]
             ]
