@@ -28,11 +28,3 @@ llama-server/logs/**
 # Pi
 pi-home/.pi/agent/bin
 pi-home/.pi/agent/sessions
-pi-home/.pi/models.json
-pi-home/.gitconfig
-
-# System
-pi-home/.venv
-pi-home/.cache
-pi-home/.local
-pi-home/.bash_history

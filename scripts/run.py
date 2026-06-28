@@ -1,5 +1,7 @@
-import os
 import sys
+sys.dont_write_bytecode = True
+
+import os
 import subprocess
 import socket
 import time
@@ -19,10 +21,6 @@ from contextlib import ExitStack
 from typing import Any, Dict, List, Optional, Type
 from huggingface_hub import hf_hub_download
 from dataclasses import dataclass, field
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-logger = logging.getLogger(__name__)
 
 # ─── Module Loading ──────────────────────────────────────────────────────
 
@@ -50,6 +48,12 @@ PROJECT_DIR: Path = Path(os.environ.get("PROJECT_DIR", Path.cwd()))
 DOTENV_PATH: Path = REPO_ROOT / ".env"
 
 load_dotenv(DOTENV_PATH)
+
+# Configure logging
+log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+logging.basicConfig(level=log_level, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 IMAGE_TAG: str = os.environ.get("IMAGE_TAG", "pi-coding-agent:local")
 LLAMA_BIN: Optional[str] = os.environ.get("LLAMA_BIN") or shutil.which("llama-server")
@@ -135,6 +139,49 @@ def stop_process_group(pid: int, name: str) -> None:
     except OSError as e:
         if e.errno != errno.ESRCH:
             logger.error(f"Error stopping process group for {name}: {e}")
+
+def get_sanitized_git_config_json():
+    """
+    Generates a JSON-serialized dictionary of 'key': 'value' pairs.
+    """
+    sanitized_dict = {}
+    # Regex to strip 'user:pass@' from URLs
+    url_credential_regex = re.compile(r'(https?://)[^/]+:[^/@]+@')
+
+    try:
+        result = subprocess.check_output(['git', 'config', '--list', '--show-origin'], text=True)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error running git config: {e}")
+        return "{}"
+    except FileNotFoundError:
+        logger.error("'git' command not found on host.")
+        return "{}"
+
+    for line in result.splitlines():
+        try:
+            pattern = r'^(.+?)\t([^=]+)=(.+)$'
+            m = re.match(pattern, line)
+            if m:
+                origin, key, value = m.group(1), m.group(2), m.group(3)
+
+                if origin in "file:.git/config":
+                    continue
+
+                key = key.strip()
+                value = value.strip()
+
+                if key.startswith('credential.'):
+                    continue
+
+                value = url_credential_regex.sub(r'\1', value)
+
+                sanitized_dict[key] = value
+
+        except Exception as e:
+            logger.error(f"git: {e}")
+            continue
+
+    return json.dumps(sanitized_dict)
 
 # ─── Model Class ──────────────────────────────────────────────────────────
 
@@ -531,14 +578,13 @@ def main() -> None:
                 "--rm",
                 "--interactive",
                 "--tty",
-                "--volume", f"{REPO_ROOT}/pi-home:/home/pi",
-                "--volume", f"{PROJECT_DIR}:/workspace",
-                "--tmpfs", "/home/pi/.cache",
-                "--tmpfs", "/home/pi/.local",
-                "--tmpfs", "/home/pi/.venv",
+                "--tmpfs", "/home/pi/",
+                "--volume", f"{REPO_ROOT}/pi-home/.pi:/home/pi/.pi",
                 "--tmpfs", "/home/pi/.pi/agent/bin",
+                "--volume", f"{PROJECT_DIR}:/workspace",
                 "--workdir", "/workspace",
                 "--env", f"LLAMA_PORTS={portconfig}",
+                "--env", f"HOST_GIT_CONFIG={get_sanitized_git_config_json()}",
                 IMAGE_TAG,
                 *sys.argv[1:]
             ]

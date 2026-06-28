@@ -11,7 +11,15 @@ if [ -f /workspace/.pi/dependencies/apt/packages.txt ]; then
 fi
 
 export GATEWAY_IP=$(ip route | awk '/default/ {print $3}')
-export PARSED_PAIRS=$(echo "$LLAMA_PORTS" | jq -r '.[] | "\(.cp):\(.hp)"')
+export PARSED_PAIRS=$(echo "${LLAMA_PORTS:-[]}" | jq -r '.[] | "\(.cp):\(.hp)"')
+
+if [ -n "$HOST_GIT_CONFIG" ]; then
+    while IFS=$'\t' read -r key value; do
+        if [[ -n "$key" ]]; then
+            gosu pi git config --global "$key" "$value"
+        fi
+    done < <(echo "$HOST_GIT_CONFIG" | jq -r 'to_entries[] | [.key, .value] | @tsv')
+fi
 
 exec gosu pi bash -c '
     shift 2

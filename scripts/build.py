@@ -1,5 +1,7 @@
-import os
 import sys
+sys.dont_write_bytecode = True
+
+import os
 import subprocess
 from pathlib import Path
 from util import load_dotenv
@@ -16,14 +18,14 @@ IMAGE_TAG = os.environ.get("IMAGE_TAG", "pi-coding-agent:local")
 
 def main():
     print(f"Building image: {IMAGE_TAG}")
-    
+
     cmd = [
         "container", "build",
         "--tag", IMAGE_TAG,
         "--file", str(REPO_ROOT / "Containerfile"),
         str(REPO_ROOT)
     ]
-    
+
     try:
         subprocess.run(cmd, check=True)
     except subprocess.CalledProcessError as e:
