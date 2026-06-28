@@ -82,8 +82,8 @@
                 "--top_p", 0.95,
                 "--top_k", 64,
                 "--prio", 2,
-                "--jinja",
                 "--cache-ram", 8192,
+                "--jinja",
                 "--chat-template-file", "llama-server/chat-templates/gemma-4-26B-A4B-it/chat_template.jinja"
             ]
         }

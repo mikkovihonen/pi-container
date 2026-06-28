@@ -244,11 +244,13 @@ class Server:
 
         return None
 
-    def _stop_completely(self) -> None:
-        if self.server_pid:
-            logger.info(f"[Server: {self.server_id}] Stopping server process group (pid {self.server_pid})...")
-            stop_process_group(self.server_pid, f"llama-server group {self.server_id}")
-            self.server_pid = None
+    def _stop_completely(self, pid_to_kill: Optional[int] = None) -> None:
+        target_pid = pid_to_kill or self.server_pid
+        if target_pid:
+            logger.info(f"[Server: {self.server_id}] Stopping server process group (pid {target_pid})...")
+            stop_process_group(target_pid, f"llama-server group {self.server_id}")
+            if target_pid == self.server_pid:
+                self.server_pid = None
 
         if self.socat_process and self.socat_process.poll() is None:
             logger.info(f"[Server: {self.server_id}] Stopping socat process (pid {self.socat_process.pid})...")
@@ -306,102 +308,114 @@ class Server:
 
     def start(self) -> int:
         self._ensure_models_downloaded()
-        server_flags: List[str] = self._get_server_flags()
 
         with open(self.paths["ref_count_lock"], "a") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-            ref_count: int = 0
-            if self.paths["ref_count_file"].exists():
-                try:
-                    ref_count = int(self.paths["ref_count_file"].read_text().strip())
-                except ValueError:
-                    ref_count = 0
+            ref_count = self._get_current_ref_count()
 
             if ref_count > 0:
-                is_running: bool = False
-                if self.paths["pid_file"].exists():
-                    try:
-                        with open(self.paths["pid_file"], "r") as pf:
-                            lines = pf.read().splitlines()
-                            if len(lines) >= 2:
-                                potential_pid = int(lines[0])
-                                self.port = int(lines[1])
-                                try:
-                                    os.kill(potential_pid, 0)
-                                    # Check if server is actually responsive
-                                    try:
-                                        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/health", timeout=2) as resp:
-                                            if resp.status == 200:
-                                                is_running = True
-                                    except Exception:
-                                        logger.warning(f"[Server: {self.server_id}] Process {potential_pid} is alive but /health is not responding. Cleaning up...")
-                                        is_running = False
-                                except OSError:
-                                    is_running = False
-                                except Exception as e:
-                                    logger.warning(f"[Server: {self.server_id}] Error checking health: {e}")
-                                    is_running = False
-                            else:
-                                is_running = False
-                    except (ValueError, IndexError):
-                        is_running = False
-
-                if not is_running:
-                    logger.warning(f"[Server: {self.server_id}] Server is supposed to be running but process is not found or not healthy. Cleaning up...")
-                    self._stop_completely()
-                    ref_count = 0
-                else:
+                healthy, pid, port = self._is_existing_server_healthy()
+                if healthy and pid and port:
+                    self.port = port
                     ref_count += 1
-
-            if ref_count == 0:
-                port = get_free_port()
-                self.port = port
-
-                self.paths["log_file"].parent.mkdir(parents=True, exist_ok=True)
-                cmd: List[str] = [
-                    self.llama_bin,
-                    "--host", "127.0.0.1",
-                    "--port", str(port),
-                    "--log-file", str(self.paths["log_file"]),
-                    *server_flags
-                ]
-
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True
-                )
-                self.server_pid = process.pid
-
-                bridge_ip = self._get_bridge_ip()
-                if bridge_ip:
-                    socat_cmd = [
-                        "socat",
-                        f"TCP-LISTEN:{port},fork,reuseaddr,bind={bridge_ip}",
-                        f"TCP:127.0.0.1:{port}"
-                    ]
-                    try:
-                        self.socat_process = subprocess.Popen(
-                            socat_cmd,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL
-                        )
-                        logger.info(f"[Server: {self.server_id}] socat started (pid {self.socat_process.pid}) listening on {bridge_ip}:{port}")
-                    except Exception as e:
-                        logger.warning(f"[Server: {self.server_id}] Failed to start socat: {e}")
-
-                with open(self.paths["pid_file"], "w") as pf:
-                    pf.write(f"{process.pid}\n{port}\n")
-
-                if not self.wait_for_server():
-                    self._stop_completely()
-                    raise Exception(f"Failed to start server {self.server_id}")
+                    logger.info(f"[Server: {self.server_id}] Attaching to existing healthy server on port {port}")
+                else:
+                    logger.warning(f"[Server: {self.server_id}] Existing server is not healthy or stale. Cleaning up and restarting...")
+                    self._stop_completely(pid)
+                    ref_count = 1
+                    self._start_new_server_process()
+            else:
+                ref_count = 1
+                self._start_new_server_process()
 
             self.paths["ref_count_file"].write_text(str(ref_count))
 
         return self.port if self.port is not None else -1
+
+    def _get_current_ref_count(self) -> int:
+        if self.paths["ref_count_file"].exists():
+            try:
+                return int(self.paths["ref_count_file"].read_text().strip())
+            except ValueError:
+                return 0
+        return 0
+
+    def _is_existing_server_healthy(self) -> tuple[bool, Optional[int], Optional[int]]:
+        if not self.paths["pid_file"].exists():
+            return False, None, None
+        
+        try:
+            with open(self.paths["pid_file"], "r") as pf:
+                lines = pf.read().splitlines()
+                if len(lines) < 2:
+                    return False, None, None
+                pid = int(lines[0])
+                port = int(lines[1])
+        except (ValueError, IndexError):
+            return False, None, None
+
+        try:
+            # Check if process is alive
+            os.kill(pid, 0)
+            
+            # Check if server is responsive
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as resp:
+                    if resp.status == 200:
+                        return True, pid, port
+            except Exception:
+                pass
+        except OSError:
+            # Process is not alive
+            pass
+            
+        return False, pid, port
+
+    def _start_new_server_process(self) -> None:
+        port = get_free_port()
+        self.port = port
+
+        self.paths["log_file"].parent.mkdir(parents=True, exist_ok=True)
+        cmd: List[str] = [
+            self.llama_bin,
+            "--host", "127.0.0.1",
+            "--port", str(port),
+            "--log-file", str(self.paths["log_file"]),
+            *self._get_server_flags()
+        ]
+
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+            start_new_session=True
+        )
+        self.server_pid = process.pid
+
+        bridge_ip = self._get_bridge_ip()
+        if bridge_ip:
+            socat_cmd = [
+                "socat",
+                f"TCP-LISTEN:{port},fork,reuseaddr,bind={bridge_ip}",
+                f"TCP:127.0.0.1:{port}"
+            ]
+            try:
+                self.socat_process = subprocess.Popen(
+                    socat_cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                logger.info(f"[Server: {self.server_id}] socat started (pid {self.socat_process.pid}) listening on {bridge_ip}:{port}")
+            except Exception as e:
+                logger.warning(f"[Server: {self.server_id}] Failed to start socat: {e}")
+
+        with open(self.paths["pid_file"], "w") as pf:
+            pf.write(f"{process.pid}\n{port}\n")
+
+        if not self.wait_for_server():
+            self._stop_completely()
+            raise Exception(f"Failed to start server {self.server_id}")
 
     def stop(self) -> None:
         if self.paths["ref_count_file"].exists():
