@@ -417,20 +417,6 @@ class Server:
         if should_full_cleanup:
             self._cleanup(full_cleanup=True)
 
-def get_container_ip(runtime: str, name: str) -> Optional[str]:
-    """Gets the IP address of a running container."""
-    try:
-        # This format handles both the default bridge and custom networks
-        cmd = [runtime, "inspect", name, "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}{{.NetworkSettings.IPAddress}}"]
-        result = subprocess.check_output(cmd, text=True, timeout=5).strip()
-        if result and result != "0.0.0.0":
-            # Split in case multiple IPs are returned and take the first valid one
-            ips = [ip for ip in result.split('\n') if ip and ip != "0.0.0.0"]
-            if ips:
-                return ips[0]
-    except Exception:
-        pass
-    return None
 # ─── Main ──────────────────────────────────────────────────────────────────
 
 def main() -> None:
