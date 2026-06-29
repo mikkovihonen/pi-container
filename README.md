@@ -27,6 +27,15 @@ To run this environment comfortably, especially when utilizing the full 128k con
   - **Recommended:** 64 GB or more (For optimal performance)
 - **Storage:** 50 GB of available SSD space.
 
+## Project Structure
+
+- `pi-coding-agent/`: Main agent container definition and entrypoint.
+- `pi-coding-agent-proxy/`: A Debian-based router container that routes traffic via [mitmproxy](https://mitmproxy.org/) to allow traffic monitoring.
+- `llama-server/`: Directory for `llama.cpp` server components (models, templates, logs).
+- `src/`: Python source code for the build and run utilities.
+- `build.sh`: Script to build the container images.
+- `run.sh`: Script to manage the environment lifecycle.
+
 ## Getting Started
 
 ### 1. Build the Container Image
@@ -60,6 +69,10 @@ Once the server is ready, you can interact with the agent through the terminal. 
 
 Agent looks for `.pi/dependencies/apt/packages.txt` under the directory it was started in and prompts the user to install the packages listed in the file.
 
+### 4. Using the Proxy
+
+Web UI is available at 8081. See [pi-coding-agent-proxy/README.md](pi-coding-agent-proxy/README.md) for details.
+
 ## Environment Configuration
 
 The application uses a `.env` file for managing environment-specific settings. To get started, copy the example configuration file to `.env`:
@@ -76,83 +89,9 @@ The following environment variables are used by `run.sh` to configure the contai
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `IMAGE_TAG` | The tag of the container image to run | `pi-coding-agent:local` |
+| `PI_IMAGE_TAG` | The tag of the pi container image to run | `pi-coding-agent:local` |
+| `PROXY_IMAGE_TAG` | The tag of the  proxycontainer image to run | `pi-coding-agent-proxy:local` |
 | `LLAMA_BIN` | Path to the `llama-server` executable | `llama-server` or `/opt/homebrew/bin/llama-server` |
 | `BRIDGE_INTERFACE` | The network interface for the `socat` bridge | `bridge100` |
-
-## Project Structure
-
-### Root Directory
-- `build.sh`: Shell script to build the container image.
-- `run.sh`: Shell script to orchestrate model downloads, `llama-server`, and container execution.
-- `.env.example`: Template for environment variable configuration.
-- `.gitignore`: Specifies files and directories for Git to ignore.
-- `Containerfile`: Defines the container image (Node.js base, Python 3.14, `pi-coding-agent`).
-- `README.md`: Project documentation.
-- `entrypoint.sh`: The script executed when the container starts.
-
-### `pi-home/`
-Contains configuration templates and scripts used by the agent inside the container.
-- `.pi/`: Internal configuration for the `pi-coding-agent`.
-  - `agent/`:
-    - `AGENTS.md`: Agent configuration/documentation.
-    - `auth.json`: Authentication settings.
-    - `config.json`: General agent configuration.
-    - `models.json`: Model and provider configurations.
-    - `settings.json`: Agent settings.
-    - `.pi_ignore`: Internal ignore file used by the agent.
-    - `extensions/`: Directory containing custom agent extensions (e.g., `plan-mode`, `terminal-beautifier`).
-- `.gitconfig`: Git configuration for the container user.
-
-### `src/`
-Python orchestration scripts for managing the container environment.
-- `build.py`: Python version of the build script.
-- `run.py`: Python version of the run script.
-- `util.py`: Common utility functions used by the scripts.
-
-
-
-``` bash
-# ── SETUP ─────────────────────────────────────────────────────────────────────
-
-# Create the isolated internal network
-container network create --internal isolated-net
-
-# Start the proxy container (dual-homed, mitmweb UI proxied by Caddy on port 8082)
-container run -d --rm --name proxy \
-  --network default \
-  --network isolated-net \
-  --cap-add NET_ADMIN \
-  -p 8082:8082 \
-  coding-agent-proxy:local
-
-# Start the source container (isolated network only)
-pi_container_cmd = [
-  container_runtime, "run",
-  "--rm",
-  "--interactive",
-  "--tty",
-  "--network", "isolated-net",
-  "--tmpfs", "/home/pi/",
-  "--volume", f"{REPO_ROOT}/pi-coding-agent/home/.pi:/home/pi/.pi",
-  "--tmpfs", "/home/pi/.pi/agent/bin",
-  "--volume", f"{PROJECT_DIR}:/workspace",
-  "--workdir", "/workspace",
-  "--env", f"LLAMA_PORTS={portconfig}",
-  "--env", f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",
-  IMAGE_TAG,
-  *sys.argv[1:]
-]
-# ── SOURCE CONFIGURATION ──────────────────────────────────────────────────────
-
-# Get the proxy's IP on isolated-net (eth1), e.g. 192.168.65.2
-container exec proxy ip addr show eth1
-
-# Route all source traffic through the proxy (replace IP as needed)
-container exec source ip route replace default via 192.168.65.2
-
-# ── CLEANUP ───────────────────────────────────────────────────────────────────
-
-container stop source proxy
-container network delete isolated-net
-```
+| `LOG_LEVEL` | Log level | `INFO` |
+| `ADMIN_PASSWORD` | Password for mitmproxy Web UI | `bridge100` |
