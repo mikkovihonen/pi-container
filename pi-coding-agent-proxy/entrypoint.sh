@@ -15,6 +15,10 @@ iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 80 -j REDIRECT --to-port 80
 # Redirect HTTPS (443) to mitmproxy (8080)
 iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 443 -j REDIRECT --to-port 8080
 
+# Redirect DNS from isolated-net to mitmproxy's unprivileged DNS port
+iptables -t nat -A PREROUTING -i eth1 -p udp --dport 53 -j REDIRECT --to-port 5353
+iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 53 -j REDIRECT --to-port 5353
+
 # NAT everything else going out eth0 (internet side)
 iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
 iptables -A FORWARD -j ACCEPT

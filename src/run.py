@@ -50,6 +50,7 @@ MAX_STARTUP_ATTEMPTS: int =  int(os.environ.get("MAX_STARTUP_ATTEMPTS", 2))
 MODELS_DIR: Path = REPO_ROOT / "llama-server" / "models"
 LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / "llama-server" / ".locks"
 BRIDGE_INTERFACE: str = os.environ.get("BRIDGE_INTERFACE", "bridge100")
+ADMIN_PASSWORD_HASH: str = os.environ.get('ADMIN_PASSWORD_HASH', '')
 
 # ─── Configuration Dataclasses ───────────────────────────────────────────
 
@@ -146,7 +147,7 @@ class ContainerNetworkManager:
         self.proxy_name: str = proxy_name
 
         # Shared directory for synchronization across different run.py processes
-        self.lock_dir: Path = REPO_ROOT / ".container_network_manager_locks"
+        self.lock_dir: Path = REPO_ROOT / "pi-coding-agent-proxy" / ".locks"
         self.paths: Dict[str, Path] = {
             "lock_dir": self.lock_dir,
             "ref_count_lock": self.lock_dir / ".network_manager.lock",
@@ -218,7 +219,9 @@ class ContainerNetworkManager:
             "--network", "default",
             "--network", self.network_name,
             "--cap-add", "NET_ADMIN",
+            "--dns", "1.1.1.1",
             "-p", "8082:8082",
+            "--env", f"ADMIN_PASSWORD_HASH={ADMIN_PASSWORD_HASH}",
             self.proxy_image
         ], stderr=subprocess.DEVNULL)
 
@@ -606,6 +609,7 @@ def main() -> None:
                     "--rm",
                     "--interactive",
                     "--tty",
+                    "--dns", f"{eth1_ip}",
                     "--cap-add", "NET_ADMIN",
                     "--network", "isolated-net",
                     "--tmpfs", "/home/pi/",

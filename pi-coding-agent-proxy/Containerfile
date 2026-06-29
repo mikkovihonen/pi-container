@@ -1,7 +1,6 @@
-FROM debian:bookworm-slim
+FROM python:3.14.6-slim-trixie
 
 RUN apt-get update && apt-get install -y \
-    mitmproxy \
     iptables \
     iproute2 \
     ca-certificates \
@@ -9,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     caddy \
     expect \
     procps \
+    && pip install mitmproxy \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m mitmproxy
@@ -28,4 +28,4 @@ COPY pi-coding-agent-proxy/Caddyfile /etc/caddy/Caddyfile
 EXPOSE 8080 8082
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["mitmweb", "--mode", "transparent", "--listen-port", "8080", "--web-host", "0.0.0.0"]
+CMD ["mitmweb", "--mode", "transparent@8080", "--mode", "dns@5353", "--web-host", "0.0.0.0"]
