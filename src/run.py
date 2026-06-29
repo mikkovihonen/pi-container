@@ -135,7 +135,102 @@ class Model:
                 logger.exception(f"[Model: {self.label}] Download failed")
                 raise
 
-# ─── Server Class ──────────────────────────────────────────────────────────
+
+# ─── Container Network Manager ───────────────────────────────────────────
+
+class ContainerNetworkManager:
+    def __init__(self, container_runtime: str, network_name: str, proxy_image: str, proxy_name: str = "proxy") -> None:
+        self.container_runtime: str = container_runtime
+        self.network_name: str = network_name
+        self.proxy_image: str = proxy_image
+        self.proxy_name: str = proxy_name
+
+        # Shared directory for synchronization across different run.py processes
+        self.lock_dir: Path = REPO_ROOT / ".container_network_manager_locks"
+        self.paths: Dict[str, Path] = {
+            "lock_dir": self.lock_dir,
+            "ref_count_lock": self.lock_dir / ".network_manager.lock",
+            "ref_count_file": self.lock_dir / ".network_manager.refcount",
+        }
+
+    def __enter__(self) -> 'ContainerNetworkManager':
+        self.start()
+        return self
+
+    def __exit__(self, exc_type: Optional[Type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[Any]) -> None:
+        self.stop()
+
+    def start(self) -> None:
+        self.paths["lock_dir"].mkdir(exist_ok=True, parents=True)
+
+        with self.paths["ref_count_lock"].open("a") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+
+            ref_count = self._get_ref_count()
+            if ref_count == 0:
+                self._actually_start()
+
+            ref_count += 1
+            self.paths["ref_count_file"].write_text(str(ref_count))
+
+    def stop(self) -> None:
+        with self.paths["ref_count_lock"].open("a") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+
+            ref_count = self._get_ref_count()
+            if ref_count <= 1:
+                self._actually_stop()
+                self.paths["ref_count_file"].write_text("0")
+                try:
+                    # Only remove lock_dir if it's empty
+                    if self.paths["lock_dir"].exists() and not any(self.paths["lock_dir"].iterdir()):
+                        self.paths["lock_dir"].rmdir()
+                except OSError:
+                    pass
+            else:
+                ref_count -= 1
+                self.paths["ref_count_file"].write_text(str(ref_count))
+
+    def _get_ref_count(self) -> int:
+        if self.paths["ref_count_file"].exists():
+            try:
+                return int(self.paths["ref_count_file"].read_text().strip())
+            except ValueError:
+                return 0
+        return 0
+
+    def _actually_start(self) -> None:
+        # Create the isolated internal network
+        logger.info(f"Creating network {self.network_name}...")
+        subprocess.run([
+            self.container_runtime,
+            "network",
+            "create",
+            "--internal",
+            self.network_name
+        ], stderr=subprocess.DEVNULL)
+
+        # Start proxy container
+        logger.info(f"Starting proxy container {self.proxy_name} from {self.proxy_image}...")
+        subprocess.run([
+            self.container_runtime,
+            "run", "-d", "--rm", "--name", self.proxy_name,
+            "--network", "default",
+            "--network", self.network_name,
+            "--cap-add", "NET_ADMIN",
+            "-p", "8082:8082",
+            self.proxy_image
+        ], stderr=subprocess.DEVNULL)
+
+        # Wait for proxy to be ready
+        time.sleep(2)
+
+    def _actually_stop(self) -> None:
+        logger.info(f"Stopping proxy container {self.proxy_name}...")
+        subprocess.run([self.container_runtime, "stop", self.proxy_name], stderr=subprocess.DEVNULL)
+
+        logger.info(f"Removing network {self.network_name}...")
+        subprocess.run([self.container_runtime, "network", "delete", self.network_name], stderr=subprocess.DEVNULL)
 
 class Server:
     def __init__(self, config: ServerConfig, models_dir: Path, llama_bin: Optional[str], bridge_interface: str, lock_dir: Path, repo_root: Path, server_id: str, container_port: Optional[int] = None) -> None:
@@ -470,65 +565,70 @@ def main() -> None:
                 [{"cp": server.container_port, "hp": server.port} for server in servers]
             )
 
-            # Create the isolated internal network
-            network_create_command = [
+            with ContainerNetworkManager(
                 container_runtime,
-                "network",
-                "create",
-                "--internal",
-                "isolated-net"
-            ]
-
-            subprocess.Popen(
-                network_create_command
-            )
-
-            proxy_create_command = [
-                container_runtime,
-                "run", "-d", "--rm", "--name", "proxy",
-                "--network", "default",
-                "--network", "isolated-net",
-                "--cap-add", "NET_ADMIN",
-                "-p", "8082:8082",
+                "isolated-net",
                 "pi-coding-agent-proxy:local"
-            ]
+            ) as _:
+                eth1_ip = None
+                gateway_ip = None
+                try:
+                    result_ip = subprocess.run(
+                        [container_runtime, "exec", "proxy", "ip", "addr", "show", "eth1"],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                        timeout=5
+                    )
+                    match_ip = re.search(r'inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+', result_ip.stdout)
+                    if match_ip:
+                        eth1_ip = match_ip.group(1)
+                        logger.info(f"Found eth1 IP address: {eth1_ip}")
 
-            subprocess.Popen(
-                proxy_create_command
-            )
+                    # Get default gateway
+                    result_route = subprocess.run(
+                        [container_runtime, "exec", "proxy", "ip", "route", "show", "default"],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                        timeout=5
+                    )
+                    match_route = re.search(r'default via (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', result_route.stdout)
+                    if match_route:
+                        gateway_ip = match_route.group(1)
+                        logger.info(f"Found proxy default gateway: {gateway_ip}")
 
-            #DEFAULT ROUTE FROM HERE
-            subprocess.Popen(
-                [container_runtime, "exec", "proxy", "ip", "addr", "show", "eth1"]
-            )
+                except Exception as e:
+                    logger.warning(f"Could not retrieve proxy network info: {e}")
 
-            pi_container_cmd = [
-                container_runtime, "run",
-                "--rm",
-                "--interactive",
-                "--tty",
-                #"--network", "isolated-net",
-                "--tmpfs", "/home/pi/",
-                "--volume", f"{REPO_ROOT}/pi-coding-agent/home/.pi:/home/pi/.pi",
-                "--tmpfs", "/home/pi/.pi/agent/bin",
-                "--volume", f"{PROJECT_DIR}:/workspace",
-                "--workdir", "/workspace",
-                #"--env", f"DEFAULT_ROUTE={}", from proxy container
-                "--env", f"LLAMA_PORTS={portconfig}",
-                "--env", f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",
-                IMAGE_TAG,
-                *sys.argv[1:]
-            ]
+                pi_container_cmd = [
+                    container_runtime, "run",
+                    "--rm",
+                    "--interactive",
+                    "--tty",
+                    "--cap-add", "NET_ADMIN",
+                    "--network", "isolated-net",
+                    "--tmpfs", "/home/pi/",
+                    "--volume", f"{REPO_ROOT}/pi-coding-agent/home/.pi:/home/pi/.pi",
+                    "--tmpfs", "/home/pi/.pi/agent/bin",
+                    "--volume", f"{PROJECT_DIR}:/workspace",
+                    "--workdir", "/workspace",
+                ]
 
-            result = subprocess.run(pi_container_cmd)
+                if eth1_ip:
+                    pi_container_cmd.extend(["--env", f"DEFAULT_ROUTE={eth1_ip}"])
+                if gateway_ip:
+                    pi_container_cmd.extend(["--env", f"GATEWAY_IP={gateway_ip}"])
 
-            subprocess.Popen(
-                [container_runtime, "stop", "proxy"]
-            )
+                pi_container_cmd.extend([
+                    "--env", f"LLAMA_PORTS={portconfig}",
+                    "--env", f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",
+                    IMAGE_TAG,
+                    *sys.argv[1:]
+                ])
 
-            subprocess.Popen(
-                [container_runtime, "network", "delete", "isolated-net"]
-            )
+                result = subprocess.run(pi_container_cmd)
+
 
             if result.returncode != 0:
                 sys.exit(result.returncode)

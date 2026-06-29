@@ -12,7 +12,6 @@ fi
 
 ip route replace default via $DEFAULT_ROUTE
 
-export GATEWAY_IP=$(ip route | awk '/default/ {print $3}')
 export PARSED_PAIRS=$(echo "${LLAMA_PORTS:-[]}" | jq -r '.[] | "\(.cp):\(.hp)"')
 
 if [ -n "$HOST_GIT_CONFIG" ]; then
