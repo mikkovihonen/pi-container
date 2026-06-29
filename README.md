@@ -109,3 +109,50 @@ Python orchestration scripts for managing the container environment.
 - `build.py`: Python version of the build script.
 - `run.py`: Python version of the run script.
 - `util.py`: Common utility functions used by the scripts.
+
+
+
+``` bash
+# ── SETUP ─────────────────────────────────────────────────────────────────────
+
+# Create the isolated internal network
+container network create --internal isolated-net
+
+# Start the proxy container (dual-homed, mitmweb UI proxied by Caddy on port 8082)
+container run -d --rm --name proxy \
+  --network default \
+  --network isolated-net \
+  --cap-add NET_ADMIN \
+  -p 8082:8082 \
+  coding-agent-proxy:local
+
+# Start the source container (isolated network only)
+pi_container_cmd = [
+  container_runtime, "run",
+  "--rm",
+  "--interactive",
+  "--tty",
+  "--network", "isolated-net",
+  "--tmpfs", "/home/pi/",
+  "--volume", f"{REPO_ROOT}/pi-coding-agent/home/.pi:/home/pi/.pi",
+  "--tmpfs", "/home/pi/.pi/agent/bin",
+  "--volume", f"{PROJECT_DIR}:/workspace",
+  "--workdir", "/workspace",
+  "--env", f"LLAMA_PORTS={portconfig}",
+  "--env", f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",
+  IMAGE_TAG,
+  *sys.argv[1:]
+]
+# ── SOURCE CONFIGURATION ──────────────────────────────────────────────────────
+
+# Get the proxy's IP on isolated-net (eth1), e.g. 192.168.65.2
+container exec proxy ip addr show eth1
+
+# Route all source traffic through the proxy (replace IP as needed)
+container exec source ip route replace default via 192.168.65.2
+
+# ── CLEANUP ───────────────────────────────────────────────────────────────────
+
+container stop source proxy
+container network delete isolated-net
+```

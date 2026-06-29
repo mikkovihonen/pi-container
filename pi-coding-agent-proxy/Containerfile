@@ -1,0 +1,31 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    mitmproxy \
+    iptables \
+    iproute2 \
+    ca-certificates \
+    gosu \
+    caddy \
+    expect \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m mitmproxy
+
+USER mitmproxy
+WORKDIR /home/mitmproxy
+RUN timeout 3s mitmweb || [ $? -eq 124 ]
+
+USER root
+# Set up entrypoint script
+COPY pi-coding-agent-proxy/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Copy Caddyfile
+COPY pi-coding-agent-proxy/Caddyfile /etc/caddy/Caddyfile
+
+EXPOSE 8080 8082
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["mitmweb", "--mode", "transparent", "--listen-port", "8080", "--web-host", "0.0.0.0"]

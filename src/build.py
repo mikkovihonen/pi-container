@@ -14,20 +14,35 @@ DOTENV_PATH = REPO_ROOT / ".env"
 
 load_dotenv(DOTENV_PATH)
 
-IMAGE_TAG = os.environ.get("IMAGE_TAG", "pi-coding-agent:local")
+PI_IMAGE_TAG = os.environ.get("PI_IMAGE_TAG", "pi-coding-agent:local")
+PROXY_IMAGE_TAG = os.environ.get("PROXY_IMAGE_TAG", "pi-coding-agent-proxy:local")
 
-def main():
-    print(f"Building image: {IMAGE_TAG}")
+def build_proxy():
+    print(f"Building proxy image: {PROXY_IMAGE_TAG}")
+    cmd = [
+        "container", "build",
+        "--tag", PROXY_IMAGE_TAG,
+        "--file", str(REPO_ROOT / "pi-coding-agent-proxy" / "Containerfile"),
+        str(REPO_ROOT)
+    ]
+    subprocess.run(cmd, check=True)
+
+def build_agent():
+    print(f"Building agent image: {PI_IMAGE_TAG}")
 
     cmd = [
         "container", "build",
-        "--tag", IMAGE_TAG,
+        "--tag", PI_IMAGE_TAG,
         "--file", str(REPO_ROOT / "pi-coding-agent" / "Containerfile"),
         str(REPO_ROOT)
     ]
 
+    subprocess.run(cmd, check=True)
+
+def main():
     try:
-        subprocess.run(cmd, check=True)
+        build_proxy()
+        build_agent()
     except subprocess.CalledProcessError as e:
         print(f"Build failed: {e}")
         sys.exit(1)

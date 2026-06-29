@@ -470,23 +470,66 @@ def main() -> None:
                 [{"cp": server.container_port, "hp": server.port} for server in servers]
             )
 
-            container_cmd = [
+            # Create the isolated internal network
+            network_create_command = [
+                container_runtime,
+                "network",
+                "create",
+                "--internal",
+                "isolated-net"
+            ]
+
+            subprocess.Popen(
+                network_create_command
+            )
+
+            proxy_create_command = [
+                container_runtime,
+                "run", "-d", "--rm", "--name", "proxy",
+                "--network", "default",
+                "--network", "isolated-net",
+                "--cap-add", "NET_ADMIN",
+                "-p", "8082:8082",
+                "pi-coding-agent-proxy:local"
+            ]
+
+            subprocess.Popen(
+                proxy_create_command
+            )
+
+            #DEFAULT ROUTE FROM HERE
+            subprocess.Popen(
+                [container_runtime, "exec", "proxy", "ip", "addr", "show", "eth1"]
+            )
+
+            pi_container_cmd = [
                 container_runtime, "run",
                 "--rm",
                 "--interactive",
                 "--tty",
+                #"--network", "isolated-net",
                 "--tmpfs", "/home/pi/",
                 "--volume", f"{REPO_ROOT}/pi-coding-agent/home/.pi:/home/pi/.pi",
                 "--tmpfs", "/home/pi/.pi/agent/bin",
                 "--volume", f"{PROJECT_DIR}:/workspace",
                 "--workdir", "/workspace",
+                #"--env", f"DEFAULT_ROUTE={}", from proxy container
                 "--env", f"LLAMA_PORTS={portconfig}",
                 "--env", f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",
                 IMAGE_TAG,
                 *sys.argv[1:]
             ]
 
-            result = subprocess.run(container_cmd)
+            result = subprocess.run(pi_container_cmd)
+
+            subprocess.Popen(
+                [container_runtime, "stop", "proxy"]
+            )
+
+            subprocess.Popen(
+                [container_runtime, "network", "delete", "isolated-net"]
+            )
+
             if result.returncode != 0:
                 sys.exit(result.returncode)
 

@@ -10,6 +10,8 @@ if [ -f /workspace/.pi/dependencies/apt/packages.txt ]; then
     }  >/dev/null 2>&1
 fi
 
+ip route replace default via $DEFAULT_ROUTE
+
 export GATEWAY_IP=$(ip route | awk '/default/ {print $3}')
 export PARSED_PAIRS=$(echo "${LLAMA_PORTS:-[]}" | jq -r '.[] | "\(.cp):\(.hp)"')
 

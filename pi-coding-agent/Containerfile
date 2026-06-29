@@ -38,6 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ripgrep \
     ca-certificates \
+    openssl \
     iproute2 \
     locales \
     libssl3 \
@@ -83,6 +84,10 @@ ENV VIRTUAL_ENV=/home/pi/.venv
 ENV UV_PROJECT_ENVIRONMENT=/home/pi/.venv
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
+
+RUN mkdir -p /usr/local/share/ca-certificates/extra
+COPY --from=pi-coding-agent-proxy:local /home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.pem
+RUN openssl x509 -in /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.pem -inform PEM -out /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.crt && update-ca-certificates
 
 WORKDIR /workspace
 

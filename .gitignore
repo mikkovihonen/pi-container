@@ -32,5 +32,5 @@ pi-coding-agent/home/.pi/agent/bin
 pi-coding-agent/home/.pi/agent/sessions
 
 # Proxy
-transparent-proxy/logs
-transparent-proxy/logs/**
+pi-coding-agent-proxy/logs
+pi-coding-agent-proxy/logs/**

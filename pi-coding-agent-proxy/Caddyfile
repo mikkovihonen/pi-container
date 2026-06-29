@@ -1,0 +1,6 @@
+:8082 {
+    basicauth {
+        admin $ADMIN_PASSWORD_HASH
+    }
+    reverse_proxy localhost:8081
+}
