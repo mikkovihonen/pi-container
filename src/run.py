@@ -50,7 +50,7 @@ MAX_STARTUP_ATTEMPTS: int =  int(os.environ.get("MAX_STARTUP_ATTEMPTS", 2))
 MODELS_DIR: Path = REPO_ROOT / "llama-server" / "models"
 LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / "llama-server" / ".locks"
 BRIDGE_INTERFACE: str = os.environ.get("BRIDGE_INTERFACE", "bridge100")
-ADMIN_PASSWORD_HASH: str = os.environ.get('ADMIN_PASSWORD_HASH', '')
+ADMIN_PASSWORD: str = os.environ.get('ADMIN_PASSWORD', '')
 
 # ─── Configuration Dataclasses ───────────────────────────────────────────
 
@@ -175,22 +175,26 @@ class ContainerNetworkManager:
             self.paths["ref_count_file"].write_text(str(ref_count))
 
     def stop(self) -> None:
+        should_full_cleanup = False
         with self.paths["ref_count_lock"].open("a") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
             ref_count = self._get_ref_count()
             if ref_count <= 1:
                 self._actually_stop()
-                self.paths["ref_count_file"].write_text("0")
-                try:
-                    # Only remove lock_dir if it's empty
-                    if self.paths["lock_dir"].exists() and not any(self.paths["lock_dir"].iterdir()):
-                        self.paths["lock_dir"].rmdir()
-                except OSError:
-                    pass
+                should_full_cleanup = True
             else:
                 ref_count -= 1
                 self.paths["ref_count_file"].write_text(str(ref_count))
+
+        if should_full_cleanup:
+            self.paths["ref_count_file"].unlink(missing_ok=True)
+            try:
+                self.paths["ref_count_lock"].unlink(missing_ok=True)
+                if self.paths["lock_dir"].exists() and not any(self.paths["lock_dir"].iterdir()):
+                    self.paths["lock_dir"].rmdir()
+            except OSError:
+                pass
 
     def _get_ref_count(self) -> int:
         if self.paths["ref_count_file"].exists():
@@ -209,7 +213,7 @@ class ContainerNetworkManager:
             "create",
             "--internal",
             self.network_name
-        ], stderr=subprocess.DEVNULL)
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Start proxy container
         logger.info(f"Starting proxy container {self.proxy_name} from {self.proxy_image}...")
@@ -220,20 +224,20 @@ class ContainerNetworkManager:
             "--network", self.network_name,
             "--cap-add", "NET_ADMIN",
             "--dns", "1.1.1.1",
-            "-p", "8082:8082",
-            "--env", f"ADMIN_PASSWORD_HASH={ADMIN_PASSWORD_HASH}",
+            "-p", "8081:8081",
+            "--env", f"ADMIN_PASSWORD={ADMIN_PASSWORD}",
             self.proxy_image
-        ], stderr=subprocess.DEVNULL)
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Wait for proxy to be ready
         time.sleep(2)
 
     def _actually_stop(self) -> None:
         logger.info(f"Stopping proxy container {self.proxy_name}...")
-        subprocess.run([self.container_runtime, "stop", self.proxy_name], stderr=subprocess.DEVNULL)
+        subprocess.run([self.container_runtime, "stop", self.proxy_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         logger.info(f"Removing network {self.network_name}...")
-        subprocess.run([self.container_runtime, "network", "delete", self.network_name], stderr=subprocess.DEVNULL)
+        subprocess.run([self.container_runtime, "network", "delete", self.network_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 class Server:
     def __init__(self, config: ServerConfig, models_dir: Path, llama_bin: Optional[str], bridge_interface: str, lock_dir: Path, repo_root: Path, server_id: str, container_port: Optional[int] = None) -> None:

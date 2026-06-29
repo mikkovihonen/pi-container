@@ -27,4 +27,6 @@ iptables -A FORWARD -j ACCEPT
 caddy run --config /etc/caddy/Caddyfile --adapter caddyfile &
 
 # Execute the CMD as mitmproxy user
-exec gosu mitmproxy "$@"
+exec gosu mitmproxy bash -c '
+    mitmweb --mode transparent@8080 --mode dns@5353 --web-host 0.0.0.0 --set web_password=$ADMIN_PASSWORD
+' -- "$@"

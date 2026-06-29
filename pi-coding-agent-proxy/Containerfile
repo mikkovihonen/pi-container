@@ -5,7 +5,6 @@ RUN apt-get update && apt-get install -y \
     iproute2 \
     ca-certificates \
     gosu \
-    caddy \
     expect \
     procps \
     && pip install mitmproxy \
@@ -22,10 +21,6 @@ USER root
 COPY pi-coding-agent-proxy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Copy Caddyfile
-COPY pi-coding-agent-proxy/Caddyfile /etc/caddy/Caddyfile
-
-EXPOSE 8080 8082
+EXPOSE 8080 8081
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["mitmweb", "--mode", "transparent@8080", "--mode", "dns@5353", "--web-host", "0.0.0.0"]
