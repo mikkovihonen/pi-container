@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional, Type
 import contextlib
 from huggingface_hub import hf_hub_download
 from dataclasses import dataclass
+import yaml
+
 from util import (
     load_dotenv,
     validate_environment,
@@ -51,6 +53,12 @@ MODELS_DIR: Path = REPO_ROOT / "llama-server" / "models"
 LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / "llama-server" / ".locks"
 ADMIN_PASSWORD: str = os.environ.get('ADMIN_PASSWORD', '')
 
+# Directory on the host where the proxy container's config files live.
+# The token_replacer config is mounted into the container at runtime so that
+# run.py can scan it for ${ENV:...} references and pull required secrets
+# from the host secret store.
+CONFIG_DIR: Path = REPO_ROOT / ".pi-container"
+
 try:
     CONTAINER_RUNTIME = validate_environment(LLAMA_BIN)
 except EnvironmentError as e:
@@ -75,6 +83,42 @@ if not os.environ.get("BRIDGE_INTERFACE"):
     BRIDGE_INTERFACE = _runtime_default_bridge_interface.get(CONTAINER_RUNTIME, BRIDGE_INTERFACE)
 if not os.environ.get("PROXY_UPSTREAM_NETWORK"):
     PROXY_UPSTREAM_NETWORK = _proxy_default_upstream_network.get(CONTAINER_RUNTIME, "default")
+
+
+# ─── Token Replacer Config Scanner (duplicated from pi-coding-agent-proxy/addons/token_replacer)
+#
+# run.py lives outside pi-coding-agent-proxy and must not import from it.
+# This function is duplicated here so run.py can scan the host-side token
+# replacer config for ${ENV:VAR} references and pull required secrets from
+# the host environment / secret store before launching the container.
+#
+# Source of truth: addons/token_replacer/token_replacer.py
+# ──────────────────────────────────────────────────────────────────────────
+
+_TOKEN_REPLACER_ENV_VAR_REQUIRED_PATTERN = re.compile(r"^\$\{ENV:([^,}]+)\}$")
+
+
+def scan_config_env_refs(config: dict) -> list[str]:
+    """Scan a parsed config dict for required env-var references.
+
+    Finds all ``${ENV:VAR}`` references (no default value) in
+    ``replace_with.value`` fields across every rule. These are the values
+    the host must pull from a secret store before launching the container.
+
+    Args:
+        config: The parsed YAML config dict (as returned by ``yaml.safe_load``).
+
+    Returns:
+        A deduplicated, sorted list of env var names that are required.
+    """
+    refs: set[str] = set()
+    for rule in config.get("rules", []):
+        replace = rule.get("replace_with", {}) or {}
+        value = replace.get("value", "")
+        m = _TOKEN_REPLACER_ENV_VAR_REQUIRED_PATTERN.match(str(value))
+        if m:
+            refs.add(m.group(1))
+    return sorted(refs)
 
 
 # ─── Configuration Dataclasses ───────────────────────────────────────────
@@ -180,11 +224,19 @@ class Model:
 # ─── Container Network Manager ───────────────────────────────────────────
 
 class ContainerNetworkManager:
-    def __init__(self, container_runtime: str, network_name: str, proxy_image: str, proxy_name: str = "proxy") -> None:
+    def __init__(
+        self,
+        container_runtime: str,
+        network_name: str,
+        proxy_image: str,
+        proxy_name: str = "proxy",
+        config_dir: Optional[Path] = None,
+    ) -> None:
         self.container_runtime: str = container_runtime
         self.network_name: str = network_name
         self.proxy_image: str = proxy_image
         self.proxy_name: str = proxy_name
+        self.config_dir: Path = config_dir or CONFIG_DIR
 
         # Shared directory for synchronization across different run.py processes
         self.lock_dir: Path = REPO_ROOT / "pi-coding-agent-proxy" / ".locks"
@@ -193,6 +245,52 @@ class ContainerNetworkManager:
             "ref_count_lock": self.lock_dir / ".network_manager.lock",
             "ref_count_file": self.lock_dir / ".network_manager.refcount",
         }
+
+    def _pull_secrets_from_config(self) -> Dict[str, str]:
+        """Pull secrets required by the mounted token_replacer config.
+
+        Scans the config file for ``${ENV:VAR}`` references (no default value)
+        in ``replace_with.value`` fields, then resolves each one from the host
+        environment. Returns a dict of var_name -> value for non-empty values.
+
+        Override this method to integrate with a host secret store
+        (Vault, AWS Secrets Manager, Azure Key Vault, etc.).
+        """
+        config_path = self.config_dir / "token_replacer.yaml"
+        if not config_path.exists():
+            logger.warning(
+                f"Token replacer config not found at {config_path}; "
+                f"no secrets will be injected into the proxy container."
+            )
+            return {}
+
+        with config_path.open("r") as f:
+            config = yaml.safe_load(f) or {}
+
+        required_vars = scan_config_env_refs(config)
+        if not required_vars:
+            logger.info("No required env-var secrets found in token replacer config.")
+            return {}
+
+        secrets: Dict[str, str] = {}
+        for var in required_vars:
+            value = os.environ.get(var, "")
+            if value:
+                secrets[var] = value
+            else:
+                logger.warning(
+                    f"Required secret '{var}' (referenced by token replacer config) "
+                    f"is not set in the host environment. The container will use "
+                    f"the config's fallback default, if any."
+                )
+        return secrets
+
+    def _env_flags(self, secrets: Dict[str, str]) -> List[str]:
+        """Convert a secrets dict into ``--env KEY=VALUE`` flag pairs."""
+        flags: List[str] = []
+        for k, v in sorted(secrets.items()):
+            flags.extend(["--env", f"{k}={v}"])
+        return flags
 
     def __enter__(self) -> 'ContainerNetworkManager':
         self.start()
@@ -255,9 +353,12 @@ class ContainerNetworkManager:
             self.network_name
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+        # Pull secrets required by the mounted token_replacer config
+        secrets = self._pull_secrets_from_config()
+
         # Start proxy container
         logger.info(f"Starting proxy container {self.proxy_name} from {self.proxy_image}...")
-        subprocess.run([
+        cmd = [
             self.container_runtime,
             "run", "-d", "--rm", "--name", self.proxy_name,
             "--network", PROXY_UPSTREAM_NETWORK,
@@ -266,8 +367,12 @@ class ContainerNetworkManager:
             "--dns", "1.1.1.1",
             "-p", "8081:8081",
             "--env", f"ADMIN_PASSWORD={ADMIN_PASSWORD}",
-            self.proxy_image
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            "--volume",
+            f"{self.config_dir / 'token_replacer.yaml'}:/home/mitmproxy/config/token_replacer.yaml:ro",
+            *self._env_flags(secrets),
+            self.proxy_image,
+        ]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Wait for proxy to be ready
         time.sleep(2)
@@ -612,7 +717,8 @@ def main() -> None:
             with ContainerNetworkManager(
                 CONTAINER_RUNTIME,
                 "isolated-net",
-                "pi-coding-agent-proxy:local"
+                "pi-coding-agent-proxy:local",
+                config_dir=CONFIG_DIR,
             ) as _:
                 eth1_ip = None
                 gateway_ip = None

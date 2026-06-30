@@ -46,7 +46,7 @@ The replacement is only applied when **both** conditions match:
 | Component | File | Description |
 |-----------|------|-------------|
 | Addon | `token_replacer.py` | Everything: matchers, rule engine, config loading |
-| Config | `token_replacer_config.yaml` | YAML rules: hostnames, content patterns, replacements |
+| Config | `token_replacer.yaml` | YAML rules: hostnames, content patterns, replacements |
 | Tests | `tests/test_token_replacer.py` | 61 unit tests covering all replacement paths |
 
 ### Replacing Sensitive Values from Environment Variables
@@ -79,7 +79,7 @@ Resolution happens at config load time — matchers always receive plain strings
 
 > **Security note:** Environment variables are already accessible to the process. This feature simply avoids hardcoding secret values in YAML files that may be committed to version control.
 
-### Configuration Format (`token_replacer_config.yaml`)
+### Configuration Format (`token_replacer.yaml`)
 
 ```yaml
 # Global settings
@@ -206,8 +206,6 @@ The token_replacer addon is loaded as a mitmproxy script via the `scripts` optio
 ```dockerfile
 COPY pi-coding-agent-proxy/addons/token_replacer/token_replacer.py \
      /home/mitmproxy/scripts/token_replacer.py
-COPY pi-coding-agent-proxy/addons/token_replacer/token_replacer_config.yaml \
-     /home/mitmproxy/config/token_replacer_config.yaml
 ```
 
 #### Step 2: Load the script via `--set scripts`
@@ -224,7 +222,7 @@ The `scripts` option accepts a list of script paths. mitmproxy loads each script
 
 #### Step 3 (optional): Configure via environment variable
 
-By default, the addon looks for its configuration at the path specified in the `token_replacer_config.yaml` file alongside `token_replacer.py`. You can override this via the `TOKEN_REPLACER_CONFIG_PATH` environment variable:
+By default, the addon looks for its configuration at the path specified in the `token_replacer.yaml` file alongside `token_replacer.py`. You can override this via the `TOKEN_REPLACER_CONFIG_PATH` environment variable:
 
 ```bash
 mitmweb --set scripts=/home/mitmproxy/scripts/token_replacer.py \

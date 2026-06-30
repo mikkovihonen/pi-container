@@ -29,6 +29,7 @@ from token_replacer import (
     _resolve_env_refs,
     _strip_port,
     _validate_rule,
+    scan_config_env_refs,
     HeaderMatcher,
     JsonBodyMatcher,
     RawBodyMatcher,
@@ -2148,3 +2149,118 @@ class TestResolveEnvRefs:
 
         with pytest.raises(KeyError, match="MISSING_REQUIRED_E2E"):
             TokenReplacerAddon(str(config_file))
+
+
+# ---------------------------------------------------------------------------
+# scan_config_env_refs tests
+# ---------------------------------------------------------------------------
+
+
+class TestScanConfigEnvRefs:
+    def test_required_env_var(self):
+        config = {
+            "rules": [
+                {"replace_with": {"value": "${ENV:API_KEY}"}},
+            ]
+        }
+        assert scan_config_env_refs(config) == ["API_KEY"]
+
+    def test_env_var_with_default_not_required(self):
+        config = {
+            "rules": [
+                {"replace_with": {"value": "${ENV:OPTIONAL,default}"}},
+            ]
+        }
+        assert scan_config_env_refs(config) == []
+
+    def test_literal_value_not_required(self):
+        config = {
+            "rules": [
+                {"replace_with": {"value": "REDACTED_TOKEN"}},
+            ]
+        }
+        assert scan_config_env_refs(config) == []
+
+    def test_empty_value_not_required(self):
+        config = {
+            "rules": [
+                {"replace_with": {"value": ""}},
+            ]
+        }
+        assert scan_config_env_refs(config) == []
+
+    def test_multiple_rules_deduplication(self):
+        config = {
+            "rules": [
+                {"replace_with": {"value": "${ENV:KEY_A}"}},
+                {"replace_with": {"value": "${ENV:KEY_B}"}},
+                {"replace_with": {"value": "${ENV:KEY_A}"}},  # duplicate
+            ]
+        }
+        assert scan_config_env_refs(config) == ["KEY_A", "KEY_B"]
+
+    def test_no_rules(self):
+        assert scan_config_env_refs({}) == []
+        assert scan_config_env_refs({"global": {}}) == []
+        assert scan_config_env_refs({"rules": []}) == []
+
+    def test_missing_replace_with(self):
+        config = {
+            "rules": [
+                {"name": "no_replace"},
+            ]
+        }
+        assert scan_config_env_refs(config) == []
+
+    def test_replace_with_none(self):
+        config = {
+            "rules": [
+                {"replace_with": None},
+            ]
+        }
+        assert scan_config_env_refs(config) == []
+
+    def test_sorted_output(self):
+        config = {
+            "rules": [
+                {"replace_with": {"value": "${ENV:ZEBRA}"}},
+                {"replace_with": {"value": "${ENV:ALPHA}"}},
+                {"replace_with": {"value": "${ENV:MIDDLE}"}},
+            ]
+        }
+        assert scan_config_env_refs(config) == ["ALPHA", "MIDDLE", "ZEBRA"]
+
+    def test_partial_match_does_not_match(self):
+        config = {
+            "rules": [
+                {"replace_with": {"value": "prefix${ENV:KEY}"}},
+                {"replace_with": {"value": "${ENV:KEY}suffix"}},
+                {"replace_with": {"value": "${ENV:}"}},
+            ]
+        }
+        assert scan_config_env_refs(config) == []
+
+    def test_real_config_example(self):
+        """Scan the actual example config — should find REDACTION_TOKEN."""
+        config = {
+            "global": {"log_replacements": True, "dry_run": False},
+            "rules": [
+                {"replace_with": {"strategy": "static", "value": "REDACTED_API_KEY"}},
+                {"replace_with": {"strategy": "hash", "value": "ignored"}},
+                {"replace_with": {"strategy": "uuid", "value": "ignored"}},
+                {"replace_with": {"strategy": "static", "value": "REDACTED_JWT"}},
+                {"replace_with": {"strategy": "static", "value": "${ENV:REDACTION_TOKEN,REDACTED_TOKEN}"}},
+            ],
+        }
+        assert scan_config_env_refs(config) == []
+
+    def test_real_config_with_required_secret(self):
+        """Scan config where one rule has a required (no-default) env var."""
+        config = {
+            "global": {"log_replacements": True, "dry_run": False},
+            "rules": [
+                {"replace_with": {"strategy": "static", "value": "REDACTED"}},
+                {"replace_with": {"strategy": "static", "value": "${ENV:REDACTION_TOKEN}"}},
+            ],
+        }
+        assert scan_config_env_refs(config) == ["REDACTION_TOKEN"]

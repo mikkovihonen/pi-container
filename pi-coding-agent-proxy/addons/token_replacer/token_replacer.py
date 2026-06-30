@@ -82,6 +82,48 @@ def _resolve_env_refs(value: str) -> str:
     return env_val
 
 
+# ---------------------------------------------------------------------------
+# Config scanning (host-side secret store integration)
+# ---------------------------------------------------------------------------
+
+_ENV_VAR_REQUIRED_PATTERN = re.compile(r"^\$\{ENV:([^,}]+)\}$")
+
+
+def scan_config_env_refs(config: dict) -> list[str]:
+    """Scan a parsed config dict for required env-var references.
+
+    Finds all ``${ENV:VAR}`` references (no default value) in
+    ``replace_with.value`` fields across every rule. These are the values
+    the host must pull from a secret store before launching the container.
+
+    Args:
+        config: The parsed YAML config dict (as returned by ``yaml.safe_load``).
+
+    Returns:
+        A deduplicated list of env var names that are required by the config.
+        The order is deterministic (sorted) so callers can produce stable
+        ``--env`` flags.
+
+    Examples:
+        >>> scan_config_env_refs({
+        ...     "rules": [
+        ...         {"replace_with": {"value": "${ENV:API_KEY}"}},
+        ...         {"replace_with": {"value": "${ENV:SECRET,fallback}"}},
+        ...         {"replace_with": {"value": "literal"}},
+        ...     ]
+        ... })
+        ['API_KEY']
+    """
+    refs: set[str] = set()
+    for rule in config.get("rules", []):
+        replace = rule.get("replace_with", {}) or {}
+        value = replace.get("value", "")
+        m = _ENV_VAR_REQUIRED_PATTERN.match(str(value))
+        if m:
+            refs.add(m.group(1))
+    return sorted(refs)
+
+
 def _matches_hostname(hostname: str, patterns: list[str]) -> bool:
     """Check if hostname matches any of the patterns.
 
@@ -1023,7 +1065,7 @@ import os
 
 _config_path = os.environ.get(
     "TOKEN_REPLACER_CONFIG_PATH",
-    os.path.join(os.path.dirname(__file__), "token_replacer_config.yaml"),
+    os.path.join(os.path.dirname(__file__), "token_replace.yaml"),
 )
 
 addon = TokenReplacerAddon(config_path=_config_path)

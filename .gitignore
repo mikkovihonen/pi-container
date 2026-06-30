@@ -13,6 +13,8 @@ __pycache__/
 .venv
 env/
 venv/
+.pytest_cache
+.pytest_cache/**
 
 # Node
 .npm
@@ -30,6 +32,10 @@ pi-coding-agent/logs
 pi-coding-agent/logs/**
 pi-coding-agent/home/.pi/agent/bin
 pi-coding-agent/home/.pi/agent/sessions
+
+# pi-container
+.pi-container
+.pi-container/**
 
 # Proxy
 pi-coding-agent-proxy/.locks
