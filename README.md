@@ -94,4 +94,4 @@ The following environment variables are used by `run.sh` to configure the contai
 | `LLAMA_BIN` | Path to the `llama-server` executable | `llama-server` or `/opt/homebrew/bin/llama-server` |
 | `BRIDGE_INTERFACE` | The network interface for the `socat` bridge | `bridge100` |
 | `LOG_LEVEL` | Log level | `INFO` |
-| `ADMIN_PASSWORD` | Password for mitmproxy Web UI | `bridge100` |
+| `ADMIN_PASSWORD` | Password for mitmproxy Web UI | `password` |

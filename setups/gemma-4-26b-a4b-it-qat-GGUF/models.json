@@ -15,8 +15,8 @@
         },
         "models": [
             {
-                "id": "ornith-1.0-35b-Q6_K",
-                "name": "ornith-1.0-35b-Q6_K",
+                "id": "gemma-4-26b-a4b-it-qat-ud-q4-k-xl",
+                "name": "gemma-4-26b-a4b-it-qat-ud-q4-k-xl",
                 "contextWindow": 131072,
                 "compactionThreshold": 128000,
                 "maxTokens": 4096,
@@ -24,6 +24,13 @@
                 "toolCalling": true,
                 "vision": true,
                 "reasoning": true,
+                "thinkingLevelMap": {
+                    "minimal": "MINIMAL",
+                    "low": null,
+                    "medium": null,
+                    "high": "HIGH",
+                    "xhigh": null
+                },
                 "thinkingFormat": "chat-template",
                 "chat_template_kwargs": {
                     "$var": "thinking.effort"
@@ -41,9 +48,27 @@
             "hfModels": {
                 "main": {
                     "fileFlag": "--model",
-                    "repo": "deepreinforce-ai/Ornith-1.0-35B-GGUF",
-                    "file": "ornith-1.0-35b-Q6_K.gguf",
-                    "dir":"Ornith-1.0-35B-GGUF",
+                    "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+                    "file": "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+                    "dir":"gemma-4-26B-A4B-it-qat-GGUF",
+                    "additionalServerFlags": []
+                },
+                "draft": {
+                    "fileFlag": "--model-draft",
+                    "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+                    "file": "mtp-gemma-4-26B-A4B-it.gguf",
+                    "dir":"gemma-4-26B-A4B-it-qat-GGUF",
+                    "additionalServerFlags": [
+                        "--spec-type", "draft-mtp",
+                        "--spec-draft-n-min", 1,
+                        "--spec-draft-n-max", 4
+                    ]
+                },
+                "mmproj": {
+                    "fileFlag": "--mmproj",
+                    "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+                    "file": "mmproj-F16.gguf",
+                    "dir":"gemma-4-26B-A4B-it-qat-GGUF",
                     "additionalServerFlags": []
                 }
             },
@@ -64,9 +89,9 @@
                 "--top_p", 0.95,
                 "--top_k", 64,
                 "--prio", 2,
-                "--cache-ram", 4096,
+                "--cache-ram", 8192,
                 "--jinja",
-                "--chat-template-file", "llama-server/chat-templates/Ornith-1.0-35B-FP8/chat_template.jinja",
+                "--chat-template-file", "llama-server/chat-templates/gemma-4-26B-A4B-it/chat_template.jinja",
                 "--chat-template-kwargs", "{\"enable_thinking\":true}",
                 "--n-gpu-layers", 999
             ]
