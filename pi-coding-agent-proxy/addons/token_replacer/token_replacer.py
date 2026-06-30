@@ -1065,7 +1065,7 @@ import os
 
 _config_path = os.environ.get(
     "TOKEN_REPLACER_CONFIG_PATH",
-    os.path.join(os.path.dirname(__file__), "token_replace.yaml"),
+    os.path.join(os.path.dirname(__file__), "token_replacer.yaml"),
 )
 
 addon = TokenReplacerAddon(config_path=_config_path)

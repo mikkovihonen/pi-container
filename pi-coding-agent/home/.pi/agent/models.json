@@ -44,7 +44,8 @@
                     "repo": "deepreinforce-ai/Ornith-1.0-35B-GGUF",
                     "file": "ornith-1.0-35b-Q6_K.gguf",
                     "dir":"Ornith-1.0-35B-GGUF",
-                    "additionalServerFlags": []
+                    "additionalServerFlags": [],
+                    "sha256": ""  
                 }
             },
             "flags":[

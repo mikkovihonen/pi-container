@@ -53,6 +53,13 @@ MODELS_DIR: Path = REPO_ROOT / "llama-server" / "models"
 LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / "llama-server" / ".locks"
 ADMIN_PASSWORD: str = os.environ.get('ADMIN_PASSWORD', '')
 
+if not ADMIN_PASSWORD or ADMIN_PASSWORD == 'CHANGEME':
+    logger.error(
+        "ERROR: ADMIN_PASSWORD must be set to a non-default value. "
+        "Update .env with a strong password before running."
+    )
+    sys.exit(1)
+
 # Directory on the host where the proxy container's config files live.
 # The token_replacer config is mounted into the container at runtime so that
 # run.py can scan it for ${ENV:...} references and pull required secrets
@@ -130,6 +137,7 @@ class ModelConfig:
     file: str
     directory: Path
     additional_server_flags: List[Any]
+    sha256: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ModelConfig':
@@ -138,7 +146,8 @@ class ModelConfig:
             repo=data["repo"],
             file=data["file"],
             directory=Path(data["dir"]),
-            additional_server_flags=data.get("additionalServerFlags", [])
+            additional_server_flags=data.get("additionalServerFlags", []),
+            sha256=data.get("sha256"),
         )
 
 @dataclass(frozen=True)
@@ -168,6 +177,34 @@ class Model:
     @property
     def path(self) -> Path:
         return self.models_dir / self.config.directory / self.config.file
+
+    def _verify_sha256(self) -> None:
+        """Verify the downloaded model file against its expected SHA256 hash.
+
+        Raises:
+            ValueError: If the hash does not match or no expected hash is set.
+        """
+        if not self.config.sha256:
+            logger.warning(
+                f"[Model: {self.label}] No SHA256 checksum configured for "
+                f"{self.config.repo}:{self.config.file}. Skipping integrity check."
+            )
+            return
+
+        logger.info(f"[Model: {self.label}] Verifying SHA256 checksum...")
+        sha256_hash = hashlib.sha256()
+        with self.path.open("rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256_hash.update(chunk)
+        computed = sha256_hash.hexdigest()
+
+        if computed.lower() != self.config.sha256.lower():
+            raise ValueError(
+                f"[Model: {self.label}] SHA256 mismatch for {self.config.file}: "
+                f"expected {self.config.sha256}, got {computed}. "
+                f"The model file may be corrupted or tampered with."
+            )
+        logger.info(f"[Model: {self.label}] SHA256 verification passed.")
 
     def download(self) -> None:
         if self.path.exists():
@@ -201,6 +238,9 @@ class Model:
                     local_dir_use_symlinks=False
                 )
                 logger.info(f"[Model: {self.label}] Download complete.")
+
+            # Verify integrity after download
+            self._verify_sha256()
         finally:
             lock_file_path.unlink(missing_ok=True)
 
@@ -343,15 +383,23 @@ class ContainerNetworkManager:
         return 0
 
     def _actually_start(self) -> None:
-        # Create the isolated internal network
-        logger.info(f"Creating network {self.network_name}...")
-        subprocess.run([
-            self.container_runtime,
-            "network",
-            "create",
-            "--internal",
-            self.network_name
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Create the isolated internal network (skip if it already exists)
+        logger.info(f"Checking network {self.network_name}...")
+        result = subprocess.run(
+            [self.container_runtime, "network", "inspect", self.network_name],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            logger.info(f"Creating network {self.network_name}...")
+            subprocess.run([
+                self.container_runtime,
+                "network",
+                "create",
+                "--internal",
+                self.network_name
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            logger.info(f"Network {self.network_name} already exists, skipping creation.")
 
         # Pull secrets required by the mounted token_replacer config
         secrets = self._pull_secrets_from_config()
@@ -374,8 +422,8 @@ class ContainerNetworkManager:
         ]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # Wait for proxy to be ready
-        time.sleep(2)
+        # Wait for proxy to be ready via health probe
+        self._wait_for_proxy_health(timeout=30)
 
     def _actually_stop(self) -> None:
         logger.info(f"Stopping proxy container {self.proxy_name}...")
@@ -383,6 +431,37 @@ class ContainerNetworkManager:
 
         logger.info(f"Removing network {self.network_name}...")
         subprocess.run([self.container_runtime, "network", "delete", self.network_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _wait_for_proxy_health(self, timeout: int = 30) -> None:
+        """Wait for the proxy container's mitmweb UI to become healthy.
+
+        Polls the mitmweb HTTP endpoint every 2 seconds until a response is
+        received (any status code means the container is alive and responding).
+
+        Raises:
+            RuntimeError: If the proxy does not become healthy within timeout.
+        """
+        url = "http://127.0.0.1:8081"
+        elapsed = 0
+        while elapsed < timeout:
+            try:
+                resp = urllib.request.urlopen(url, timeout=2)
+                logger.info(f"Proxy container is healthy ({elapsed}s)")
+                return
+            except urllib.error.HTTPError as e:
+                # HTTP error means the server is alive, just returning a status code
+                if 400 <= e.code < 500:
+                    logger.info(f"Proxy container is healthy (HTTP {e.code})")
+                    return
+            except Exception:
+                pass
+            time.sleep(2)
+            elapsed += 2
+
+        raise RuntimeError(
+            f"Proxy container did not become healthy within {timeout}s. "
+            f"Check proxy logs: {self.container_runtime} logs {self.proxy_name}"
+        )
 
 class Server:
     def __init__(self, config: ServerConfig, models_dir: Path, llama_bin: Optional[str], bridge_interface: str, lock_dir: Path, repo_root: Path, server_id: str, container_port: Optional[int] = None) -> None:
@@ -774,6 +853,8 @@ def main() -> None:
                 pi_container_cmd.extend([
                     "--env", f"LLAMA_PORTS={portconfig}",
                     "--env", f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",
+                    "--memory", "16g",
+                    "--cpus", "8",
                     IMAGE_TAG,
                     *sys.argv[1:]
                 ])

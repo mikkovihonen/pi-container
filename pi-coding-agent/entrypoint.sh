@@ -10,6 +10,10 @@ if [ -f /workspace/.pi/dependencies/apt/packages.txt ]; then
     }  >/dev/null 2>&1
 fi
 
+if [ -z "$DEFAULT_ROUTE" ]; then
+    echo "ERROR: DEFAULT_ROUTE is not set. The pi-coding-agent container must be started via run.sh."
+    exit 1
+fi
 ip route replace default via $DEFAULT_ROUTE
 
 export PARSED_PAIRS=$(echo "${LLAMA_PORTS:-[]}" | jq -r '.[] | "\(.cp):\(.hp)"')

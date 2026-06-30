@@ -116,6 +116,13 @@ cp .env.example .env
 
 Then, edit `.env` to include your specific configuration.
 
+### Security
+
+- **`ADMIN_PASSWORD`** MUST be changed from the default `CHANGEME` before running.
+  The proxy's mitmweb UI at port 8081 will refuse to start with a default or empty password.
+- **Model integrity**: Set `sha256` in `models.json` to verify downloaded model files.
+  Without a checksum, downloads proceed without integrity verification.
+
 ### Run Configuration
 
 The following environment variables are used by `run.sh` to configure the container runtime and the `llama-server`:

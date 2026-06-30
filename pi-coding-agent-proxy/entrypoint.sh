@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# ─── Validate ADMIN_PASSWORD ─────────────────────────────────────────────────
+if [ -z "$ADMIN_PASSWORD" ] || [ "$ADMIN_PASSWORD" = "CHANGEME" ]; then
+    echo "ERROR: ADMIN_PASSWORD must be set to a non-default value."
+    echo "Update the .env file on the host before running."
+    exit 1
+fi
+
 # Enable IP forwarding in the container
 # This requires CAP_NET_ADMIN
 sysctl -w net.ipv4.ip_forward=1
