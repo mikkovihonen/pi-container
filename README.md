@@ -15,7 +15,7 @@ Before running, ensure you have the following installed on your host machine:
   |---------|----------|--------------|
   | `container` | macOS | Download the [macOS installer (.pkg)](https://github.com/apple/container/releases/download/1.0.0/container-1.0.0-installer-signed.pkg) |
   | `docker` | macOS / Linux / WSL2 | [Install Docker](https://docs.docker.com/get-docker/) |
-  | `podman` | Linux / WSL2 | `sudo apt install podman` (Debian/Ubuntu) or your distro's package manager |
+  | `podman` | macOS / Linux / WSL2 | `brew install podman` (macOS) or `sudo apt install podman` (Debian/Ubuntu) or your distro's package manager |
 
 - **llama.cpp**: Specifically `llama-server`.
   - On macOS: `brew install llama.cpp`
