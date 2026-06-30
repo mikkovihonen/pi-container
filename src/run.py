@@ -49,8 +49,33 @@ LLAMA_BIN: Optional[str] = os.environ.get("LLAMA_BIN") or shutil.which("llama-se
 MAX_STARTUP_ATTEMPTS: int =  int(os.environ.get("MAX_STARTUP_ATTEMPTS", 2))
 MODELS_DIR: Path = REPO_ROOT / "llama-server" / "models"
 LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / "llama-server" / ".locks"
-BRIDGE_INTERFACE: str = os.environ.get("BRIDGE_INTERFACE", "bridge100")
 ADMIN_PASSWORD: str = os.environ.get('ADMIN_PASSWORD', '')
+
+try:
+    CONTAINER_RUNTIME = validate_environment(LLAMA_BIN)
+except EnvironmentError as e:
+    logger.error(f"Environment Error: {e}")
+    sys.exit(1)
+
+_runtime_default_bridge_interface: Dict[str, str] = {
+    "container": "bridge100",
+    "docker": "docker0",
+    "podman": "podman0",
+}
+_proxy_default_upstream_network: Dict[str, str] = {
+    "container": "default",
+    "docker": "bridge",
+    "podman": "podman",
+}
+
+BRIDGE_INTERFACE: str = os.environ.get("BRIDGE_INTERFACE", "bridge100")
+PROXY_UPSTREAM_NETWORK: str = os.environ.get("PROXY_UPSTREAM_NETWORK", "default")
+
+if not os.environ.get("BRIDGE_INTERFACE"):
+    BRIDGE_INTERFACE = _runtime_default_bridge_interface.get(CONTAINER_RUNTIME, BRIDGE_INTERFACE)
+if not os.environ.get("PROXY_UPSTREAM_NETWORK"):
+    PROXY_UPSTREAM_NETWORK = _proxy_default_upstream_network.get(CONTAINER_RUNTIME, "default")
+
 
 # ─── Configuration Dataclasses ───────────────────────────────────────────
 
@@ -235,7 +260,7 @@ class ContainerNetworkManager:
         subprocess.run([
             self.container_runtime,
             "run", "-d", "--rm", "--name", self.proxy_name,
-            "--network", "default",
+            "--network", PROXY_UPSTREAM_NETWORK,
             "--network", self.network_name,
             "--cap-add", "NET_ADMIN",
             "--dns", "1.1.1.1",
@@ -540,12 +565,6 @@ class Server:
 # ─── Main ──────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    try:
-        container_runtime = validate_environment(LLAMA_BIN)
-    except EnvironmentError as e:
-        logger.error(f"Environment Error: {e}")
-        sys.exit(1)
-
     config_path: Path = REPO_ROOT / "pi-coding-agent" / "home" / ".pi" / "agent" / "models.json"
     if not config_path.exists():
          logger.error(f"Config file not found: {config_path}")
@@ -591,7 +610,7 @@ def main() -> None:
             )
 
             with ContainerNetworkManager(
-                container_runtime,
+                CONTAINER_RUNTIME,
                 "isolated-net",
                 "pi-coding-agent-proxy:local"
             ) as _:
@@ -599,7 +618,7 @@ def main() -> None:
                 gateway_ip = None
                 try:
                     result_ip = subprocess.run(
-                        [container_runtime, "exec", "proxy", "ip", "addr", "show", "eth1"],
+                        [CONTAINER_RUNTIME, "exec", "proxy", "ip", "addr", "show", "eth1"],
                         capture_output=True,
                         text=True,
                         check=True,
@@ -612,7 +631,7 @@ def main() -> None:
 
                     # Get default gateway
                     result_route = subprocess.run(
-                        [container_runtime, "exec", "proxy", "ip", "route", "show", "default"],
+                        [CONTAINER_RUNTIME, "exec", "proxy", "ip", "route", "show", "default"],
                         capture_output=True,
                         text=True,
                         check=True,
@@ -627,7 +646,7 @@ def main() -> None:
                     logger.warning(f"Could not retrieve proxy network info: {e}")
 
                 pi_container_cmd = [
-                    container_runtime, "run",
+                    CONTAINER_RUNTIME, "run",
                     "--rm",
                     "--interactive",
                     "--tty",

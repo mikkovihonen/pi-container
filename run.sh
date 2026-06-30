@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 # Runs the pi-coding-agent container.
 set -euo pipefail
-
-python3 "$(dirname "$0")/src/run.py" "$@"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+python3 "$SCRIPT_DIR/src/run.py" "$@"

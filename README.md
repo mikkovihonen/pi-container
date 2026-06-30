@@ -93,5 +93,6 @@ The following environment variables are used by `run.sh` to configure the contai
 | `PROXY_IMAGE_TAG` | The tag of the  proxycontainer image to run | `pi-coding-agent-proxy:local` |
 | `LLAMA_BIN` | Path to the `llama-server` executable | `llama-server` or `/opt/homebrew/bin/llama-server` |
 | `BRIDGE_INTERFACE` | The network interface for the `socat` bridge | `bridge100` |
+| `PROXY_UPSTREAM_NETWORK` | The network the proxy container connects to | `default` |
 | `LOG_LEVEL` | Log level | `INFO` |
 | `ADMIN_PASSWORD` | Password for mitmproxy Web UI | `password` |
