@@ -1,0 +1,95 @@
+# Allowlist Configuration
+#
+# This file defines rules for controlling which domains and IP addresses
+# are permitted through the mitmproxy transparent proxy.
+#
+# Each rule has:
+#   - name:        Human-readable label for logging
+#   - mode:        "allow" (default) or "block"
+#   - hostnames:   List of hostname patterns (glob wildcards or regex)
+#   - ip_ranges:   List of IP addresses or CIDR ranges
+#   - enabled:     Whether this rule is active (default: true)
+#
+# Matching semantics:
+#   - "allow" mode: request is allowed if hostname matches OR IP matches.
+#   - "block" mode: request is denied if hostname matches OR IP matches.
+#   - Multiple rules are evaluated in order; first match wins.
+#   - Requests not matching any rule fall back to the global default_action.
+
+# Global settings
+global:
+  # "allow" = only allowlisted hosts/IPs pass through; everything else is blocked.
+  # "block" = only blocked hosts/IPs are denied; everything else is allowed.
+  mode: "allow"
+
+  # Default action for requests that don't match any rule.
+  default_action: "block"
+
+  # HTTP status code returned when blocking. 444 closes the connection.
+  status_code: 403
+
+  # Log blocked requests (default: true)
+  log_blocked: true
+
+  # Log allowed requests (default: false)
+  log_allowed: false
+
+  # Dry run: log matches without blocking (default: false)
+  dry_run: false
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # NAMED RULES
+  # ─────────────────────────────────────────────────────────────────────────
+  rules:
+
+    # ── Allow internal API services ──────────────────────────────────────
+    - name: "internal-api-allow"
+      mode: "allow"
+      hostnames:
+        - "api.internal.local"
+        - "*.internal.local"
+      ip_ranges: []
+
+    # ── Allow monitoring endpoints by IP range ───────────────────────────
+    - name: "monitoring-ip-allow"
+      mode: "allow"
+      hostnames: []
+      ip_ranges:
+        - "10.0.0.0/8"           # RFC 1918 private range
+        - "192.168.0.0/16"       # RFC 1918 private range
+        - "172.16.0.0/12"        # RFC 1918 private range
+        - "fd00::/8"             # IPv6 ULA range
+
+    # ── Block known-bad domains ──────────────────────────────────────────
+    - name: "block-ads-and-trackers"
+      mode: "block"
+      hostnames:
+        - "*.ads.example.com"
+        - "*.tracker.example.net"
+        - "^malicious\\..*\\.evil\\.com$"
+      ip_ranges: []
+
+    # ── Block specific IP ranges (e.g., known-bad providers) ─────────────
+    - name: "block-bad-ips"
+      mode: "block"
+      hostnames: []
+      ip_ranges:
+        - "203.0.113.0/24"       # Documentation/test range (block as example)
+        - "198.51.100.0/24"      # Documentation/test range (block as example)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FLAT ALLOWLIST (alternative to named rules)
+# ─────────────────────────────────────────────────────────────────────────────
+# If you only need a simple allow/block list without rule-level control,
+# you can use the flat hostnames/ip_ranges keys directly under global:
+#
+# global:
+#   mode: "allow"
+#   hostnames:
+#     - "api.example.com"
+#     - "*.example.com"
+#   ip_ranges:
+#     - "10.0.0.0/8"
+#
+# This creates a single "global-allowlist" rule automatically.
+# Named rules (above) take priority if both are present.

@@ -1,0 +1,98 @@
+# Token Replacer Configuration
+#
+# This file defines rules for replacing sensitive tokens in HTTP requests
+# as they pass through the mitmproxy transparent proxy.
+#
+# Each rule has:
+#   - name:        Human-readable label for logging
+#   - hostnames:   List of hostname patterns (supports * glob wildcards)
+#   - content_patterns: How and where to find tokens
+#   - replace_with: What to replace them with
+
+# Global settings
+global:
+  log_replacements: true    # Emit console logs when replacements occur
+  dry_run: false            # If true, only log matches without modifying requests
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RULE DEFINITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+rules:
+
+  # ── Example 1: Replace API keys in JSON request bodies ──────────────────
+  - name: "JSON API key in body"
+    hostnames:
+      - "api.example.com"
+      - "api-staging.example.com"
+      - "*.internal.example.com"          # wildcard subdomain match
+    content_patterns:
+      - field: "body.json"
+        path: "$.credentials.api_key"      # JSONPath to the token field
+        regex: "ak_[A-Za-z0-9]{20,}"      # additional regex filter (optional)
+    replace_with:
+      strategy: "static"                   # static | hash | uuid
+      value: "REDACTED_API_KEY"
+
+  # ── Example 2: Redact Bearer tokens in Authorization header ─────────────
+  - name: "Bearer token in Authorization header"
+    hostnames:
+      - "auth.example.com"
+      - "api.*.example.com"
+    content_patterns:
+      - field: "headers"
+        header_name: "Authorization"
+        regex: "(Bearer\\s)\\S+"           # capture "Bearer " as prefix to preserve
+    replace_with:
+      strategy: "static"
+      value: "REDACTED_BEARER"
+
+  # ── Example 3: Hash session cookies for auditability ────────────────────
+  - name: "Session cookie hashing"
+    hostnames:
+      - "session.example.com"
+      - "web.example.com"
+    content_patterns:
+      - field: "headers"
+        header_name: "Cookie"
+        regex: "(session=)[a-f0-9]{32}"   # capture group 1 preserved via sub
+    replace_with:
+      strategy: "hash"                     # SHA-256 of original cookie value
+
+  # ── Example 4: Replace raw form-encoded tokens ──────────────────────────
+  - name: "Form-encoded access token"
+    hostnames:
+      - "login.example.com"
+      - "oauth.example.com"
+    content_patterns:
+      - field: "body.form"
+        field_name: "access_token"
+        regex: "at_[A-Za-z0-9]{32,}"
+    replace_with:
+      strategy: "uuid"                     # replace with random UUID
+
+  # ── Example 5: Raw body token replacement (e.g., raw JWT) ───────────────
+  - name: "JWT in raw body"
+    hostnames:
+      - '.*\\.example\\.com'                 # any subdomain of example.com
+    content_patterns:
+      - field: "body.raw"
+        regex: "eyJ[A-Za-z0-9_-]+\\.eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+"
+    replace_with:
+      strategy: "static"
+      value: "REDACTED_JWT"
+
+  # ── Example 6: Replacement value from environment variable ──────────────
+  # The value is resolved from os.environ["REDACTION_TOKEN"] at config load.
+  # If the variable is missing, the fallback value below is used.
+  # In production configs omit the default to get a hard error when the
+  # environment variable is not set.
+  - name: "API key with env-var replacement"
+    hostnames:
+      - "api.example.com"
+    content_patterns:
+      - field: "body.json"
+        path: "$.credentials.api_key"
+        regex: "ak_[A-Za-z0-9]{20,}"
+    replace_with:
+      strategy: "static"
+      value: "${ENV:REDACTION_TOKEN,REDACTED_TOKEN}"

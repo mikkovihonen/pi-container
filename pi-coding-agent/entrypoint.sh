@@ -30,7 +30,7 @@ exec gosu pi bash -c '
         socat "TCP-LISTEN:${cp},fork,reuseaddr" "TCP:${GATEWAY_IP}:${hp}" &
     done
     {
-        uv venv --python /usr/local/bin/python3 --no-managed-python "$UV_PROJECT_ENVIRONMENT"
+        uv venv --python /usr/local/bin/python3 --no-managed-python --with pip "$UV_PROJECT_ENVIRONMENT"
         source /home/pi/.venv/bin/activate
     } >/dev/null 2>&1
     exec pi "$@"
