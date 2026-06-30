@@ -18,7 +18,7 @@ from contextlib import ExitStack
 from typing import Any, Dict, List, Optional, Type
 import contextlib
 from huggingface_hub import hf_hub_download
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from util import (
     load_dotenv,
     validate_environment,
@@ -106,7 +106,7 @@ class Model:
             return
 
         # Create a shared lock directory for all models
-        shared_lock_dir: Path = self.models_dir.parent / ".model_download_locks"
+        shared_lock_dir: Path = LLAMA_SERVER_LOCK_DIR / "model_download"
         shared_lock_dir.mkdir(exist_ok=True, parents=True)
 
         # Create a unique lock filename based on repo and file
@@ -114,17 +114,17 @@ class Model:
         lock_file_path = shared_lock_dir / f"{model_id}.lock"
 
         logger.info(f"[Model: {self.label}] Acquiring lock for download...")
-        with lock_file_path.open("a") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            with lock_file_path.open("a") as lock_file:
+                fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-            # Re-check if exists after acquiring lock
-            if self.path.exists():
-                logger.info(f"[Model: {self.label}] Found existing model after acquiring lock: {self.path}")
-                return
+                # Re-check if exists after acquiring lock
+                if self.path.exists():
+                    logger.info(f"[Model: {self.label}] Found existing model after acquiring lock: {self.path}")
+                    return
 
-            logger.info(f"[Model: {self.label}] Downloading {self.config.file} from {self.config.repo}...")
-            self.path.parent.mkdir(exist_ok=True, parents=True)
-            try:
+                logger.info(f"[Model: {self.label}] Downloading {self.config.file} from {self.config.repo}...")
+                self.path.parent.mkdir(exist_ok=True, parents=True)
                 hf_hub_download(
                     repo_id=self.config.repo,
                     filename=self.config.file,
@@ -132,9 +132,24 @@ class Model:
                     local_dir_use_symlinks=False
                 )
                 logger.info(f"[Model: {self.label}] Download complete.")
-            except Exception:
-                logger.exception(f"[Model: {self.label}] Download failed")
-                raise
+        finally:
+            lock_file_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def cleanup_download_lock_dir(lock_dir: Path) -> None:
+        """Remove the model download lock directory if it's empty (last run.py instance cleaned up)."""
+        if lock_dir.exists():
+            try:
+                if not any(lock_dir.iterdir()):
+                    lock_dir.rmdir()
+                    logger.info(f"Removed empty model download lock directory: {lock_dir}")
+                # Clean up parent .locks dir if it's now empty too
+                parent = lock_dir.parent
+                if parent.exists() and not any(parent.iterdir()):
+                    parent.rmdir()
+                    logger.info(f"Removed empty lock directory: {parent}")
+            except OSError:
+                pass
 
 
 # ─── Container Network Manager ───────────────────────────────────────────
@@ -519,6 +534,9 @@ class Server:
         if should_full_cleanup:
             self._cleanup(full_cleanup=True)
 
+
+
+
 # ─── Main ──────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -637,15 +655,14 @@ def main() -> None:
 
                 result = subprocess.run(pi_container_cmd)
 
-
             if result.returncode != 0:
                 sys.exit(result.returncode)
-
-    except SystemExit:
-        sys.exit(0)
     except Exception:
         logger.exception("An error occurred")
         sys.exit(1)
+    finally:
+        # Clean up model download lock directory if empty (after all servers stopped)
+        Model.cleanup_download_lock_dir(LLAMA_SERVER_LOCK_DIR / "model_download")
 
 if __name__ == "__main__":
     main()
