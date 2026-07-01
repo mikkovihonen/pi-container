@@ -58,22 +58,54 @@ The system consists of three components running as containers or processes:
 
 ### Network topology
 
-```
-Host
- ├── llama-server (llama.cpp) ──┐
- │        reached from proxy via:│  Apple container → host bridge + socat
- │                               │  podman/docker   → host.containers.internal
- │                               ▼
- ├── pi-coding-agent-proxy ── eth0 → internet (mitmproxy + NAT; FORWARD default-DROP)
- │                              eth1 → isolated-net (transparent proxy + DNS)
- │
- └── pi-coding-agent ── isolated-net only (default route + DNS → proxy eth1)
+```mermaid
+flowchart LR
+    subgraph agent["<b>pi-coding-agent</b>"]
+        direction TB
+        agent_eth["eth0<br/>isolated-net"]
+    end
+
+    subgraph net["isolated-net<br/>(--internal, no gateway)"]
+        direction TB
+    end
+
+    subgraph proxy["<b>pi-coding-agent-proxy</b>"]
+        direction TB
+        eth1["eth1<br/>isolated-net"]
+        mitm["mitmproxy<br/>transparent :8080<br/>allowlist + token_replacer"]
+        dns["mitmproxy<br/>DNS :5353<br/>resolves 'llama' → eth1 IP"]
+        eth0["eth0<br/>upstream network<br/>internet + MASQUERADE"]
+    end
+
+    subgraph host["<b>Host</b><br/>llama-server (host process)"]
+        direction TB
+    end
+
+    %% L3 routing: agent → isolated-net → proxy eth1
+    agent_eth -.->|L3 routed via proxy eth1 IP| eth1
+    agent_eth --- net
+    net --- eth1
+
+    %% Proxy internal: L4 interception & forwarding
+    eth1 -->|REDIRECT 80/443 → :8080| mitm
+    eth1 -->|REDIRECT 53 → :5353| dns
+    eth1 -->|DNAT llama:<cp> → llama_net| llama_net
+    mitm -->|egress| eth0
+    dns -->|egress| eth0
+    eth1 -.->|opt-in FORWARD → eth0 → MASQUERADE| eth0
+    eth0 -->|internet| Out["Internet"]
+
+    subgraph llama_net["llama-server reachability<br/>(per-runtime network component)"]
+        direction TB
+        socat["Apple container<br/>host bridge + socat"]
+        podman_net["podman<br/>host.containers.internal<br/>(gvproxy)"]
+        docker_net["docker<br/>host.docker.internal<br/>(gvproxy)"]
+    end
+
+    llama_net --> host
 ```
 
-The proxy container requires `CAP_NET_ADMIN` to manage iptables rules and IP
-forwarding. The `isolated-net` is created `--internal` (no gateway of its own),
-so the agent has no route to the internet except the default route it is given
-to the proxy — which enforces the egress policy below.
+The proxy's iptables rules enforce a **default-deny** forward policy — HTTP, HTTPS, and DNS from the agent are intercepted by mitmproxy (via `REDIRECT` to ports 8080/5353, bypassing the `FORWARD` chain entirely). Every other protocol is **denied by default**; opt-in forwarding (`PROXY_ALLOW_SSH`, `PROXY_ALLOW_SMTP`, `PROXY_ALLOW_GIT`, `PROXY_ALLOW_NTP`, custom TCP/UDP ports) uses plain NAT and is **not inspected** by mitmproxy. The `isolated-net` is created with `--internal` (no external gateway), so the agent has no route to the internet except the default route and DNS pointed at the proxy.
 
 <a name="proxy-egress-policy"></a>
 ### Proxy egress policy
