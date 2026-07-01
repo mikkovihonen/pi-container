@@ -357,6 +357,7 @@ def _make_flow(host: str, server_ip: str | None = None,
     flow.request = MagicMock()
     flow.request.method = method
     flow.request.host = host
+    flow.request.pretty_host = host
     flow.request.path = path
     flow.response = None
     flow.error = None
@@ -446,7 +447,7 @@ class TestAllowlistAddonOnRequest:
         })]
 
         flow = _make_flow("api.example.com", "93.184.216.34")
-        addon.on_request(flow)
+        addon.request(flow)
         flow.response = None  # Ensure no response was set
         assert flow.response is None
 
@@ -462,7 +463,7 @@ class TestAllowlistAddonOnRequest:
         })]
 
         flow = _make_flow("evil.com", "1.2.3.4")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is not None
         assert flow.response.status_code == 403
 
@@ -478,7 +479,7 @@ class TestAllowlistAddonOnRequest:
         })]
 
         flow = _make_flow("unknown.host.com", "10.1.2.3")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is None
 
     def test_allowlist_blocks_non_matching_ip(self):
@@ -493,7 +494,7 @@ class TestAllowlistAddonOnRequest:
         })]
 
         flow = _make_flow("unknown.host.com", "8.8.8.8")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is not None
 
     def test_block_mode_blocks_matching_host(self):
@@ -508,7 +509,7 @@ class TestAllowlistAddonOnRequest:
         })]
 
         flow = _make_flow("tracker.ads.example.com", "93.184.216.34")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is not None
         assert flow.response.status_code == 403
 
@@ -524,7 +525,7 @@ class TestAllowlistAddonOnRequest:
         })]
 
         flow = _make_flow("good.example.com", "93.184.216.34")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is None
 
     def test_localhost_always_allowed(self):
@@ -536,7 +537,7 @@ class TestAllowlistAddonOnRequest:
         addon.rules = []
 
         flow = _make_flow("localhost", "127.0.0.1")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is None
 
     def test_private_ip_always_allowed(self):
@@ -552,7 +553,7 @@ class TestAllowlistAddonOnRequest:
 
         # Private IP should always be allowed regardless of allowlist rules.
         flow = _make_flow("some-private-host", "192.168.1.100")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is None
 
     def test_dry_run_no_blocking(self):
@@ -568,7 +569,7 @@ class TestAllowlistAddonOnRequest:
         })]
 
         flow = _make_flow("evil.com", "1.2.3.4")
-        addon.on_request(flow)
+        addon.request(flow)
         # In dry_run mode, no blocking occurs.
         assert flow.response is None
 
@@ -585,7 +586,7 @@ class TestAllowlistAddonOnRequest:
         })]
 
         flow = _make_flow("evil.com", "1.2.3.4")
-        addon.on_request(flow)
+        addon.request(flow)
         flow.kill.assert_called_once()
 
     def test_blocked_flow_has_marked_indicator(self):
@@ -601,7 +602,7 @@ class TestAllowlistAddonOnRequest:
         })]
 
         flow = _make_flow("evil.com", "1.2.3.4")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.marked == ":no_entry_sign:"
         assert "Blocked by allowlist" in flow.comment
 
@@ -618,7 +619,7 @@ class TestAllowlistAddonOnRequest:
         })]
 
         flow = _make_flow("evil.com", "1.2.3.4")
-        addon.on_request(flow)
+        addon.request(flow)
         assert "default action" in flow.comment
 
     def test_blocked_flow_rule_name_in_comment(self):
@@ -634,7 +635,7 @@ class TestAllowlistAddonOnRequest:
         })]
 
         flow = _make_flow("tracker.ads.example.com", "93.184.216.34")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.marked == ":no_entry_sign:"
         assert "rule matched" in flow.comment
 
@@ -650,7 +651,7 @@ class TestAllowlistAddonOnRequest:
         # Flow already has a response → should be skipped
         flow = _make_flow("api.example.com", "93.184.216.34")
         flow.response = MagicMock()
-        addon.on_request(flow)
+        addon.request(flow)
 
     def test_skipserrored_flows(self):
         addon = AllowlistAddon(config_path="")
@@ -664,7 +665,7 @@ class TestAllowlistAddonOnRequest:
         # Flow has an error → should be skipped
         flow = _make_flow("api.example.com", "93.184.216.34")
         flow.error = Exception("connection reset")
-        addon.on_request(flow)
+        addon.request(flow)
 
     def test_skips_dead_flows(self):
         addon = AllowlistAddon(config_path="")
@@ -678,7 +679,7 @@ class TestAllowlistAddonOnRequest:
         # Flow is not live → should be skipped
         flow = _make_flow("api.example.com", "93.184.216.34")
         flow.live = False
-        addon.on_request(flow)
+        addon.request(flow)
 
     def test_default_action_allow(self):
         addon = AllowlistAddon(config_path="")
@@ -693,7 +694,7 @@ class TestAllowlistAddonOnRequest:
 
         # No matching rule, default is allow → should pass through.
         flow = _make_flow("unknown.com", "8.8.8.8")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is None
 
     def test_multiple_rules_first_wins(self):
@@ -717,7 +718,7 @@ class TestAllowlistAddonOnRequest:
 
         # First rule (block) should win
         flow = _make_flow("evil.com", "1.2.3.4")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is not None
 
 
@@ -792,28 +793,28 @@ class TestIntegration:
 
         # Allow: internal API
         flow = _make_flow("api.internal.local", "10.0.1.5")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is None
 
         # Allow: internal subdomain
         flow = _make_flow("dev.staging.internal.local", "10.0.2.10")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is None
 
         # Allow: monitoring IP
         flow = _make_flow("unknown.external.com", "192.168.1.50")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is None
 
         # Block: ad domain
         flow = _make_flow("tracker.ads.example.com", "93.184.216.34")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is not None
         assert flow.response.status_code == 403
 
         # Block: external IP not in allowlist
         flow = _make_flow("random.external.com", "8.8.8.8")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is not None
 
     def test_block_mode_with_allow_default(self, tmp_path):
@@ -842,19 +843,19 @@ class TestIntegration:
 
         # Block: malware domain
         flow = _make_flow("malware.bad.com", "1.2.3.4")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is not None
 
         # Block: evil.net subdomain
         flow = _make_flow("evil.malware.net", "1.2.3.4")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is not None
 
         # Allow: everything else
         flow = _make_flow("google.com", "142.250.80.46")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is None
 
         flow = _make_flow("github.com", "140.82.121.4")
-        addon.on_request(flow)
+        addon.request(flow)
         assert flow.response is None

@@ -16,7 +16,7 @@ The replacement is only applied when **both** conditions match:
 ┌─────────────────────────────────────────────────────────────┐
 │                    mitmproxy                                │
 │                                                             │
-│  Flow → TokenReplacerAddon (on_request)                     │
+│  Flow → TokenReplacerAddon (request / response)             │
 │    │                                                        │
 │    ├─► Phase 1: Detection                                   │
 │    │     • Check hostname against allowlist                 │
@@ -144,9 +144,9 @@ rules:
 
 ### How It Works
 
-`on_request(flow)` executes in three phases to prevent one rule's replacement value from being re-matched by another rule:
+The `request(flow)` hook (and its mirror, `response(flow)`) executes in three phases to prevent one rule's replacement value from being re-matched by another rule:
 
-1. **Hostname selection** — The addon extracts the request's hostname and collects all rules whose `hostnames` patterns match (supporting exact, glob `*`, and regex).
+1. **Hostname selection** — The addon extracts the request's hostname (`flow.request.pretty_host` — the Host header / SNI, correct under transparent proxying; `flow.request.host` would be the destination IP) and collects all rules whose `hostnames` patterns match (supporting exact, glob `*`, and regex).
 2. **Phase 1 — Detection** — Every applicable rule's matchers scan the **original** request data (parsed JSON, form, raw body, and headers). Findings (original token values) are collected but nothing is modified.
 3. **Phase 2 — Application** — Matchers are grouped by content type. Each body type is parsed **once** from the original request, all matchers of that type are applied to the shared parsed data, and the result is written back **once**. This ensures that one rule's replacement value can never be re-matched by another rule's regex.
 4. **Phase 3 — Logging** — If `log_replacements` is enabled, a console message is emitted for every match found in Phase 1.
@@ -199,7 +199,15 @@ The addon applies the same hostname + content-pattern matching to HTTP responses
 
 ### Integration with the Proxy Container
 
-The token_replacer addon is loaded as a mitmproxy script via the `scripts` option. mitmproxy loads Python scripts and registers them as addons.
+> **In this project the token_replacer is already wired in and active.** The
+> [Containerfile](../../Containerfile) bakes the script + a default config, the
+> [entrypoint](../../entrypoint.sh) loads it with `-s` and points
+> `TOKEN_REPLACER_CONFIG_PATH` at `/home/mitmproxy/config/token_replacer.yaml`,
+> and `run.py` mounts the host's [`.pi-container/token_replacer.yaml`](../../../.pi-container/token_replacer.yaml)
+> over it (also injecting any `${ENV:VAR}` secrets it references). The steps below
+> describe that wiring for reference / other proxies.
+
+The token_replacer addon is loaded as a mitmproxy script via the `scripts` option. The script exposes a module-level `addons = [addon]` list, which is how mitmproxy discovers and registers it (a bare `addon = ...` variable would load but never register its hooks).
 
 #### Step 1: Copy files into the mitmproxy container
 
@@ -208,31 +216,33 @@ COPY pi-coding-agent-proxy/addons/token_replacer/token_replacer.py \
      /home/mitmproxy/scripts/token_replacer.py
 ```
 
-#### Step 2: Load the script via `--set scripts`
+The image must also have `pyyaml` installed (`pip install pyyaml`).
 
-Add the following to your mitmproxy command line (e.g., in the container entrypoint):
+#### Step 2: Load the script via `-s` / `--set scripts`
+
+Add the following to your mitmproxy command line (e.g., in the container entrypoint). `-s` is the short form and can be repeated to load multiple addons:
 
 ```bash
-mitmweb --listen-port 8080 \
-        --set scripts=/home/mitmproxy/scripts/token_replacer.py \
+mitmweb --mode transparent@8080 \
+        -s /home/mitmproxy/scripts/token_replacer.py \
         ...
 ```
 
-The `scripts` option accepts a list of script paths. mitmproxy loads each script and registers any module-level addon instances it defines.
+#### Step 3: Point the addon at its config
 
-#### Step 3 (optional): Configure via environment variable
+The addon reads `TOKEN_REPLACER_CONFIG_PATH` at import time (falling back to `token_replacer.yaml` alongside the script). In this project it is baked as image `ENV` and the config is mounted there from the host:
 
-By default, the addon looks for its configuration at the path specified in the `token_replacer.yaml` file alongside `token_replacer.py`. You can override this via the `TOKEN_REPLACER_CONFIG_PATH` environment variable:
-
-```bash
-mitmweb --set scripts=/home/mitmproxy/scripts/token_replacer.py \
-        TOKEN_REPLACER_CONFIG_PATH=/home/mitmproxy/config/my_custom_config.yaml \
-        ...
+```dockerfile
+ENV TOKEN_REPLACER_CONFIG_PATH=/home/mitmproxy/config/token_replacer.yaml
 ```
 
 #### Troubleshooting
 
-- If the addon does not load, check the mitmproxy logs for errors. Common issues include:
-  - Incorrect script path (verify the file exists in the container)
-  - YAML syntax errors in the config file
-  - Python import errors (ensure `pyyaml` is installed in the mitmproxy environment)
+- If the addon does not load or has no effect, check the mitmproxy logs. Common issues include:
+  - **No `addons = [addon]` list** — the script loads (config parses) but hooks never fire.
+  - **Wrong hook name** — hooks must be `request` / `response`, not `on_request` / `on_response`.
+  - **Matching on `flow.request.host`** — use `pretty_host`; in transparent mode `host` is the destination IP, so hostname rules never match.
+  - Incorrect script path (verify the file exists in the container).
+  - YAML syntax errors in the config file.
+  - Python import errors (ensure `pyyaml` is installed in the mitmproxy environment).
+  - Script file not readable by the `mitmproxy` user (COPY preserves host file mode; `chmod a+r` in the image if needed).

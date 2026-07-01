@@ -10,11 +10,9 @@ if [ -f /workspace/.pi/dependencies/apt/packages.txt ]; then
     }  >/dev/null 2>&1
 fi
 
-if [ -z "$DEFAULT_ROUTE" ]; then
-    echo "ERROR: DEFAULT_ROUTE is not set. The pi-coding-agent container must be started via run.sh."
-    exit 1
+if [ -n "$DEFAULT_ROUTE" ]; then
+    ip route replace default via $DEFAULT_ROUTE
 fi
-ip route replace default via $DEFAULT_ROUTE
 
 if [ -n "$HOST_GIT_CONFIG" ]; then
     while IFS=$'\t' read -r key value; do

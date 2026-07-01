@@ -1,9 +1,10 @@
 # Transparent proxy container
 
-- Debian based router container which routes all traffic via mitmproxy
-- mitmproxy generates a self-signed certificate with its certificate authority first time it's run
-- mitmweb provides a web UI for monitoring traffic
-- routes traffic from other containers to Internet via mitmproxy
+- Debian based router container that transparently intercepts the agent's HTTP/HTTPS/DNS traffic via mitmproxy
+- mitmproxy generates a self-signed certificate with its certificate authority the first time it's run
+- mitmweb provides a web UI (port 8081) for monitoring traffic
+- runs `allowlist` and `token_replacer` addons on the intercepted traffic (host filtering + secret redaction)
+- forwards the isolated network's traffic to the Internet; non-HTTP protocols are denied by default (fail-closed, opt-in via `PROXY_ALLOW_*`)
 
 ## Building transparent proxy container image
 
@@ -22,15 +23,48 @@ RUN timeout 3s mitmweb || [ $? -eq 124 ]
 To use the transparent proxy, the container must be run with additional capabilities to allow it to manage network interfaces and routing tables:
 - `CAP_NET_ADMIN`
 
-The container uses `iptables` to redirect incoming traffic to `mitmproxy` (default port 8080):
+The [entrypoint](entrypoint.sh) uses `iptables` on the isolated-net interface
+(`eth1`) to transparently intercept the agent's traffic. HTTP, HTTPS and DNS are
+redirected into mitmproxy (running transparent + DNS modes); the local
+`llama-server` API is DNAT'd out to the host; everything else is denied by
+default:
 
 ```bash
-# Redirect HTTP traffic to mitmproxy
-iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080
+# Redirect HTTP/HTTPS into mitmproxy (transparent proxy on 8080)
+iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 80  -j REDIRECT --to-port 8080
+iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 443 -j REDIRECT --to-port 8080
 
-# Redirect HTTPS traffic to mitmproxy
-iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 8080
+# Redirect DNS into mitmproxy's DNS mode (5353); the proxy resolves "llama" to
+# itself and forwards other lookups upstream
+iptables -t nat -A PREROUTING -i eth1 -p udp --dport 53 -j REDIRECT --to-port 5353
+iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 53 -j REDIRECT --to-port 5353
 ```
+
+### Egress policy (default-deny)
+
+Only HTTP/HTTPS/DNS are intercepted and inspected by mitmproxy. Any other
+protocol the agent emits would otherwise be forwarded straight to the internet
+**uninspected**, so the `FORWARD` chain defaults to `DROP`. The model API
+(DNAT'd to the host) is explicitly permitted, and operators can opt specific
+extra protocols in via `PROXY_ALLOW_*` env vars (`PROXY_ALLOW_SSH`,
+`PROXY_ALLOW_SMTP`, `PROXY_ALLOW_GIT`, `PROXY_ALLOW_NTP`, `PROXY_ALLOW_TCP_PORTS`,
+`PROXY_ALLOW_UDP_PORTS` — see the project [README](../README.md)). **Traffic
+allowed this way is plain NAT and is NOT seen by mitmproxy or the allowlist.**
+
+## Addons
+
+mitmproxy loads two addons (baked into the image, loaded via `-s` in the
+entrypoint) that operate on the intercepted HTTP/HTTPS traffic:
+
+| Addon | Purpose | Config (host → container) |
+|-------|---------|---------------------------|
+| [`allowlist`](addons/allowlist/) | Blocks requests to non-allowlisted hosts/IPs (default action `block`). | `.pi-container/allowlist.yaml` → `/home/mitmproxy/config/allowlist.yaml` |
+| [`token_replacer`](addons/token_replacer/) | Redacts secrets (API keys, Bearer tokens, cookies, JWTs) from requests/responses. | `.pi-container/token_replacer.yaml` → `/home/mitmproxy/config/token_replacer.yaml` |
+
+The image bakes fail-closed default configs; `run.py` mounts the host configs
+from `.pi-container/` over them at runtime (and injects any `${ENV:VAR}` secrets
+the token_replacer config references). Edit the host files to change policy. See
+[addons/README.md](addons/README.md) for how mitmproxy addons work.
 
 ## Installing the mitmproxy CA certificate to Pi Coding Agent
 

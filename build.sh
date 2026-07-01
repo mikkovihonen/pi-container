@@ -2,4 +2,4 @@
 # Builds the pi-coding-agent image.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-python3 "$SCRIPT_DIR/src/build.py" "$@"
+exec uv run --project "$SCRIPT_DIR" python "$SCRIPT_DIR/src/build.py" "$@"

@@ -40,13 +40,24 @@ def validate_environment(llama_bin: Optional[str]) -> str:
     if shutil.which("socat") is None:
         raise EnvironmentError("socat not found. Install via: brew install socat (macOS) or apt install socat (Linux)")
 
+    # Check for explicit CONTAINER_RUNTIME from .env first
+    explicit_runtime = os.environ.get("CONTAINER_RUNTIME", "").strip()
+    supported_runtimes = ("container", "docker", "podman")
+
+    if explicit_runtime:
+        if explicit_runtime not in supported_runtimes:
+            raise EnvironmentError(
+                f"Unsupported CONTAINER_RUNTIME '{explicit_runtime}'. "
+                f"Supported values: {', '.join(supported_runtimes)}."
+            )
+        return explicit_runtime
+
+    # Fall back to auto-detection
     runtime: Optional[str] = None
-    if shutil.which("container") is not None:
-        runtime = "container"
-    elif shutil.which("docker") is not None:
-        runtime = "docker"
-    elif shutil.which("podman") is not None:
-        runtime = "podman"
+    for candidate in supported_runtimes:
+        if shutil.which(candidate) is not None:
+            runtime = candidate
+            break
 
     if runtime is None:
         raise EnvironmentError("No supported container runtime found (container, docker or podman).")

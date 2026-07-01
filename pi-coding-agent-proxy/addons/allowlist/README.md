@@ -16,24 +16,30 @@ This addon also works in reverse: in `block` mode, only blocked hosts/IPs are de
 
 ## Quick Start
 
-Load the addon in mitmproxy/mitmweb:
+> **In this project the allowlist is already wired in and active.** The
+> `pi-coding-agent-proxy` image bakes the script and a fail-closed default config,
+> and `run.py` mounts the host's [`.pi-container/allowlist.yaml`](../../../.pi-container/allowlist.yaml)
+> over it at runtime. Edit that host file to change the policy — you don't need
+> the manual steps below unless you're wiring the addon into a different proxy.
+
+Load the addon in mitmproxy/mitmweb (`-s` is the short form of `--set scripts=`, and can be repeated for multiple addons):
 
 ```bash
-mitmweb --set scripts=allowlist.py
+mitmweb -s allowlist.py
 ```
 
-Or in Docker (pi-coding-agent-proxy):
+Or in Docker (pi-coding-agent-proxy) — see the [Containerfile](../../Containerfile) and [entrypoint.sh](../../entrypoint.sh):
 
 ```dockerfile
 COPY addons/allowlist/allowlist.py /home/mitmproxy/scripts/allowlist.py
-COPY addons/allowlist/allowlist_config.yaml /home/mitmproxy/config/allowlist_config.yaml
+COPY addons/allowlist/allowlist_config.yaml /home/mitmproxy/config/allowlist.yaml
+ENV ALLOWLIST_CONFIG_PATH=/home/mitmproxy/config/allowlist.yaml
 ```
 
 Then in the entrypoint:
 
 ```bash
-mitmweb --listen-port 8080 \
-        --set scripts=/home/mitmproxy/scripts/allowlist.py
+mitmweb --mode transparent@8080 -s /home/mitmproxy/scripts/allowlist.py
 ```
 
 ## Configuration
@@ -194,7 +200,12 @@ mitmweb --set scripts=allowlist.py \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ALLOWLIST_CONFIG_PATH` | `allowlist_config.yaml` (same directory) | Path to config file |
+| `ALLOWLIST_CONFIG_PATH` | `allowlist_config.yaml` (same directory as the script) | Path to config file. In the `pi-coding-agent-proxy` image this is set to `/home/mitmproxy/config/allowlist.yaml`, which `run.py` mounts from the host's `.pi-container/allowlist.yaml`. |
+
+> **Note:** the allowlist only governs HTTP/HTTPS traffic that mitmproxy
+> intercepts. Non-HTTP protocols are handled separately by the proxy's `FORWARD`
+> policy (default-deny, opt-in via `PROXY_ALLOW_*` — see the project README), not
+> by this addon.
 
 ## Examples
 
@@ -286,8 +297,8 @@ This ensures that local services and the proxy's own connections are never block
 
 ## How It Works
 
-1. **`on_request(flow)`** hook fires for every HTTP request
-2. Hostname and server IP are extracted from the flow
+1. **`request(flow)`** hook fires for every HTTP request
+2. Hostname (`flow.request.pretty_host` — the Host header / SNI, which is correct under transparent proxying; `flow.request.host` would be the destination IP) and server IP are extracted from the flow
 3. If localhost/private → allowed immediately
 4. Rules are evaluated in order; first match determines action
 5. If no rule matches → `default_action` is applied

@@ -50,6 +50,7 @@ def _make_flow(method: str = "POST", host: str = "api.example.com",
     flow.request = MagicMock()
     flow.request.method = method
     flow.request.host = host
+    flow.request.pretty_host = host
     flow.request.path = path
     flow.request.pretty_url = f"http://{host}{path}"
     flow.request.headers = MagicMock()
@@ -68,6 +69,7 @@ def _make_response_flow(host: str = "api.example.com", body: bytes = b""):
     flow = MagicMock()
     flow.request = MagicMock()
     flow.request.host = host
+    flow.request.pretty_host = host
     flow.request.get_content = MagicMock(return_value=b"")
     flow.response = MagicMock()
     flow.response.headers = MagicMock()
@@ -817,7 +819,7 @@ class TestTokenReplacerAddon:
         payload = json.dumps({"credentials": {"api_key": "ak_real_secret_key_here"}}).encode()
         flow = _make_flow(host="api.example.com", body=payload)
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # Verify set_content was called (body was modified)
         flow.request.set_content.assert_called()
@@ -852,7 +854,7 @@ class TestTokenReplacerAddon:
         payload = json.dumps({"api_key": "ak_secret"}).encode()
         flow = _make_flow(host="api.example.com:443", body=payload)
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # Should have replaced the token even with port in host
         flow.request.set_content.assert_called()
@@ -884,7 +886,7 @@ class TestTokenReplacerAddon:
         payload = json.dumps({"api_key": "should_not_touch"}).encode()
         flow = _make_flow(host="other.com", body=payload)
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # set_content should NOT have been called
         flow.request.set_content.assert_not_called()
@@ -914,14 +916,14 @@ class TestTokenReplacerAddon:
         payload = json.dumps({"api_key": "ak_secret"}).encode()
         flow = _make_flow(host="api.example.com", body=payload)
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # In dry run, set_content should NOT be called
         flow.request.set_content.assert_not_called()
         # But log should have been called (module-level logger)
         with patch("token_replacer.log") as mock_log:
             # Re-run on_request with the patched logger
-            addon.on_request(flow)
+            addon.request(flow)
         assert mock_log.info.call_count > 0
 
     def test_cross_rule_no_interference(self):
@@ -970,7 +972,7 @@ class TestTokenReplacerAddon:
         payload = json.dumps({"key_a": "original_a", "key_b": "original_b"}).encode()
         flow = _make_flow(host="api.example.com", body=payload)
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # Verify set_content was called exactly once (single-pass per type)
         assert flow.request.set_content.call_count == 1
@@ -1021,7 +1023,7 @@ class TestTokenReplacerAddon:
         payload = b"use TOKEN_A and TOKEN_B here"
         flow = _make_flow(host="api.example.com", body=payload)
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # Verify set_content was called exactly once
         assert flow.request.set_content.call_count == 1
@@ -1062,7 +1064,7 @@ class TestTokenReplacerAddon:
         payload = b"username=admin&access_token=at_abcdefghijklmnopqrstuvwxyz012345&other=val&access_token=at_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
         flow = _make_flow(host="login.example.com", body=payload)
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # Verify set_content was called
         assert flow.request.set_content.called
@@ -1117,7 +1119,7 @@ class TestTokenReplacerAddon:
         payload = b"prefix TOKEN_A_B suffix"
         flow = _make_flow(host="api.example.com", body=payload)
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # set_content should be called exactly once
         assert flow.request.set_content.call_count == 1
@@ -1158,7 +1160,7 @@ class TestTokenReplacerAddon:
 
         flow.request.headers = _make_headers_mock({"Cookie": original_cookie})
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # Verify the header was modified
         flow.request.headers.__setitem__.assert_called()
@@ -1218,7 +1220,7 @@ class TestTokenReplacerAddon:
             {"Authorization": "Bearer my_secret_token_12345"}
         )
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         new_value = flow.request.headers.__setitem__.call_args[0][1]
         assert new_value == "Bearer REPLACED_A"
@@ -1257,6 +1259,7 @@ class TestTokenReplacerAddon:
         flow = MagicMock()
         flow.request = MagicMock()
         flow.request.host = "api.example.com"
+        flow.request.pretty_host = "api.example.com"
         flow.request.url = "http://api.example.com/path?api_key=ak_abcdefghijklmnopqrstuvwxyz012345&page=1"
         flow.request.get_content = MagicMock(return_value=b"")
         flow.request.set_content = MagicMock()
@@ -1273,7 +1276,7 @@ class TestTokenReplacerAddon:
         flow.request._set_query = MagicMock()
         flow.request._set_query.side_effect = lambda pairs: None
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # _set_query should have been called with the modified pairs
         flow.request._set_query.assert_called()
@@ -1317,6 +1320,7 @@ class TestTokenReplacerAddon:
         flow = MagicMock()
         flow.request = MagicMock()
         flow.request.host = "api.example.com"
+        flow.request.pretty_host = "api.example.com"
         flow.request.url = "http://api.example.com/path?api_key=ak_abcdefghijklmnopqrstuvwxyz012345"
         flow.request.get_content = MagicMock(return_value=b"")
         flow.request.set_content = MagicMock()
@@ -1329,7 +1333,7 @@ class TestTokenReplacerAddon:
         )
         flow.request._set_query = MagicMock()
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # In dry run, _set_query should NOT have been called
         flow.request._set_query.assert_not_called()
@@ -1364,7 +1368,7 @@ class TestOnResponse:
         payload = json.dumps({"api_key": "ak_secret_in_response"}).encode()
         flow = _make_response_flow(host="api.example.com", body=payload)
 
-        addon.on_response(flow)
+        addon.response(flow)
 
         # Verify set_content was called on the response
         flow.response.set_content.assert_called()
@@ -1395,7 +1399,7 @@ class TestOnResponse:
         payload = json.dumps({"api_key": "keep_this"}).encode()
         flow = _make_response_flow(host="other.com", body=payload)
 
-        addon.on_response(flow)
+        addon.response(flow)
 
         flow.response.set_content.assert_not_called()
 
@@ -1423,7 +1427,7 @@ class TestOnResponse:
         payload = json.dumps({"api_key": "ak_secret"}).encode()
         flow = _make_response_flow(host="api.example.com", body=payload)
 
-        addon.on_response(flow)
+        addon.response(flow)
 
         # In dry run, set_content should NOT be called
         flow.response.set_content.assert_not_called()
@@ -1453,7 +1457,7 @@ class TestOnResponse:
         flow = _make_response_flow(host="api.example.com", body=payload)
 
         with patch("token_replacer.log") as mock_log:
-            addon.on_response(flow)
+            addon.response(flow)
 
         # No logging should have occurred
         mock_log.info.assert_not_called()
@@ -1482,7 +1486,7 @@ class TestOnResponse:
         payload = b'Some text eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123XYZ more text'
         flow = _make_response_flow(host="api.example.com", body=payload)
 
-        addon.on_response(flow)
+        addon.response(flow)
 
         flow.response.set_content.assert_called()
         new_body = flow.response.set_content.call_args[0][0]
@@ -1521,7 +1525,7 @@ class TestOnResponse:
         original_token = "token=abcdef1234567890abcdef1234567890"
         flow.response.headers = _make_headers_mock({"X-Auth-Token": original_token})
 
-        addon.on_response(flow)
+        addon.response(flow)
 
         flow.response.headers.__setitem__.assert_called()
         call_args = flow.response.headers.__setitem__.call_args[0]
@@ -1562,7 +1566,7 @@ class TestOnResponse:
         }
         flow.response.headers = _make_headers_mock(headers_dict)
 
-        addon.on_response(flow)
+        addon.response(flow)
 
         # Transfer-Encoding should be removed
         assert "Transfer-Encoding" not in headers_dict
@@ -1741,7 +1745,7 @@ class TestFormBodyNonUtf8:
         flow = _make_flow(host="login.example.com", body=payload)
 
         # Should not raise, even though the body has invalid UTF-8
-        addon.on_request(flow)
+        addon.request(flow)
 
         # The valid token should still be replaced
         flow.request.set_content.assert_called()
@@ -1777,7 +1781,7 @@ class TestRawBodyNoMatch:
         payload = b"This is just regular text with no JWT tokens"
         flow = _make_flow(host="api.example.com", body=payload)
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # set_content should NOT be called since no matches were found
         flow.request.set_content.assert_not_called()
@@ -1816,6 +1820,7 @@ class TestQueryNoChange:
         flow = MagicMock()
         flow.request = MagicMock()
         flow.request.host = "api.example.com"
+        flow.request.pretty_host = "api.example.com"
         flow.request.get_content = MagicMock(return_value=b"")
         flow.request.set_content = MagicMock()
         flow.request.headers = MagicMock()
@@ -1826,7 +1831,7 @@ class TestQueryNoChange:
         flow.request.query = (("page", "1"), ("sort", "asc"))
         flow.request._set_query = MagicMock()
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # _set_query should NOT have been called
         flow.request._set_query.assert_not_called()
@@ -1853,7 +1858,7 @@ class TestEmptyMatchersRule:
         flow = _make_flow(host="api.example.com", body=payload)
 
         # Should not raise or modify anything
-        addon.on_request(flow)
+        addon.request(flow)
 
         flow.request.set_content.assert_not_called()
 
@@ -1875,7 +1880,7 @@ class TestEmptyMatchersRule:
         flow = _make_response_flow(host="api.example.com", body=payload)
 
         # Should not raise or modify anything
-        addon.on_response(flow)
+        addon.response(flow)
 
         flow.response.set_content.assert_not_called()
 
@@ -1993,7 +1998,7 @@ class TestHeaderNoCrossRuleInterferenceInResponse:
             {"Authorization": "Bearer my_secret_token_12345"}
         )
 
-        addon.on_response(flow)
+        addon.response(flow)
 
         new_value = flow.response.headers.__setitem__.call_args[0][1]
         assert new_value == "Bearer REPLACED_A"
@@ -2043,7 +2048,7 @@ class TestRawBodyOverlappingReplacements:
         payload = b"before SHORT_TOKEN after"
         flow = _make_flow(host="api.example.com", body=payload)
 
-        addon.on_request(flow)
+        addon.request(flow)
 
         # set_content should be called exactly once
         assert flow.request.set_content.call_count == 1
@@ -2118,7 +2123,7 @@ class TestResolveEnvRefs:
 
         payload = json.dumps({"api_key": "ak_real_secret_here"}).encode()
         flow = _make_flow(host="api.example.com", body=payload)
-        addon.on_request(flow)
+        addon.request(flow)
 
         new_data = json.loads(flow.request.set_content.call_args[0][0])
         assert new_data["api_key"] == "E2E_REDACTED"

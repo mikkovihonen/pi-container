@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     expect \
     procps \
     jq \
-    && pip install mitmproxy \
+    && pip install mitmproxy pyyaml \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m mitmproxy
@@ -21,6 +21,24 @@ USER root
 # Set up entrypoint script
 COPY pi-coding-agent-proxy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+# mitmproxy addons: allowlist (host/IP filtering) and token_replacer (secret
+# redaction). Scripts are baked into the image; the YAML configs are baked as
+# fail-closed defaults but are overridden at runtime by the host configs that
+# run.py mounts over /home/mitmproxy/config/*.yaml.
+COPY pi-coding-agent-proxy/addons/allowlist/allowlist.py /home/mitmproxy/scripts/allowlist.py
+COPY pi-coding-agent-proxy/addons/token_replacer/token_replacer.py /home/mitmproxy/scripts/token_replacer.py
+COPY pi-coding-agent-proxy/addons/allowlist/allowlist_config.yaml /home/mitmproxy/config/allowlist.yaml
+COPY pi-coding-agent-proxy/addons/token_replacer/token_replacer.yaml /home/mitmproxy/config/token_replacer.yaml
+# COPY preserves host file modes (token_replacer.py ships 0600), so ensure the
+# mitmproxy user can read the scripts and configs.
+RUN chmod -R a+rX /home/mitmproxy/scripts /home/mitmproxy/config
+
+# Tell the addons where their configs live. Baked as image ENV so the value is
+# in the process environment from PID 1 onward and inherited by the gosu'd
+# mitmweb, independent of entrypoint export/gosu propagation.
+ENV ALLOWLIST_CONFIG_PATH=/home/mitmproxy/config/allowlist.yaml
+ENV TOKEN_REPLACER_CONFIG_PATH=/home/mitmproxy/config/token_replacer.yaml
 
 EXPOSE 8080 8081
 

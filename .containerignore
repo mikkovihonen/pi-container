@@ -1,0 +1,28 @@
+# MacOS
+.DS_Store
+.localized
+__MACOS__
+.AppleDouble
+.LSOverride
+
+# Python
+__pycache__/
+*.py[cod]
+.env
+.venv
+env/
+venv/
+.pytest_cache
+
+# llama.cpp
+llama-server/.locks
+llama-server/models
+llama-server/logs
+
+# Pi
+pi-coding-agent/logs
+pi-coding-agent/setups
+pi-coding-agent/home/.pi/agent/sessions
+
+# Proxy
+pi-coding-agent-proxy/.locks

@@ -13,28 +13,34 @@ mitmproxy starts
   → ScriptLoader.configure() detects "scripts" option
   → For each script path:
       → load_script(path)  — imports the Python module
-      → AddonManager.register(module.addon)  — registers the module-level "addon" instance
+      → AddonManager.register(module.addons)  — registers each addon in the module-level "addons" list
       → InvokeHook(LoadHook)  — calls addon.load(loader)
       → InvokeHook(ConfigureHook)  — calls addon.configure(updated_keys)
 ```
 
-## Required: Module-Level `addon` Instance
+## Required: Module-Level `addons` List
 
-Your script **must** expose a module-level `addon` attribute that is an instance of a class implementing the mitmproxy addon interface:
+Your script **must** expose a module-level `addons` **list** containing your addon instance(s). mitmproxy discovers addons via this list — a bare `addon = MyAddon()` variable is imported (so its `__init__` runs) but its event hooks are **never registered**, which silently disables the addon:
 
 ```python
 # my_addon.py
 
 class MyAddon:
-    def on_request(self, flow: http.HTTPFlow) -> None:
+    def request(self, flow: http.HTTPFlow) -> None:
         # inspect or modify the request
         pass
 
-# CRITICAL: mitmproxy registers THIS instance
 addon = MyAddon()
+
+# CRITICAL: mitmproxy registers the objects in this list. Without it the
+# script loads (config parses) but no hooks ever fire.
+addons = [addon]
 ```
 
-Without this, mitmproxy has nothing to register and the script is silently ignored (or causes an error).
+> **Why this matters:** if you only assign `addon = MyAddon()` and forget
+> `addons = [addon]`, the module still imports and any config loading done in
+> `__init__` runs — so it *looks* loaded — but `request`/`response` are never
+> called and traffic passes through untouched.
 
 ## Addon Lifecycle Hooks
 
@@ -46,26 +52,29 @@ mitmproxy invokes the following methods on your addon instance at specific point
 | `configure(updated)` | After option change | React to option changes (`updated` is a set of changed keys) |
 | `running()` | Proxy starts | Perform one-time startup tasks |
 | `done()` | Proxy shuts down | Cleanup resources |
-| `on_request(flow)` | HTTP request received | Inspect/modify request before forwarding |
-| `on_response(flow)` | HTTP response received | Inspect/modify response before returning to client |
+| `request(flow)` | HTTP request received | Inspect/modify request before forwarding |
+| `response(flow)` | HTTP response received | Inspect/modify response before returning to client |
 | `client_connected(client)` | Client connects to proxy | Track connected clients |
 | `client_disconnected(client)` | Client disconnects | Cleanup per-client state |
 | `server_connect(conn)`, `server_connected(conn)`, `server_disconnected(conn)` | Server connection events | Track upstream connections |
 | `add_log(log_entry)` | New log entry | Process log messages |
 
-Only the hooks your addon defines are called. Undeclared hooks are ignored.
+Only the hooks your addon defines are called. Undeclared hooks are ignored — and because dispatch is by **exact method name**, a misnamed hook (e.g. `on_request` instead of `request`) is silently never invoked.
 
 ## The Flow Object
 
-`on_request(flow)` and `on_response(flow)` receive an `http.HTTPFlow` instance:
+`request(flow)` and `response(flow)` receive an `http.HTTPFlow` instance:
 
 ```python
 from mitmproxy import http
 
 class MyAddon:
-    def on_request(self, flow: http.HTTPFlow) -> None:
-        # Hostname (may include port: "api.example.com:443")
-        host = flow.request.host
+    def request(self, flow: http.HTTPFlow) -> None:
+        # Hostname for policy decisions. Use pretty_host, NOT host:
+        #   flow.request.host        → in TRANSPARENT mode this is the destination
+        #                              IP (the client already resolved DNS itself)
+        #   flow.request.pretty_host → the Host header / SNI hostname (what you want)
+        host = flow.request.pretty_host
 
         # URL
         url = flow.request.url
@@ -85,7 +94,7 @@ class MyAddon:
         method = flow.request.method
         path = flow.request.path
 
-    def on_response(self, flow: http.HTTPFlow) -> None:
+    def response(self, flow: http.HTTPFlow) -> None:
         # Same access pattern for flow.response
         response_body = flow.response.get_content()
 ```
@@ -99,7 +108,7 @@ When you modify a request or response body, you must:
 3. **Remove Transfer-Encoding**: If the original response had `Transfer-Encoding: chunked`, delete it — RFC 7230 requires `Content-Length` to be ignored when `Transfer-Encoding` is present, which would cause clients to misparse the modified body.
 
 ```python
-def on_request(self, flow: http.HTTPFlow) -> None:
+def request(self, flow: http.HTTPFlow) -> None:
     body = flow.request.get_content()
     new_body = body.replace(b"secret_token", b"REDACTED")
     flow.request.set_content(new_body)
@@ -132,7 +141,7 @@ if "Authorization" in flow.request.headers:
 Query strings are request-only (cannot appear in responses). They are accessed as a tuple of `(key, value)` pairs and modified via `_set_query()`:
 
 ```python
-def on_request(self, flow: http.HTTPFlow) -> None:
+def request(self, flow: http.HTTPFlow) -> None:
     pairs = list(flow.request.query)  # [("api_key", "secret"), ("page", "1")]
     pairs = [(k, "REDACTED") if k == "api_key" else v for k, v in pairs]
     flow.request._set_query(pairs)
@@ -189,8 +198,8 @@ def _validate_rule(self, rule: dict) -> None:
 For addons that modify content based on multiple rules, use a three-phase approach to prevent one rule's replacement from being re-matched by another:
 
 ```python
-def on_request(self, flow: http.HTTPFlow) -> None:
-    hostname = flow.request.host.split(":")[0]  # strip port
+def request(self, flow: http.HTTPFlow) -> None:
+    hostname = flow.request.pretty_host  # Host header / SNI (see note above)
 
     # Phase 1: Detect — scan original data, collect findings, no modification
     findings = self._detect_matches(flow.request)
@@ -290,19 +299,21 @@ Test your addon without running mitmproxy by importing the module directly and u
 from unittest.mock import MagicMock
 from my_addon import MyAddon, addon
 
-def test_on_request():
+def test_request():
     a = MyAddon.__new__(MyAddon)
     a.config = {"rules": [...]}
     a._load_config = lambda *args: None  # skip config loading
 
     flow = MagicMock()
+    # Set BOTH: the addon matches on pretty_host, host is the transparent-mode IP.
     flow.request.host = "api.example.com"
+    flow.request.pretty_host = "api.example.com"
     flow.request.get_content = MagicMock(return_value=b'{"key": "secret"}')
     flow.request.set_content = MagicMock()
     flow.request.headers = MagicMock()
     flow.request.headers.keys = MagicMock(return_value=iter([]))
 
-    a.on_request(flow)
+    a.request(flow)
 
     flow.request.set_content.assert_called()
     new_body = json.loads(flow.request.set_content.call_args[0][0])
@@ -317,21 +328,23 @@ python -m pytest tests/test_my_addon.py -v
 
 ## Common Pitfalls
 
-1. **Missing `addon` instance**: The script file must define `addon = MyClass()` at module level. Without it, mitmproxy silently ignores the script.
+1. **Missing `addons` list**: The script must define `addons = [MyClass()]` at module level. A bare `addon = MyClass()` is imported (so `__init__`/config loading runs and it *looks* loaded) but its hooks are never registered, so it silently does nothing.
 
-2. **Port in hostname**: `flow.request.host` may include a port (e.g., `api.example.com:443`). Strip it before pattern matching: `hostname = flow.request.host.split(":")[0]`.
+2. **Wrong hook name**: Hooks are dispatched by exact name — use `request(self, flow)` / `response(self, flow)`, **not** `on_request` / `on_response`. A misnamed hook is silently never called. Note that a unit test calling `addon.on_request(flow)` directly will still pass, hiding both this and the missing-`addons`-list bug — only an integration run through mitmproxy exercises real dispatch.
 
-3. **Transfer-Encoding conflict**: When you modify a body and set a new `Content-Length`, delete `Transfer-Encoding` if present. Otherwise, clients ignore `Content-Length` per RFC 7230.
+3. **Hostname is an IP in transparent mode**: For policy/matching use `flow.request.pretty_host` (Host header / SNI), not `flow.request.host` — in transparent mode the latter is the destination IP the client already resolved, so hostname rules never match. `pretty_host` has no port, so no port-stripping is needed.
 
-4. **JSON formatting**: `json.dumps()` re-serializes parsed JSON, changing formatting and potentially key order. This is necessary for path-based matching but means the response body may differ from the upstream.
+4. **Transfer-Encoding conflict**: When you modify a body and set a new `Content-Length`, delete `Transfer-Encoding` if present. Otherwise, clients ignore `Content-Length` per RFC 7230.
 
-5. **Form body encoding**: Use `urllib.parse.parse_qsl()` to parse form bodies as a list of `(key, value)` tuples (preserves duplicate keys). Re-encode with `urllib.parse.urlencode()`.
+5. **JSON formatting**: `json.dumps()` re-serializes parsed JSON, changing formatting and potentially key order. This is necessary for path-based matching but means the response body may differ from the upstream.
 
-6. **Non-UTF-8 bodies**: Use `body.decode("utf-8", errors="ignore")` when treating raw bytes as strings.
+6. **Form body encoding**: Use `urllib.parse.parse_qsl()` to parse form bodies as a list of `(key, value)` tuples (preserves duplicate keys). Re-encode with `urllib.parse.urlencode()`.
 
-7. **Header case**: mitmproxy's `Headers` object is case-insensitive for lookups but preserves original casing. Use `headers[key.lower()]` for case-insensitive checks, but set via the original key name to preserve order.
+7. **Non-UTF-8 bodies**: Use `body.decode("utf-8", errors="ignore")` when treating raw bytes as strings.
 
-8. **Query strings are request-only**: `body.query` patterns should only apply to requests. Check `is_response` or `hasattr(target, 'query')` before processing.
+8. **Header case**: mitmproxy's `Headers` object is case-insensitive for lookups but preserves original casing. Use `headers[key.lower()]` for case-insensitive checks, but set via the original key name to preserve order.
+
+9. **Query strings are request-only**: `body.query` patterns should only apply to requests. Check `is_response` or `hasattr(target, 'query')` before processing.
 
 ## mitmweb UI Extensions
 

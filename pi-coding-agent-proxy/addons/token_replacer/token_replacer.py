@@ -708,8 +708,8 @@ class TokenReplacerAddon:
                 matching.append(rule)
         return matching
 
-    def on_request(self, flow: http.HTTPFlow) -> None:
-        """Main hook: inspect and potentially modify every HTTP request.
+    def request(self, flow: http.HTTPFlow) -> None:
+        """Main mitmproxy hook: inspect and potentially modify every HTTP request.
 
         Operates in two phases to avoid cross-rule interference:
         1. **Detection** — all matchers scan the original data and collect findings.
@@ -717,7 +717,9 @@ class TokenReplacerAddon:
            each operating on the original parsed data (single pass).
         """
         # Strip port from hostname (mitmproxy includes it, e.g. "api.example.com:443")
-        hostname = _strip_port(flow.request.host or "")
+        # pretty_host = Host header / SNI hostname; flow.request.host is the
+        # destination IP in transparent mode, so match hostnames on pretty_host.
+        hostname = _strip_port(flow.request.pretty_host or "")
 
         applicable_rules = self._should_replace(hostname)
         if not applicable_rules:
@@ -761,14 +763,16 @@ class TokenReplacerAddon:
                     f"[token-replacer] {total_tokens_found} token(s) {status} in request to {hostname}"
                 )
 
-    def on_response(self, flow: http.HTTPFlow) -> None:
-        """Mirror of on_request: inspect and potentially modify HTTP responses.
+    def response(self, flow: http.HTTPFlow) -> None:
+        """Mirror of request(): inspect and potentially modify HTTP responses.
 
         Applies the same hostname + content-pattern matching to response bodies
         and headers, masking sensitive tokens that may have been returned by the
         upstream server (e.g., API keys in error responses, tokens in 401 bodies).
         """
-        hostname = _strip_port(flow.request.host or "")
+        # pretty_host = Host header / SNI hostname; flow.request.host is the
+        # destination IP in transparent mode, so match hostnames on pretty_host.
+        hostname = _strip_port(flow.request.pretty_host or "")
 
         applicable_rules = self._should_replace(hostname)
         if not applicable_rules:
@@ -1069,3 +1073,8 @@ _config_path = os.environ.get(
 )
 
 addon = TokenReplacerAddon(config_path=_config_path)
+
+# mitmproxy discovers a script's addons via a module-level ``addons`` list.
+# Without this, the module is imported (config loads) but the addon's event
+# hooks (request/response) are never registered, so no redaction happens.
+addons = [addon]

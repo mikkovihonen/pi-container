@@ -469,13 +469,16 @@ class AllowlistAddon:
                 return result
         return None
 
-    def on_request(self, flow: http.HTTPFlow) -> None:
-        """Main hook: filter HTTP requests based on allowlist rules."""
+    def request(self, flow: http.HTTPFlow) -> None:
+        """Main mitmproxy hook: filter HTTP requests based on allowlist rules."""
         # Skip flows that already have a response or error
         if flow.response or flow.error or not flow.live:
             return
 
-        hostname = _strip_port(flow.request.host or "")
+        # pretty_host is the Host header / SNI hostname. In transparent mode
+        # flow.request.host is the destination IP (the client already resolved
+        # DNS), so hostname rules must match against pretty_host.
+        hostname = _strip_port(flow.request.pretty_host or "")
         server_ip = _get_server_ip(flow)
 
         # Always allow localhost
@@ -558,3 +561,8 @@ _config_path = os.environ.get(
 )
 
 addon = AllowlistAddon(config_path=_config_path)
+
+# mitmproxy discovers a script's addons via a module-level ``addons`` list.
+# Without this, the module is imported (config loads) but the addon's event
+# hooks (request/response) are never registered, so no filtering happens.
+addons = [addon]

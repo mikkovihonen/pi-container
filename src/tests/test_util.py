@@ -91,6 +91,12 @@ class TestLoadDotenv:
 
 
 class TestValidateEnvironment:
+    def setup_method(self):
+        os.environ.pop("CONTAINER_RUNTIME", None)
+
+    def teardown_method(self):
+        os.environ.pop("CONTAINER_RUNTIME", None)
+
     def test_all_dependencies_present(self):
         with patch("util.Path") as mock_path, \
              patch("util.shutil") as mock_shutil:
@@ -221,6 +227,50 @@ class TestValidateEnvironment:
             }.get(cmd)
 
             assert validate_environment("/usr/bin/llama-server") == "podman"
+
+    def test_explicit_runtime_from_env(self, monkeypatch):
+        """CONTAINER_RUNTIME env var should override auto-detection."""
+        monkeypatch.setenv("CONTAINER_RUNTIME", "podman")
+        with patch("util.Path") as mock_path, \
+             patch("util.shutil") as mock_shutil:
+
+            mock_path_instance = MagicMock()
+            mock_path_instance.exists.return_value = True
+            mock_path.return_value = mock_path_instance
+
+            result = validate_environment("/usr/bin/llama-server")
+            assert result == "podman"
+
+    def test_explicit_invalid_runtime_raises(self):
+        """An unsupported CONTAINER_RUNTIME value should raise EnvironmentError."""
+        with patch("util.Path") as mock_path, \
+             patch("util.shutil") as mock_shutil, \
+             patch.dict(os.environ, {"CONTAINER_RUNTIME": "nerdctl"}):
+
+            mock_path_instance = MagicMock()
+            mock_path_instance.exists.return_value = True
+            mock_path.return_value = mock_path_instance
+
+            with pytest.raises(EnvironmentError, match="Unsupported CONTAINER_RUNTIME"):
+                validate_environment("/usr/bin/llama-server")
+
+    def test_empty_container_runtime_falls_back(self):
+        """An empty CONTAINER_RUNTIME should fall back to auto-detection."""
+        with patch("util.Path") as mock_path, \
+             patch("util.shutil") as mock_shutil, \
+             patch.dict(os.environ, {"CONTAINER_RUNTIME": ""}):
+
+            mock_path_instance = MagicMock()
+            mock_path_instance.exists.return_value = True
+            mock_path.return_value = mock_path_instance
+
+            mock_shutil.which.side_effect = lambda cmd: {
+                "hf": "/usr/bin/hf",
+                "socat": "/usr/bin/socat",
+                "docker": "/usr/bin/docker",
+            }.get(cmd)
+
+            assert validate_environment("/usr/bin/llama-server") == "docker"
 
 
 # ---------------------------------------------------------------------------
