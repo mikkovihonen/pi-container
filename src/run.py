@@ -271,12 +271,14 @@ class ContainerNetworkManager:
         proxy_image: str,
         proxy_name: str = "proxy",
         config_dir: Optional[Path] = None,
+        llama_ports: Optional[str] = None,
     ) -> None:
         self.container_runtime: str = container_runtime
         self.network_name: str = network_name
         self.proxy_image: str = proxy_image
         self.proxy_name: str = proxy_name
         self.config_dir: Path = config_dir or CONFIG_DIR
+        self.llama_ports: Optional[str] = llama_ports
 
         # Shared directory for synchronization across different run.py processes
         self.lock_dir: Path = REPO_ROOT / "pi-coding-agent-proxy" / ".locks"
@@ -415,6 +417,7 @@ class ContainerNetworkManager:
             "--dns", "1.1.1.1",
             "-p", "8081:8081",
             "--env", f"ADMIN_PASSWORD={ADMIN_PASSWORD}",
+            *(["--env", f"LLAMA_PORTS={self.llama_ports}"] if self.llama_ports else []),
             "--volume",
             f"{self.config_dir / 'token_replacer.yaml'}:/home/mitmproxy/config/token_replacer.yaml:ro",
             *self._env_flags(secrets),
@@ -798,6 +801,7 @@ def main() -> None:
                 "isolated-net",
                 "pi-coding-agent-proxy:local",
                 config_dir=CONFIG_DIR,
+                llama_ports=portconfig,
             ) as _:
                 eth1_ip = None
                 gateway_ip = None

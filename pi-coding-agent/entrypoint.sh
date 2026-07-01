@@ -16,8 +16,6 @@ if [ -z "$DEFAULT_ROUTE" ]; then
 fi
 ip route replace default via $DEFAULT_ROUTE
 
-export PARSED_PAIRS=$(echo "${LLAMA_PORTS:-[]}" | jq -r '.[] | "\(.cp):\(.hp)"')
-
 if [ -n "$HOST_GIT_CONFIG" ]; then
     while IFS=$'\t' read -r key value; do
         if [[ -n "$key" ]]; then
@@ -27,12 +25,6 @@ if [ -n "$HOST_GIT_CONFIG" ]; then
 fi
 
 exec gosu pi bash -c '
-    shift 2
-    for pair in $PARSED_PAIRS; do
-        cp="${pair%%:*}"
-        hp="${pair##*:}"
-        socat "TCP-LISTEN:${cp},fork,reuseaddr" "TCP:${GATEWAY_IP}:${hp}" &
-    done
     {
         uv venv --python /usr/local/bin/python3 --no-managed-python --with pip "$UV_PROJECT_ENVIRONMENT"
         source /home/pi/.venv/bin/activate
