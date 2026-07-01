@@ -1,0 +1,5 @@
+# Notes
+
+- Tool use works without problems
+- Model is comparable to coding with Sonnet ~year ago
+- Requires some guidance and carefult prompt planning, but in general performs well and notices errors in code.

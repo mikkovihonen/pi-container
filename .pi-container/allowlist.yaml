@@ -1,0 +1,5 @@
+# No internet connections needed for pi-container in this project
+global:
+   mode: "allow"
+   default_action: "block"
+   status_code: 403

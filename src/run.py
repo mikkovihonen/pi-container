@@ -118,9 +118,6 @@ def main() -> None:
                 config_dir=CONFIG_DIR,
                 llama_ports=portconfig,
             ) as _:
-                # Read the proxy's isolated-network IP (eth1). The agent routes
-                # both its default route and DNS through this address so all of
-                # its traffic passes through the transparent proxy.
                 proxy_isolated_ip: Optional[str] = None
                 try:
                     result_ip = subprocess.run(
@@ -143,31 +140,24 @@ def main() -> None:
                         f"the agent cannot be routed through the proxy."
                     )
 
-                volume_mounts = [
-                    *RUNTIME.tmpfs_args("/home/pi/"),
-                    "--volume", f"{REPO_ROOT}/pi-coding-agent/home/.pi:/home/pi/.pi",
-                    *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
-                    "--volume", f"{PROJECT_DIR}:/workspace",
-                ]
-
                 pi_container_cmd = [
                     CONTAINER_RUNTIME, "run",
                     "--rm",
                     "--interactive",
                     "--tty",
                     *RUNTIME.agent_network_args("isolated-net", proxy_isolated_ip),
-                    *volume_mounts,
+                    *RUNTIME.tmpfs_args("/home/pi/"),
+                    "--volume", f"{REPO_ROOT}/pi-coding-agent/home/.pi:/home/pi/.pi",
+                    *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
+                    "--volume", f"{PROJECT_DIR}:/workspace",
                     "--workdir", "/workspace",
-                ]
-
-                pi_container_cmd.extend([
                     "--env", f"LLAMA_PORTS={portconfig}",
                     "--env", f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",
                     "--memory", "16g",
                     "--cpus", "8",
                     IMAGE_TAG,
                     *sys.argv[1:]
-                ])
+                ]
 
                 result = subprocess.run(pi_container_cmd)
 
@@ -177,7 +167,6 @@ def main() -> None:
         logger.exception("An error occurred")
         sys.exit(1)
     finally:
-        # Clean up model download lock directory if empty (after all servers stopped)
         Model.cleanup_download_lock_dir(LLAMA_SERVER_LOCK_DIR / "model_download")
 
 if __name__ == "__main__":

@@ -1,0 +1,77 @@
+{
+  "providers": {
+    "local-ornith": {
+        "baseUrl": "http://llama:9999/v1",
+        "api": "openai-completions",
+        "apiKey": "not-required",
+        "compat": {
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": false,
+            "supportsUsageInStreaming": false,
+            "supportsStrictMode": false,
+            "supportsLongCacheRetention": false,
+            "maxTokensField": "max_tokens"
+        },
+        "models": [
+            {
+                "id": "ornith-1.0-35b-Q6_K",
+                "name": "ornith-1.0-35b-Q6_K",
+                "contextWindow": 131072,
+                "compactionThreshold": 128000,
+                "maxTokens": 4096,
+                "streaming": true,
+                "toolCalling": true,
+                "vision": true,
+                "reasoning": true,
+                "thinkingFormat": "chat-template",
+                "chat_template_kwargs": {
+                    "$var": "thinking.effort"
+                },
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "input": ["text","image"],
+                "options": {
+                    "temperature": 0.2,
+                    "top_p": 0.95,
+                    "top_k": 64
+                }
+            }
+        ],
+        "serverCustomParameters": {
+            "hfModels": {
+                "main": {
+                    "fileFlag": "--model",
+                    "repo": "deepreinforce-ai/Ornith-1.0-35B-GGUF",
+                    "file": "ornith-1.0-35b-Q6_K.gguf",
+                    "dir":"Ornith-1.0-35B-GGUF",
+                    "additionalServerFlags": [],
+                    "sha256": ""  
+                }
+            },
+            "flags":[
+                "--no-mmap",
+                "--mlock",
+                "--kv-offload",
+                "--threads", 10,
+                "--threads-batch", 8,
+                "--parallel", 1,
+                "--batch-size", 4096,
+                "--ubatch-size", 512,
+                "--flash-attn", "on",
+                "--ctx-size", 131072,
+                "--ctx-checkpoints", 32,
+                "--checkpoint-min-step", 256,
+                "--repeat-penalty", 1.0,
+                "--top_p", 0.95,
+                "--top_k", 64,
+                "--prio", 2,
+                "--cache-ram", 4096,
+                "--jinja",
+                "--chat-template-file", "llama-server/chat-templates/Ornith-1.0-35B-FP8/chat_template.jinja",
+                "--chat-template-kwargs", "{\"enable_thinking\":true}",
+                "--n-gpu-layers", 999
+            ]
+        }
+    }
+  }
+}

@@ -35,10 +35,6 @@ pi-coding-agent/logs/**
 pi-coding-agent/home/.pi/agent/bin
 pi-coding-agent/home/.pi/agent/sessions
 
-# pi-container
-.pi-container
-.pi-container/**
-
 # Proxy
 pi-coding-agent-proxy/.locks
 pi-coding-agent-proxy/.locks/**
