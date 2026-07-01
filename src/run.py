@@ -804,7 +804,6 @@ def main() -> None:
                 llama_ports=portconfig,
             ) as _:
                 eth1_ip = None
-                gateway_ip = None
                 try:
                     result_ip = subprocess.run(
                         [CONTAINER_RUNTIME, "exec", "proxy", "ip", "addr", "show", "eth1"],
@@ -817,19 +816,6 @@ def main() -> None:
                     if match_ip:
                         eth1_ip = match_ip.group(1)
                         logger.info(f"Found eth1 IP address: {eth1_ip}")
-
-                    # Get default gateway
-                    result_route = subprocess.run(
-                        [CONTAINER_RUNTIME, "exec", "proxy", "ip", "route", "show", "default"],
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                        timeout=5
-                    )
-                    match_route = re.search(r'default via (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', result_route.stdout)
-                    if match_route:
-                        gateway_ip = match_route.group(1)
-                        logger.info(f"Found proxy default gateway: {gateway_ip}")
 
                 except Exception as e:
                     logger.warning(f"Could not retrieve proxy network info: {e}")
@@ -851,8 +837,6 @@ def main() -> None:
 
                 if eth1_ip:
                     pi_container_cmd.extend(["--env", f"DEFAULT_ROUTE={eth1_ip}"])
-                if gateway_ip:
-                    pi_container_cmd.extend(["--env", f"GATEWAY_IP={gateway_ip}"])
 
                 pi_container_cmd.extend([
                     "--env", f"LLAMA_PORTS={portconfig}",
