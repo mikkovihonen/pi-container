@@ -286,6 +286,39 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 
 `BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` are derived from `CONTAINER_RUNTIME` and rarely need setting; provide them only to override the per-runtime default for your host.
 
+## Per workspace configuration
+
+### Introduction
+
+When launched, pi-container will look for workspace specific overrides in ./pi-container and package dependencies in the directory it's launched in.
+
+### APT dependencies
+
+The agent container installs system packages listed in `.pi-container/dependencies/apt/packages.txt` at startup (via `entrypoint.sh`). Each line is a package name passed to `apt-get install -y`. The file is read from the mounted `/workspace` — changes take effect on the next `run.sh` invocation.
+
+If the agent encounters an unmet system dependency during operation, it should append the package name to this file and inform the user that a container restart is needed.
+
+Example:
+```text
+# .pi-container/dependencies/apt/packages.txt
+curl
+```
+
+### Allowlist
+
+The `allowlist.yaml` config in `.pi-container/` defines hostname rules for the [allowlist addon](pi-coding-agent-proxy/addons/allowlist/) running on the mitmproxy transparent proxy. Traffic from the agent container to non-allowlisted hosts is **blocked with HTTP 403**.
+
+Each rule has a `name`, `mode` (`allow`), a list of `hostnames` (supporting `*` wildcards), and optional `ip_ranges`. Traffic matching any rule is permitted; all other traffic is denied. The default mode is `allow` with a `block` default action.
+
+Current default rules allow:
+- **PyPI**: `pypi.org`, `files.pythonhosted.org`
+- **npm**: `registry.npmjs.org`, `*.npmjs.org`
+- **GitHub**: `github.com`, `api.github.com`, `codeload.github.com`, `objects.githubusercontent.com`, and related subdomains
+- **Yarn**: `registry.yarnpkg.com`
+- **Debian apt**: `deb.debian.org`, `security.debian.org`, `packages.debian.org`
+
+Add new rules for any additional hostnames the agent needs to reach (e.g. internal APIs, private package registries).
+
 ### Token Replacer Secrets
 
 The `token_replacer.yaml` config in `.pi-container/` may reference `${ENV:VAR}` values that must be set in the host environment before running. `run.py` scans this config and injects the values as environment variables into the proxy container. Override `ContainerNetworkManager._pull_secrets_from_config()` (in [`src/network.py`](src/network.py)) to integrate with a secret store (Vault, AWS Secrets Manager, etc.).
