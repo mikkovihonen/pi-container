@@ -71,10 +71,8 @@ flowchart TB
 
     subgraph proxy["<b>pi-coding-agent-proxy</b>"]
         direction TB
-        eth1["eth1<br/>isolated-net"]
         mitm["mitmproxy<br/>transparent :8080<br/>allowlist + token_replacer"]
         dns["mitmproxy<br/>DNS :5353<br/>resolves 'llama' → eth1 IP"]
-        eth0["eth0<br/>upstream network<br/>internet + MASQUERADE"]
     end
     style proxy fill:none,text-align:left
 
@@ -82,6 +80,9 @@ flowchart TB
         direction TB
     end
     style host fill:none,text-align:left
+
+    eth1["eth1<br/>isolated-net"]
+    eth0["eth0<br/>upstream network<br/>internet + MASQUERADE"]
 
     %% L3 routing: agent → isolated-net → proxy eth1
     agent_eth -.->|L3 routed via proxy eth1 IP| eth1
