@@ -10,6 +10,7 @@ import subprocess
 import threading
 import uuid
 from contextlib import ExitStack
+from datetime import UTC
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -56,7 +57,7 @@ def _sanitize_ip(ip: str) -> str:
     return ip.strip("[]").replace(":", "-")
 
 
-def _get_agent_container_ips(runtime_bin: str, container_name: str) -> "list[str]":
+def _get_agent_container_ips(runtime_bin: str, container_name: str) -> list[str]:
     """Return the agent container's global isolated-net IPs (IPv4 and/or IPv6).
 
     The agent joins only the isolated network. The proxy sees whichever family a
@@ -91,11 +92,11 @@ def _get_agent_container_ips(runtime_bin: str, container_name: str) -> "list[str
 def _poll_agent_container_ips(
     runtime_bin: str,
     container_name: str,
-    stop: "object",
+    stop: object,
     timeout: float = 20.0,
     interval: float = 0.3,
     settle: float = 1.5,
-) -> "list[str]":
+) -> list[str]:
     """Poll for the agent's isolated-net IPs until found, ``stop`` set, or timeout.
 
     Once the first address appears, keep polling for a short ``settle`` window to
@@ -119,7 +120,7 @@ def _poll_agent_container_ips(
     return sorted(found)
 
 
-def _get_latest_session_file(sessions_dir: "Path") -> "Path | None":
+def _get_latest_session_file(sessions_dir: Path) -> Path | None:
     """Return the most recently modified .jsonl file under sessions/.
 
     Walks all subdirectories (one per workspace) and picks the file with the
@@ -133,7 +134,7 @@ def _get_latest_session_file(sessions_dir: "Path") -> "Path | None":
     return jsonl_files[0] if jsonl_files else None
 
 
-def _extract_session_id(session_file: "Path") -> str:
+def _extract_session_id(session_file: Path) -> str:
     """Parse the first line of a pi session JSONL file to extract its ``id``.
 
     Each pi session file begins with a JSON line of the form
@@ -150,7 +151,7 @@ def _extract_session_id(session_file: "Path") -> str:
 
 
 def _load_flows_from_mount(
-    exports_dir: "Path | None" = None,
+    exports_dir: Path | None = None,
     flows_filename: str = "flows.jsonl",
 ) -> list[dict] | None:
     """Load flow history from the proxy container's mounted exports directory.
@@ -197,7 +198,7 @@ def _load_flows_from_mount(
     return flows
 
 
-def _resolve_flows_filenames(exports_dir: "Path", client_ips: "list[str] | None") -> "list[str]":
+def _resolve_flows_filenames(exports_dir: Path, client_ips: list[str] | None) -> list[str]:
     """Pick which raw ``flows-<ip>.jsonl`` file(s) to read for this session.
 
     A dual-stack agent can have both an IPv4 and IPv6 address, each with its own
@@ -222,10 +223,10 @@ def _resolve_flows_filenames(exports_dir: "Path", client_ips: "list[str] | None"
 
 
 def export_mitmweb_flows(
-    sessions_dir: "Path | None" = None,
-    exports_dir: "Path | None" = None,
-    client_ips: "list[str] | None" = None,
-) -> "Path | None":
+    sessions_dir: Path | None = None,
+    exports_dir: Path | None = None,
+    client_ips: list[str] | None = None,
+) -> Path | None:
     """Export mitmweb flow history to the exports directory, keyed by session.
 
     Reads the flows attributed to this agent container (by client IP, across both
@@ -245,7 +246,7 @@ def export_mitmweb_flows(
     Best-effort: never raises. Returns the path written or None if anything
     goes wrong.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     if sessions_dir is None:
         sessions_dir = REPO_ROOT / "pi-coding-agent" / "home" / ".pi" / "agent" / "sessions"
@@ -288,7 +289,7 @@ def export_mitmweb_flows(
     #    The millisecond-precision time plus the session id in the filename
     #    (e.g. 13-45-12-123_the-session-id.json) keeps exports sortable and
     #    unique even when the session id changes across the container's lifetime.
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     date_dir = exports_dir / "flows" / now.strftime("%Y-%m-%d")
     date_dir.mkdir(parents=True, exist_ok=True)
     timestamp = now.strftime("%H-%M-%S-") + f"{now.microsecond // 1000:03d}"
