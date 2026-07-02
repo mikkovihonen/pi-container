@@ -10,18 +10,18 @@ from coverage.exceptions import NoDataError
 OUTPUT_DIR = "badges"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "coverage.svg")
 
-# Shields.io-style badge dimensions (2/3 label, 1/3 value)
+# Shields.io-style badge dimensions (3/5 label, 2/5 value)
 WIDTH = 114
-LEFT_WIDTH = 76
-RIGHT_WIDTH = 38
+LEFT_WIDTH = 68
+RIGHT_WIDTH = 46
 HEIGHT = 20
 
 # Text content
 LEFT_TEXT = "coverage"
 
 # Text positions (centered in each section, scaled by 10 to match font-size 110)
-LEFT_X = 380  # center of 76px section (76/2 * 10)
-RIGHT_X = 950  # center of right section ((76 + 38/2) * 10)
+LEFT_X = 340  # center of 68px section (68/2 * 10)
+RIGHT_X = 910  # center of right section ((68 + 46/2) * 10)
 
 # Text lengths tuned for visual centering (from original badge style)
 LEFT_TEXT_LENGTH = 530
