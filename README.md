@@ -1,11 +1,25 @@
 # pi-container
 
 [![CI](https://github.com/mikkovihonen/pi-container/actions/workflows/ci.yml/badge.svg)](https://github.com/mikkovihonen/pi-container/actions/workflows/ci.yml)
+[![Coverage](badges/coverage.svg)](#coverage)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python: 3.14](https://img.shields.io/badge/python-3.14-blue.svg)](https://www.python.org/)
 [![uv](https://img.shields.io/badge/desc/uv-managed-brightgreen.svg)](https://docs.astral.sh/uv/)
 
 A containerized environment for running the `pi-coding-agent` with local LLM inference and full auditability. A transparent proxy container based on `mitmproxy` intercepts all HTTP/HTTPS/DNS traffic from the agent container, enforcing allowlisting and injecting secrets as needed. Supports macOS, Linux, and WSL2.
+
+<a name="coverage"></a>
+## Coverage
+
+[![Coverage](badges/coverage.svg)](#coverage)
+
+Test coverage is enforced by CI (minimum 90%). Coverage is measured with `pytest-cov` and a badge SVG is auto-committed to `badges/coverage.svg` on every push to `main`.
+
+Run locally:
+
+```bash
+uv run pytest --cov --cov-report=term-missing
+```
 
 ## Prerequisites
 
@@ -139,7 +153,7 @@ plain NAT), enable it in `.env`:
 
 ### Linux / WSL2
 
-- **Container runtime**: Use `docker` or `podman` instead of the Apple `container` CLI. Set `CONTAINER_RUNTIME=docker` or `CONTAINER_RUNTIME=podman` in your `.env`.
+- **Container runtime**: Use `docker` or `podman`. Set `CONTAINER_RUNTIME=docker` or `CONTAINER_RUNTIME=podman` in your `.env`.
 - **Network**: The default bridge interface is `docker0` (Docker) or `podman0` (Podman). The proxy upstream network defaults to `bridge` (Docker) or `podman` (Podman). Override via `BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` in `.env` if needed.
 - **LLaMA backend**: The `llama-server` binary runs natively on Linux/WSL2. For GPU acceleration on Linux, build llama.cpp with CUDA or ROCm support.
 - **WSL2**: Ensure WSL2 is properly configured with a Linux distro. Docker Desktop or Podman can be used inside WSL2 for containerization.

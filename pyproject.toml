@@ -26,6 +26,19 @@ testpaths = [
     "pi-coding-agent-proxy/addons/token_replacer/tests",
 ]
 
+[tool.coverage.run]
+branch = true
+source = [
+    "src",
+    "pi-coding-agent-proxy/addons/allowlist",
+    "pi-coding-agent-proxy/addons/token_replacer",
+]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_empty = true
+
 [tool.ruff]
 target-version = "py314"
 line-length = 120
