@@ -360,30 +360,36 @@ def _warn_if_proxy_lacks_ipv6_egress(runtime_bin: str, upstream_iface: str = "et
         logger.info(f"Proxy has IPv6 egress on {upstream_iface} (global address + default route present).")
 
 
-# ─── Startup validation ───────────────────────────────────────────────────
+# ─── Startup validation (deferred: only run when this is the entrypoint, not when imported by tests) ──
 
-if not ADMIN_PASSWORD or ADMIN_PASSWORD == "CHANGEME":
-    logger.error(
-        "ERROR: ADMIN_PASSWORD must be set to a non-default value. Update .env with a strong password before running."
+
+def _init_runtime() -> None:
+    """Validate environment and create the runtime instance.
+
+    Called only from ``if __name__ == \"__main__\"`` so that test imports of
+    this module do not trigger subprocess calls or environment checks.
+    """
+    if not ADMIN_PASSWORD or ADMIN_PASSWORD == "CHANGEME":
+        logger.error(
+            "ERROR: ADMIN_PASSWORD must be set to a non-default value. Update .env with a strong password before running."
+        )
+        sys.exit(1)
+
+    try:
+        _CONTAINER_RUNTIME = validate_environment(LLAMA_BIN)
+    except EnvironmentError as e:
+        logger.error(f"Environment Error: {e}")
+        sys.exit(1)
+
+    global CONTAINER_RUNTIME, RUNTIME, BRIDGE_INTERFACE, PROXY_UPSTREAM_NETWORK
+    RUNTIME = ContainerRuntime.create(
+        _CONTAINER_RUNTIME,
+        bridge_interface=BRIDGE_INTERFACE_ENV,
+        upstream_network=PROXY_UPSTREAM_NETWORK_ENV,
     )
-    sys.exit(1)
-
-try:
-    CONTAINER_RUNTIME = validate_environment(LLAMA_BIN)
-except EnvironmentError as e:
-    logger.error(f"Environment Error: {e}")
-    sys.exit(1)
-
-# Encapsulate all runtime-specific behaviour (network flags, mount syntax,
-# host-reachability, etc.) in a ContainerRuntime instance. Explicit env
-# overrides win; otherwise the runtime supplies its own defaults.
-RUNTIME: ContainerRuntime = ContainerRuntime.create(
-    CONTAINER_RUNTIME,
-    bridge_interface=BRIDGE_INTERFACE_ENV,
-    upstream_network=PROXY_UPSTREAM_NETWORK_ENV,
-)
-BRIDGE_INTERFACE: str = RUNTIME.bridge_interface
-PROXY_UPSTREAM_NETWORK: str = RUNTIME.upstream_network
+    CONTAINER_RUNTIME = _CONTAINER_RUNTIME
+    BRIDGE_INTERFACE = RUNTIME.bridge_interface
+    PROXY_UPSTREAM_NETWORK = RUNTIME.upstream_network
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────
@@ -568,4 +574,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    _init_runtime()
     main()
