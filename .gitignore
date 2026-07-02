@@ -39,3 +39,7 @@ pi-coding-agent/home/.pi/agent/sessions
 # Proxy
 pi-coding-agent-proxy/.locks
 pi-coding-agent-proxy/.locks/**
+
+# Generated badges (committed by CI)
+badges/
+badges/**
