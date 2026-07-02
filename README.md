@@ -1,6 +1,6 @@
 # pi-container
 
-[![CI](https://github.com/pi-container/pi-container/actions/workflows/ci.yml/badge.svg)](https://github.com/pi-container/pi-container/actions/workflows/ci.yml)
+[![CI](https://github.com/mikkovihonen/pi-container/actions/workflows/ci.yml/badge.svg)](https://github.com/mikkovihonen/pi-container/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python: 3.14](https://img.shields.io/badge/python-3.14-blue.svg)](https://www.python.org/)
 [![uv](https://img.shields.io/badge/desc/uv-managed-brightgreen.svg)](https://docs.astral.sh/uv/)
