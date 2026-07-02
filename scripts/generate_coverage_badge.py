@@ -26,10 +26,10 @@ color = (
 svg = (
     f'<svg xmlns="http://www.w3.org/2000/svg" width="120" height="20">'
     f'<rect width="120" height="20" fill="#24292e" rx="3"/>'
-    f'<rect x="60" width="60" height="20" fill="{color}" rx="3"/>'
-    f'<text x="30" y="14" fill="#fff" '
+    f'<rect x="68" width="52" height="20" fill="{color}" rx="3"/>'
+    f'<text x="10" y="14" fill="#fff" '
     f'font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">coverage</text>'
-    f'<text x="90" y="14" fill="#fff" '
+    f'<text x="82" y="14" fill="#fff" '
     f'font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">{pct}%</text>'
     f'</svg>'
 )
