@@ -72,6 +72,14 @@ def env_truthy(name: str, default: bool = False) -> bool:
 # v4 REDIRECT/NAT rules in ip6tables. See .env.example for the caveats.
 IPV6_ENABLED: bool = env_truthy("IPV6_ENABLED", default=False)
 
+# Whether to export mitmweb flow history (HTTP/HTTPS requests/responses
+# captured by the proxy) after the agent shuts down. When enabled, the
+# flow_export addon's bind-mounted JSON Lines file (appended to as each flow
+# completes) is read after the agent exits and stored, bucketed by UTC date,
+# under ``.pi-container/exports/flows/{YYYY-MM-DD}/{HH-MM-SS-mmm}_{session-id}.json``.
+# Default: disabled — set true only when you need the capture.
+MITMWEB_FLOW_EXPORT_ENABLED: bool = env_truthy("MITMWEB_FLOW_EXPORT_ENABLED", default=False)
+
 # Per-protocol forwarding opt-ins for the proxy. Only HTTP/HTTPS/DNS are
 # intercepted by mitmproxy; every other protocol the agent emits is forwarded
 # UNINSPECTED, so the proxy defaults to denying it. Setting one of these (in

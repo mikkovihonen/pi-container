@@ -40,6 +40,9 @@ pi-coding-agent/home/.pi/agent/sessions
 pi-coding-agent-proxy/.locks
 pi-coding-agent-proxy/.locks/**
 
+# Flow-export audit trail (contains captured request/response bodies + headers)
+.pi-container/exports/
+
 # Generated badges (committed by CI)
 badges/
 badges/**

@@ -18,6 +18,7 @@ import yaml
 
 from config import ADMIN_PASSWORD, CONFIG_DIR, PROXY_FORWARD_ENV, REPO_ROOT
 from runtimes import ContainerRuntime
+from util import run_quiet
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -275,10 +276,10 @@ class ContainerNetworkManager:
         )
         if result.returncode != 0:
             logger.info(f"Creating network {self.network_name} (ipv6={self.ipv6})...")
-            subprocess.run(
+            run_quiet(
                 [self.container_runtime, *self.runtime.create_isolated_network_argv(self.network_name, ipv6=self.ipv6)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                label=f"create network {self.network_name}",
+                logger=logger,
             )
         else:
             logger.info(f"Network {self.network_name} already exists, skipping creation.")
@@ -303,6 +304,21 @@ class ContainerNetworkManager:
                 config_mounts += ["--volume", f"{host_path}:{container_path}:ro"]
             else:
                 logger.warning(f"Addon config {host_path} not found; using the image default.")
+
+        # Mount a host directory for flow exports. The flow_export addon appends
+        # each flow to a per-client-IP JSON Lines file (flows-<ip>.jsonl) under
+        # /home/mitmproxy/exports inside the container; this mount makes them
+        # accessible to run.py on the host after the session. The host directory
+        # must exist first: podman refuses to auto-create a bind-mount source and
+        # the container would fail to start (surfacing as a 30s health-probe
+        # hang, since the run error → DEVNULL).
+        exports_host_dir = REPO_ROOT / ".pi-container" / "exports"
+        exports_host_dir.mkdir(parents=True, exist_ok=True)
+        exports_container_path = "/home/mitmproxy/exports"
+        exports_mounts: list[str] = [
+            "--volume",
+            f"{exports_host_dir}:{exports_container_path}",
+        ]
 
         cmd = [
             self.container_runtime,
@@ -331,16 +347,21 @@ class ContainerNetworkManager:
             # Per-protocol forwarding opt-ins (uninspected protocols).
             *[flag for k, v in PROXY_FORWARD_ENV.items() for flag in ("--env", f"{k}={v}")],
             *config_mounts,
+            *exports_mounts,
             *self._env_flags(secrets),
             self.proxy_image,
         ]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Label (not the argv) is what surfaces on failure — cmd carries
+        # ADMIN_PASSWORD and must never reach logs/tracebacks.
+        run_quiet(cmd, label=f"start proxy container {self.proxy_name}", logger=logger)
 
         # Some runtimes (Docker) attach the isolated network only after run.
         connect_argv = self.runtime.proxy_secondary_connect_argv(self.proxy_name, self.network_name)
         if connect_argv:
-            subprocess.run(
-                [self.container_runtime, *connect_argv], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            run_quiet(
+                [self.container_runtime, *connect_argv],
+                label=f"connect {self.proxy_name} to {self.network_name}",
+                logger=logger,
             )
 
         # Wait for proxy to be ready via health probe
@@ -348,14 +369,24 @@ class ContainerNetworkManager:
 
     def _actually_stop(self) -> None:
         logger.info(f"Stopping proxy container {self.proxy_name}...")
-        subprocess.run(
-            [self.container_runtime, "stop", self.proxy_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        # Teardown is best-effort: a container/network that is already gone must
+        # not abort cleanup, so check=False (log a warning, don't raise).
+        run_quiet(
+            [self.container_runtime, "stop", self.proxy_name],
+            check=False,
+            label=f"stop proxy container {self.proxy_name}",
+            logger=logger,
         )
 
         delete_argv = self.runtime.delete_isolated_network_argv(self.network_name)
         if delete_argv:
             logger.info(f"Removing network {self.network_name}...")
-            subprocess.run([self.container_runtime, *delete_argv], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            run_quiet(
+                [self.container_runtime, *delete_argv],
+                check=False,
+                label=f"remove network {self.network_name}",
+                logger=logger,
+            )
 
     def _wait_for_proxy_health(self, timeout: int = 30) -> None:
         """Wait for the proxy container's mitmweb UI to become healthy.

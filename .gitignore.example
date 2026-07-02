@@ -1,0 +1,26 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# pi-container — .gitignore entries for a workspace that runs the pi-coding-agent
+#
+# Copy the lines below into your project's .gitignore. Everything else under
+# .pi-container/ is configuration you SHOULD commit so the environment stays
+# reproducible: allowlist.yaml, token_replacer.yaml, tmpfs.yaml, and
+# dependencies/apt/packages.txt. (token_replacer.yaml holds only ${ENV:VAR}
+# references, never resolved secrets.)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# REQUIRED — proxy flow capture. Sensitive and ephemeral: full request/response
+# bodies and headers (including any Authorization/cookie values the
+# token_replacer did not redact), as raw flows-<ip>.jsonl files and per-session
+# snapshots under exports/sessions/<session-id>/. Also where run.py shadows an
+# empty tmpfs, which can leave an empty exports/ dir even with no traffic.
+# Never commit.
+.pi-container/exports/
+
+# OPTIONAL — scratch directories you mount as tmpfs via .pi-container/tmpfs.yaml.
+# Their contents live in RAM and never persist across runs, but the (empty)
+# mount points can appear in your workspace. These mirror the default
+# tmpfs.yaml example; adjust to match your own and your project's toolchain.
+.venv/
+.pytest_cache/
+.ruff_cache/
+__pycache__/

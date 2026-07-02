@@ -438,3 +438,4 @@ This writes `index.html`, `static/`, `flows.json`, and flow content to the speci
 |-------|------|-------------|
 | Token Replacer | [`token_replacer/`](token_replacer/) | Replaces sensitive tokens in HTTP bodies/headers based on hostname + content patterns |
 | Allowlist | [`allowlist/`](allowlist/) | Filters HTTP traffic by domain/IP allowlist or blocklist; supports glob, regex, CIDR ranges |
+| Flow Export | [`flow_export/`](flow_export/) | Appends all flows (including blocked/killed) to a JSON Lines audit trail as they complete |

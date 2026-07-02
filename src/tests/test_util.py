@@ -24,6 +24,7 @@ from util import (
     get_sanitized_git_config_json,
     handle_signal,
     load_dotenv,
+    run_quiet,
     stop_process_group,
     validate_environment,
 )
@@ -479,3 +480,76 @@ class TestGetSanitizedGitConfigJson:
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
         assert result["remote.origin.url"] == "https://github.com/org/repo.git"
+
+
+# ---------------------------------------------------------------------------
+# run_quiet
+# ---------------------------------------------------------------------------
+
+
+class TestRunQuiet:
+    def test_success_returns_completed_process(self):
+        """A zero-exit command returns its CompletedProcess and logs nothing."""
+        mock_logger = MagicMock()
+        result = run_quiet(["sh", "-c", "exit 0"], logger=mock_logger)
+        assert result.returncode == 0
+        mock_logger.error.assert_not_called()
+        mock_logger.warning.assert_not_called()
+
+    def test_captures_output_on_success(self):
+        """stdout is captured (not passed through) and available on the result."""
+        result = run_quiet(["sh", "-c", "echo hello"], logger=MagicMock())
+        assert result.stdout == "hello\n"
+
+    def test_failure_raises_and_logs_error(self):
+        """check=True (default): non-zero exit logs an error and raises."""
+        mock_logger = MagicMock()
+        with pytest.raises(subprocess.CalledProcessError):
+            run_quiet(["sh", "-c", "exit 3"], label="do a thing", logger=mock_logger)
+        mock_logger.error.assert_called_once()
+        assert "do a thing" in str(mock_logger.error.call_args)
+
+    def test_failure_message_includes_stderr(self):
+        """The captured stderr is surfaced in the logged failure message."""
+        mock_logger = MagicMock()
+        with pytest.raises(subprocess.CalledProcessError):
+            run_quiet(["sh", "-c", "echo boom 1>&2; exit 1"], label="do a thing", logger=mock_logger)
+        assert "boom" in str(mock_logger.error.call_args)
+
+    def test_exception_does_not_leak_argv(self):
+        """A secret passed on the command line must not appear in the raised
+        exception string — the label is used as the exception's command."""
+        mock_logger = MagicMock()
+        with pytest.raises(subprocess.CalledProcessError) as excinfo:
+            run_quiet(
+                ["sh", "-c", "exit 1", "SECRETPW123"],
+                label="start proxy container proxy",
+                logger=mock_logger,
+            )
+        assert "SECRETPW123" not in str(excinfo.value)
+        assert excinfo.value.cmd == "start proxy container proxy"
+
+    def test_check_false_warns_and_returns(self):
+        """check=False: non-zero exit logs a warning and returns instead of raising."""
+        mock_logger = MagicMock()
+        result = run_quiet(["sh", "-c", "exit 1"], check=False, label="cleanup", logger=mock_logger)
+        assert result.returncode == 1
+        mock_logger.warning.assert_called_once()
+        mock_logger.error.assert_not_called()
+
+    def test_label_defaults_to_executable(self):
+        """Without an explicit label, the executable name identifies the command."""
+        mock_logger = MagicMock()
+        with pytest.raises(subprocess.CalledProcessError) as excinfo:
+            run_quiet(["false"], logger=mock_logger)
+        assert excinfo.value.cmd == "false"
+
+    def test_kwargs_passthrough_to_subprocess_run(self):
+        """Extra kwargs (e.g. timeout) are forwarded to subprocess.run."""
+        with patch("util.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=["x"], returncode=0, stdout="", stderr="")
+            run_quiet(["x"], timeout=5, logger=MagicMock())
+        _, kwargs = mock_run.call_args
+        assert kwargs["timeout"] == 5
+        assert kwargs["capture_output"] is True
+        assert kwargs["text"] is True

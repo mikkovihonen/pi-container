@@ -4,6 +4,7 @@ sys.dont_write_bytecode = True
 
 import errno
 import json
+import logging
 import os
 import re
 import shutil
@@ -12,6 +13,59 @@ import socket
 import subprocess
 import time
 from pathlib import Path
+
+_LOG = logging.getLogger(__name__)
+
+
+def run_quiet(
+    cmd: list[str],
+    *,
+    check: bool = True,
+    label: str | None = None,
+    logger: logging.Logger | None = None,
+    **kwargs,
+) -> subprocess.CompletedProcess:
+    """Run a command quietly on success but surface the reason on failure.
+
+    Drop-in replacement for the ``subprocess.run(cmd, stdout=DEVNULL,
+    stderr=DEVNULL)`` fire-and-forget pattern, which hides *why* a command
+    failed. Output is captured instead of discarded; on a non-zero exit the
+    captured stderr (or stdout) is logged, and — unless ``check=False`` — a
+    ``CalledProcessError`` is raised so the failure cannot pass silently.
+
+    Args:
+        cmd: The command argv.
+        check: If True (default), log the failure and raise
+            ``CalledProcessError`` on non-zero exit. If False, log a warning
+            and return anyway — for teardown/cleanup where a failed command
+            should not abort the caller.
+        label: Human-readable name for the command in messages. Defaults to the
+            executable (``cmd[0]``). Also used in place of the raw argv in the
+            raised exception, so secrets passed on the command line (e.g.
+            ``ADMIN_PASSWORD``) never leak into tracebacks/logs.
+        logger: Logger to emit failure messages to (defaults to this module's).
+        **kwargs: Passed through to ``subprocess.run`` (e.g. ``timeout``).
+
+    Returns:
+        The ``CompletedProcess`` (with captured ``stdout``/``stderr``).
+    """
+    log = logger if logger is not None else _LOG
+    name = label or (cmd[0] if cmd else "command")
+    result = subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        msg = f"{name} failed (exit {result.returncode})"
+        if detail:
+            msg += f": {detail}"
+        if check:
+            log.error(msg)
+            # Raise with ``name`` (not the raw argv) so command-line secrets
+            # are not embedded in the exception string.
+            raise subprocess.CalledProcessError(
+                result.returncode, name, output=result.stdout, stderr=result.stderr
+            )
+        log.warning(msg)
+    return result
 
 
 def load_dotenv(dotenv_path: Path):

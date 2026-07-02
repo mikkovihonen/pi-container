@@ -346,6 +346,21 @@ Each path is mounted at the same absolute location inside the container. On podm
 
 Paths are validated on startup — invalid paths are silently skipped. The list is deduplicated and sorted for deterministic output.
 
+### Version control (.gitignore)
+
+A ready-to-copy [`.gitignore.example`](.gitignore.example) lists every entry a workspace needs. Copy the relevant lines into your project's `.gitignore`.
+
+Most of `.pi-container/` is project configuration you **should commit** so the environment is reproducible: `allowlist.yaml`, `token_replacer.yaml`, `tmpfs.yaml`, and `dependencies/apt/packages.txt`. (`token_replacer.yaml` holds only `${ENV:VAR}` references, never resolved secrets — see [Token Replacer Secrets](#token-replacer-secrets).)
+
+The one directory you **must ignore** is the flow-export output:
+
+```gitignore
+# pi-container: proxy flow capture — sensitive and ephemeral, never commit
+.pi-container/exports/
+```
+
+`.pi-container/exports/` holds the proxy's captured HTTP/HTTPS traffic — full request/response bodies and headers, including any `Authorization`/cookie values the [token_replacer](pi-coding-agent-proxy/addons/token_replacer/) did not redact — as raw `flows-<ip>.jsonl` files and date-bucketed snapshots under `exports/flows/<YYYY-MM-DD>/<HH-MM-SS-mmm>_<session-id>.json`. Treat it as sensitive. It is also where run-time shadows an empty tmpfs (so the agent can't read prior captures), which can leave an empty `exports/` dir in a workspace even when no traffic was captured. This repo already ignores it; add the entry above to **your** project's `.gitignore` when you run pi-container inside it.
+
 ## Development
 
 The host-side Python (`src/`) is managed with [uv](https://docs.astral.sh/uv/). Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`.
@@ -373,8 +388,6 @@ still operating on the caller's working directory.
 
 <a name="coverage"></a>
 ## Coverage
-
-[![Coverage](badges/coverage.svg)](#coverage)
 
 Test coverage is enforced by CI (minimum 90%). Coverage is measured with `pytest-cov` and a badge SVG is auto-committed to `badges/coverage.svg` on every push to `main`.
 
