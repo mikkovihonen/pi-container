@@ -205,7 +205,8 @@ plain NAT), enable it in `.env`:
 │
 └── .pi-container/                    # Host-side config mounted into proxy
     ├── token_replacer.yaml           # Token redaction rules
-    └── allowlist.yaml                # Hostname allowlist
+    ├── allowlist.yaml                # Hostname allowlist
+    └── tmpfs.yaml                    # Transient tmpfs mount paths (volatile RAM disks)
 ```
 
 ## Getting Started
@@ -288,6 +289,23 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 ### Token Replacer Secrets
 
 The `token_replacer.yaml` config in `.pi-container/` may reference `${ENV:VAR}` values that must be set in the host environment before running. `run.py` scans this config and injects the values as environment variables into the proxy container. Override `ContainerNetworkManager._pull_secrets_from_config()` (in [`src/network.py`](src/network.py)) to integrate with a secret store (Vault, AWS Secrets Manager, etc.).
+
+### Transient tmpfs Mounts
+
+The `tmpfs.yaml` config in `.pi-container/` defines paths that are mounted as **tmpfs** (volatile RAM disks) inside the pi container. Data written to these paths is **lost when the container stops** — useful for build artifacts, caches, and temp files that should not persist across runs.
+
+```yaml
+# .pi-container/tmpfs.yaml
+paths:
+  - /workspace/.venv
+  - /workspace/.pytest_cache
+  - /workspace/.ruff_cache
+  - /workspace/src/__pycache__
+```
+
+Each path is mounted at the same absolute location inside the container. On podman/docker, mounts use the `notmpcopyup` flag so they start empty (matching Apple `container` behavior) rather than copying the host's bind-mounted content into the tmpfs.
+
+Paths are validated on startup — invalid paths are silently skipped. The list is deduplicated and sorted for deterministic output.
 
 ## Development
 
