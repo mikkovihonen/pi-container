@@ -28,8 +28,6 @@ Before running, ensure you have the following installed on your host machine:
   - On WSL2: `sudo apt install llama.cpp`
 - **socat** (Apple `container` runtime only — used to expose the host `llama-server` on the container bridge; not needed for podman/docker):
   - On macOS: `brew install socat`
-  - On Linux (Debian/Ubuntu): `sudo apt install socat`
-  - On WSL2: `sudo apt install socat`
 
 Python dependencies (`huggingface_hub[cli]`, `pyyaml`) are declared in
 `pyproject.toml` and installed by `uv` — you do not install them manually.
