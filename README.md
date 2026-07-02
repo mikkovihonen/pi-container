@@ -95,7 +95,7 @@ flowchart TB
     eth1 -.->|opt-in FORWARD → eth0 → MASQUERADE| eth0
     eth0 -->|internet| Out["Internet"]
 
-    subgraph llama_net["llama-server reachability<br/>(per-runtime network component)"]
+    subgraph llama_net["llama-server reachability(per-runtime network component)"]
         direction TB
         socat["Apple container<br/>host bridge + socat"]
         podman_net["podman<br/>host.containers.internal<br/>(gvproxy)"]
