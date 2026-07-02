@@ -1,4 +1,5 @@
 import sys
+
 sys.dont_write_bytecode = True
 
 """llama-server process lifecycle (start, share via refcount, socat bridge)."""
@@ -12,18 +13,31 @@ import re
 import subprocess
 import time
 import urllib.request
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any
 
 from config import MAX_STARTUP_ATTEMPTS
 from models import Model, ServerConfig
 from util import get_free_port, stop_process_group
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 logger = logging.getLogger(__name__)
 
 
 class Server:
-    def __init__(self, config: ServerConfig, models_dir: Path, llama_bin: Optional[str], bridge_interface: str, lock_dir: Path, repo_root: Path, server_id: str, container_port: Optional[int] = None, use_host_socat: bool = True) -> None:
+    def __init__(
+        self,
+        config: ServerConfig,
+        models_dir: Path,
+        llama_bin: str | None,
+        bridge_interface: str,
+        lock_dir: Path,
+        repo_root: Path,
+        server_id: str,
+        container_port: int | None = None,
+        use_host_socat: bool = True,
+    ) -> None:
         self.config: ServerConfig = config
         self.server_id: str = server_id
         self.models_dir: Path = models_dir
@@ -35,74 +49,78 @@ class Server:
         self.use_host_socat: bool = use_host_socat
         self.lock_dir: Path = lock_dir
         self.repo_root: Path = repo_root
-        self.port: Optional[int] = None
-        self.container_port: Optional[int] = container_port
-        self.server_pid: Optional[int] = None
-        self.socat_process: Optional[subprocess.Popen] = None
-        self.models: Dict[str, Model] = {}
+        self.port: int | None = None
+        self.container_port: int | None = container_port
+        self.server_pid: int | None = None
+        self.socat_process: subprocess.Popen | None = None
+        self.models: dict[str, Model] = {}
 
         server_lock_dir: Path = self.lock_dir / self.server_id
-        self.paths: Dict[str, Path] = {
+        self.paths: dict[str, Path] = {
             "lock_dir": server_lock_dir,
             "ref_count_lock": server_lock_dir / ".llama_server_refcount.lock",
             "ref_count_file": server_lock_dir / ".llama_server_refcount",
             "pid_file": server_lock_dir / ".llama_server.pid",
-            "log_file": self.repo_root / "llama-server" / "logs" / self.server_id / "llama-server.log"
+            "log_file": self.repo_root / "llama-server" / "logs" / self.server_id / "llama-server.log",
         }
 
         for label, model_config in self.config.hf_models.items():
-            self.models[label] = Model(
-                label=label,
-                config=model_config,
-                models_dir=self.models_dir
-            )
+            self.models[label] = Model(label=label, config=model_config, models_dir=self.models_dir)
 
-    def __enter__(self) -> 'Server':
+    def __enter__(self) -> Server:
         self.start()
         return self
 
-    def __exit__(self, exc_type: Optional[Type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[Any]) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any | None) -> None:
         self.stop()
 
     def _ensure_models_downloaded(self) -> None:
         for model in self.models.values():
             model.download()
 
-    def _get_server_flags(self) -> List[str]:
+    def _get_server_flags(self) -> list[str]:
         if self.models.get("main") is None:
             raise ValueError(f"[{self.server_id}] No main model defined in config.")
 
-        flags: List[str] = [str(flag) for flag in self.config.flags]
+        flags: list[str] = [str(flag) for flag in self.config.flags]
         flags.extend(["--alias", self.server_id])
         for model in self.models.values():
             flags.extend([str(model.config.file_flag), str(model.path)])
             flags.extend([str(flag) for flag in model.config.additional_server_flags])
         return flags
 
-    def _get_bridge_ip(self) -> Optional[str]:
+    def _get_bridge_ip(self) -> str | None:
         # Try 'ip addr' first (Linux)
         with contextlib.suppress(subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-            result = subprocess.check_output(['ip', 'addr', 'show', self.bridge_interface], text=True, stderr=subprocess.DEVNULL, timeout=5)
-            match = re.search(r'inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+', result)
+            result = subprocess.check_output(
+                ["ip", "addr", "show", self.bridge_interface], text=True, stderr=subprocess.DEVNULL, timeout=5
+            )
+            match = re.search(r"inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+", result)
             if match:
                 return match.group(1)
 
         # Fallback to 'ifconfig' (macOS / older Linux)
         with contextlib.suppress(subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-            result = subprocess.check_output(['ifconfig', self.bridge_interface], text=True, stderr=subprocess.DEVNULL, timeout=5)
-            match = re.search(r'inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', result)
+            result = subprocess.check_output(
+                ["ifconfig", self.bridge_interface], text=True, stderr=subprocess.DEVNULL, timeout=5
+            )
+            match = re.search(r"inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", result)
             if match:
                 return match.group(1)
 
         return None
 
-    def _cleanup(self, pid_to_kill: Optional[int] = None, full_cleanup: bool = False) -> None:
+    def _cleanup(self, pid_to_kill: int | None = None, full_cleanup: bool = False) -> None:
         """Stops processes and cleans up local files for this server instance."""
         try:
             target_pid = pid_to_kill or self.server_pid
             if target_pid:
                 logger.info(f"[Server: {self.server_id}] Stopping server process group (pid {target_pid})...")
-                stop_process_group(target_pid, f"llama-server {'attempt' if not full_cleanup else 'group'} {self.server_id}", logger=logger)
+                stop_process_group(
+                    target_pid,
+                    f"llama-server {'attempt' if not full_cleanup else 'group'} {self.server_id}",
+                    logger=logger,
+                )
                 if target_pid == self.server_pid:
                     self.server_pid = None
 
@@ -111,7 +129,7 @@ class Server:
             # shared-server case (the process doing the final cleanup attached to
             # an existing server and never owned the socat) and stale socats left
             # behind by a crashed run.py.
-            socat_pid: Optional[int] = None
+            socat_pid: int | None = None
             if self.socat_process and self.socat_process.poll() is None:
                 socat_pid = self.socat_process.pid
             if socat_pid is None:
@@ -147,13 +165,15 @@ class Server:
             else:
                 return False
 
-            with contextlib.suppress(Exception):
-                with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/health", timeout=2) as response:
-                    if response.status == 200:
-                        data = json.loads(response.read().decode("utf-8"))
-                        if data.get("status") == "ok":
-                            logger.info(f"[Server: {self.server_id}] [OK]")
-                            return True
+            with (
+                contextlib.suppress(Exception),
+                urllib.request.urlopen(f"http://127.0.0.1:{self.port}/health", timeout=2) as response,
+            ):
+                if response.status == 200:
+                    data = json.loads(response.read().decode("utf-8"))
+                    if data.get("status") == "ok":
+                        logger.info(f"[Server: {self.server_id}] [OK]")
+                        return True
 
             time.sleep(2)
             elapsed += 2
@@ -183,7 +203,9 @@ class Server:
                     logger.info(f"[Server: {self.server_id}] Attaching to existing healthy server on port {port}")
                     self.paths["ref_count_file"].write_text(str(ref_count))
                 else:
-                    logger.warning(f"[Server: {self.server_id}] Existing server is not healthy or stale. Cleaning up and restarting...")
+                    logger.warning(
+                        f"[Server: {self.server_id}] Existing server is not healthy or stale. Cleaning up and restarting..."
+                    )
                     pid_to_cleanup = pid
                     should_start_new = True
                     self.paths["ref_count_file"].write_text("1")
@@ -206,7 +228,7 @@ class Server:
                 return 0
         return 0
 
-    def _read_socat_pid(self) -> Optional[int]:
+    def _read_socat_pid(self) -> int | None:
         """Read the socat pid recorded on the 3rd line of the pid file, if any."""
         if not self.paths["pid_file"].exists():
             return None
@@ -214,11 +236,11 @@ class Server:
             lines = self.paths["pid_file"].read_text().splitlines()
             if len(lines) >= 3 and lines[2].strip():
                 return int(lines[2])
-        except (ValueError, IndexError, OSError):
+        except ValueError, IndexError, OSError:
             return None
         return None
 
-    def _is_existing_server_healthy(self) -> tuple[bool, Optional[int], Optional[int]]:
+    def _is_existing_server_healthy(self) -> tuple[bool, int | None, int | None]:
         if not self.paths["pid_file"].exists():
             return False, None, None
 
@@ -228,15 +250,17 @@ class Server:
                 return False, None, None
             pid = int(lines[0])
             port = int(lines[1])
-        except (ValueError, IndexError):
+        except ValueError, IndexError:
             return False, None, None
 
         try:
             os.kill(pid, 0)
-            with contextlib.suppress(Exception):
-                with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as resp:
-                    if resp.status == 200:
-                        return True, pid, port
+            with (
+                contextlib.suppress(Exception),
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as resp,
+            ):
+                if resp.status == 200:
+                    return True, pid, port
         except OSError:
             pass
 
@@ -250,19 +274,19 @@ class Server:
 
             self.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
             self.paths["log_file"].parent.mkdir(parents=True, exist_ok=True)
-            cmd: List[str] = [
+            cmd: list[str] = [
                 self.llama_bin,
-                "--host", "127.0.0.1",
-                "--port", str(port),
-                "--log-file", str(self.paths["log_file"]),
-                *self._get_server_flags()
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--log-file",
+                str(self.paths["log_file"]),
+                *self._get_server_flags(),
             ]
 
             process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
             )
             self.server_pid = process.pid
 
@@ -272,24 +296,17 @@ class Server:
 
                 bridge_ip = self._get_bridge_ip() if self.use_host_socat else None
                 if bridge_ip:
-                    socat_cmd = [
-                        "socat",
-                        f"TCP-LISTEN:{port},fork,reuseaddr,bind={bridge_ip}",
-                        f"TCP:127.0.0.1:{port}"
-                    ]
+                    socat_cmd = ["socat", f"TCP-LISTEN:{port},fork,reuseaddr,bind={bridge_ip}", f"TCP:127.0.0.1:{port}"]
                     try:
                         # start_new_session gives socat its own process group so
                         # it (and its per-connection forked children) can be
                         # reaped via killpg without touching run.py, and by a
                         # different run.py process reading the pid file.
                         self.socat_process = subprocess.Popen(
-                            socat_cmd,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            start_new_session=True
+                            socat_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
                         )
                     except Exception as e:
-                        raise Exception(f"Failed to start socat: {e}")
+                        raise Exception(f"Failed to start socat: {e}") from None
 
                 # pid file: llama pid, port, and socat pid (blank if no socat).
                 socat_pid = self.socat_process.pid if self.socat_process else ""
@@ -306,7 +323,9 @@ class Server:
                 logger.warning(f"[Server: {self.server_id}] Attempt {attempt + 1}/{MAX_STARTUP_ATTEMPTS} failed: {e}")
                 self._cleanup(full_cleanup=False)
 
-        raise Exception(f"Failed to start server {self.server_id} after {MAX_STARTUP_ATTEMPTS} attempts. Last error: {last_exception}")
+        raise Exception(
+            f"Failed to start server {self.server_id} after {MAX_STARTUP_ATTEMPTS} attempts. Last error: {last_exception}"
+        )
 
     def stop(self) -> None:
         should_full_cleanup = False

@@ -1,23 +1,23 @@
 import sys
+
 sys.dont_write_bytecode = True
 
-import os
-import subprocess
-from pathlib import Path
-from typing import Optional
-import shutil
-import socket
 import errno
-import signal
 import json
-import time
+import os
 import re
+import shutil
+import signal
+import socket
+import subprocess
+import time
+from pathlib import Path
 
 
 def load_dotenv(dotenv_path: Path):
     if not dotenv_path.exists():
         return
-    with open(dotenv_path, "r") as f:
+    with open(dotenv_path) as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -26,13 +26,16 @@ def load_dotenv(dotenv_path: Path):
                 key, value = line.split("=", 1)
                 os.environ[key.strip()] = value.strip()
 
+
 class EnvironmentError(Exception):
     """Raised when the environment does not meet requirements."""
+
     pass
 
-def validate_environment(llama_bin: Optional[str]) -> str:
+
+def validate_environment(llama_bin: str | None) -> str:
     if llama_bin is None or not Path(llama_bin).exists():
-        raise EnvironmentError(f"llama-server not found. Please install it or set LLAMA_BIN.")
+        raise EnvironmentError("llama-server not found. Please install it or set LLAMA_BIN.")
 
     if shutil.which("hf") is None:
         raise EnvironmentError("hf not found. Install via: pip install huggingface_hub[cli]")
@@ -53,7 +56,7 @@ def validate_environment(llama_bin: Optional[str]) -> str:
         return explicit_runtime
 
     # Fall back to auto-detection
-    runtime: Optional[str] = None
+    runtime: str | None = None
     for candidate in supported_runtimes:
         if shutil.which(candidate) is not None:
             runtime = candidate
@@ -64,10 +67,12 @@ def validate_environment(llama_bin: Optional[str]) -> str:
 
     return runtime
 
+
 def get_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(('', 0))
+        s.bind(("", 0))
         return s.getsockname()[1]
+
 
 def handle_signal(signum: int, logger) -> None:
     signame: str = signal.Signals(signum).name
@@ -98,16 +103,17 @@ def stop_process_group(pid: int, name: str, logger) -> None:
         if e.errno != errno.ESRCH:
             logger.error(f"Error stopping process group for {name}: {e}")
 
+
 def get_sanitized_git_config_json(logger):
     """
     Generates a JSON-serialized dictionary of 'key': 'value' pairs.
     """
     sanitized_dict = {}
     # Regex to strip 'user:pass@' from URLs
-    url_credential_regex = re.compile(r'(https?://)[^/]+:[^/@]+@')
+    url_credential_regex = re.compile(r"(https?://)[^/]+:[^/@]+@")
 
     try:
-        result = subprocess.check_output(['git', 'config', '--list', '--show-origin'], text=True)
+        result = subprocess.check_output(["git", "config", "--list", "--show-origin"], text=True)
     except subprocess.CalledProcessError as e:
         logger.error(f"Error running git config: {e}")
         return "{}"
@@ -117,7 +123,7 @@ def get_sanitized_git_config_json(logger):
 
     for line in result.splitlines():
         try:
-            pattern = r'^(.+?)\t([^=]+)=(.+)$'
+            pattern = r"^(.+?)\t([^=]+)=(.+)$"
             m = re.match(pattern, line)
             if m:
                 origin, key, value = m.group(1), m.group(2), m.group(3)
@@ -128,10 +134,10 @@ def get_sanitized_git_config_json(logger):
                 key = key.strip()
                 value = value.strip()
 
-                if key.startswith('credential.'):
+                if key.startswith("credential."):
                     continue
 
-                value = url_credential_regex.sub(r'\1', value)
+                value = url_credential_regex.sub(r"\1", value)
 
                 sanitized_dict[key] = value
 

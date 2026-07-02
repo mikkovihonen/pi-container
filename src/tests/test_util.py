@@ -5,14 +5,14 @@ Run with:
     python -m pytest src/tests/test_util.py -v
 """
 
+import errno
 import json
 import os
-import sys
-import errno
 import signal
 import subprocess
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -27,7 +27,6 @@ from util import (
     stop_process_group,
     validate_environment,
 )
-
 
 # ---------------------------------------------------------------------------
 # load_dotenv
@@ -60,7 +59,7 @@ class TestLoadDotenv:
 
     def test_splits_on_first_equals_only(self, tmp_path):
         env_file = tmp_path / ".env"
-        env_file.write_text('KEY=value=with=equals\n')
+        env_file.write_text("KEY=value=with=equals\n")
         load_dotenv(env_file)
         assert os.environ["KEY"] == "value=with=equals"
         os.environ.pop("KEY", None)
@@ -98,9 +97,7 @@ class TestValidateEnvironment:
         os.environ.pop("CONTAINER_RUNTIME", None)
 
     def test_all_dependencies_present(self):
-        with patch("util.Path") as mock_path, \
-             patch("util.shutil") as mock_shutil:
-
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
             # Mock llama_bin path exists
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
@@ -130,9 +127,7 @@ class TestValidateEnvironment:
             validate_environment(None)
 
     def test_hf_not_found_raises(self):
-        with patch("util.Path") as mock_path, \
-             patch("util.shutil") as mock_shutil:
-
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -146,9 +141,7 @@ class TestValidateEnvironment:
                 validate_environment("/usr/bin/llama-server")
 
     def test_socat_not_found_raises(self):
-        with patch("util.Path") as mock_path, \
-             patch("util.shutil") as mock_shutil:
-
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -162,9 +155,7 @@ class TestValidateEnvironment:
                 validate_environment("/usr/bin/llama-server")
 
     def test_no_container_runtime_raises(self):
-        with patch("util.Path") as mock_path, \
-             patch("util.shutil") as mock_shutil:
-
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -179,9 +170,7 @@ class TestValidateEnvironment:
 
     def test_returns_container_first(self):
         """container should be preferred over docker and podman."""
-        with patch("util.Path") as mock_path, \
-             patch("util.shutil") as mock_shutil:
-
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -197,9 +186,7 @@ class TestValidateEnvironment:
             assert validate_environment("/usr/bin/llama-server") == "container"
 
     def test_returns_docker_when_only_docker(self):
-        with patch("util.Path") as mock_path, \
-             patch("util.shutil") as mock_shutil:
-
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -213,9 +200,7 @@ class TestValidateEnvironment:
             assert validate_environment("/usr/bin/llama-server") == "docker"
 
     def test_returns_podman_when_only_podman(self):
-        with patch("util.Path") as mock_path, \
-             patch("util.shutil") as mock_shutil:
-
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -231,9 +216,7 @@ class TestValidateEnvironment:
     def test_explicit_runtime_from_env(self, monkeypatch):
         """CONTAINER_RUNTIME env var should override auto-detection."""
         monkeypatch.setenv("CONTAINER_RUNTIME", "podman")
-        with patch("util.Path") as mock_path, \
-             patch("util.shutil") as mock_shutil:
-
+        with patch("util.Path") as mock_path, patch("util.shutil"):
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -243,10 +226,11 @@ class TestValidateEnvironment:
 
     def test_explicit_invalid_runtime_raises(self):
         """An unsupported CONTAINER_RUNTIME value should raise EnvironmentError."""
-        with patch("util.Path") as mock_path, \
-             patch("util.shutil") as mock_shutil, \
-             patch.dict(os.environ, {"CONTAINER_RUNTIME": "nerdctl"}):
-
+        with (
+            patch("util.Path") as mock_path,
+            patch("util.shutil"),
+            patch.dict(os.environ, {"CONTAINER_RUNTIME": "nerdctl"}),
+        ):
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -256,10 +240,11 @@ class TestValidateEnvironment:
 
     def test_empty_container_runtime_falls_back(self):
         """An empty CONTAINER_RUNTIME should fall back to auto-detection."""
-        with patch("util.Path") as mock_path, \
-             patch("util.shutil") as mock_shutil, \
-             patch.dict(os.environ, {"CONTAINER_RUNTIME": ""}):
-
+        with (
+            patch("util.Path") as mock_path,
+            patch("util.shutil") as mock_shutil,
+            patch.dict(os.environ, {"CONTAINER_RUNTIME": ""}),
+        ):
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -326,18 +311,17 @@ class TestHandleSignal:
 class TestStopProcessGroup:
     def test_sends_sigterm(self):
         mock_logger = MagicMock()
-        with patch("util.os.getpgid") as mock_getpgid, \
-             patch("util.os.killpg") as mock_killpg, \
-             patch("util.time.sleep"):
-
+        with patch("util.os.getpgid") as mock_getpgid, patch("util.os.killpg") as mock_killpg, patch("util.time.sleep"):
             mock_getpgid.return_value = 1234
 
             # Make killpg with sig=0 raise ESRCH so process "dies" immediately
             call_log = []
+
             def killpg_side_effect(pgid, sig):
                 call_log.append((pgid, sig))
                 if sig == 0:
                     raise OSError(errno.ESRCH, "No such process")
+
             mock_killpg.side_effect = killpg_side_effect
 
             stop_process_group(1234, "test_process", mock_logger)
@@ -349,16 +333,14 @@ class TestStopProcessGroup:
     def test_waits_then_kills(self):
         """If process doesn't die after 10 polls, SIGKILL should be sent."""
         mock_logger = MagicMock()
-        with patch("util.os.getpgid") as mock_getpgid, \
-             patch("util.os.killpg") as mock_killpg, \
-             patch("util.time.sleep"):
-
+        with patch("util.os.getpgid") as mock_getpgid, patch("util.os.killpg") as mock_killpg, patch("util.time.sleep"):
             mock_getpgid.return_value = 1234
 
             # killpg with 0 (check) always succeeds → process "never" dies
             def killpg_side_effect(pgid, sig):
                 if sig == 0:
                     return  # keep "alive"
+
             mock_killpg.side_effect = killpg_side_effect
 
             stop_process_group(1234, "test_process", mock_logger)
@@ -371,10 +353,7 @@ class TestStopProcessGroup:
     def test_breaks_on_esrch(self):
         """Should break out of the loop if process is gone."""
         mock_logger = MagicMock()
-        with patch("util.os.getpgid") as mock_getpgid, \
-             patch("util.os.killpg") as mock_killpg, \
-             patch("util.time.sleep"):
-
+        with patch("util.os.getpgid") as mock_getpgid, patch("util.os.killpg") as mock_killpg, patch("util.time.sleep"):
             mock_getpgid.return_value = 1234
 
             call_count = [0]
@@ -384,6 +363,7 @@ class TestStopProcessGroup:
                     call_count[0] += 1
                     if call_count[0] == 1:
                         raise OSError(errno.ESRCH, "No such process")
+
             mock_killpg.side_effect = killpg_side_effect
 
             stop_process_group(1234, "test_process", mock_logger)
@@ -397,15 +377,13 @@ class TestStopProcessGroup:
     def test_handles_os_error_esrch_in_check(self):
         """OS errors with ESRCH in the killpg poll loop should break."""
         mock_logger = MagicMock()
-        with patch("util.os.getpgid") as mock_getpgid, \
-             patch("util.os.killpg") as mock_killpg, \
-             patch("util.time.sleep"):
-
+        with patch("util.os.getpgid") as mock_getpgid, patch("util.os.killpg") as mock_killpg, patch("util.time.sleep"):
             mock_getpgid.return_value = 1234
 
             def killpg_side_effect(pgid, sig):
                 if sig == 0:
                     raise OSError(errno.ESRCH, "No such process")
+
             mock_killpg.side_effect = killpg_side_effect
 
             stop_process_group(1234, "test_process", mock_logger)
@@ -413,16 +391,14 @@ class TestStopProcessGroup:
     def test_logs_error_for_other_os_errors(self):
         """Non-ESRCH OS errors during stop should be logged."""
         mock_logger = MagicMock()
-        with patch("util.os.getpgid") as mock_getpgid, \
-             patch("util.os.killpg") as mock_killpg, \
-             patch("util.time.sleep"):
-
+        with patch("util.os.getpgid") as mock_getpgid, patch("util.os.killpg") as mock_killpg, patch("util.time.sleep"):
             mock_getpgid.return_value = 1234
 
             # killpg with sig=0 raises EIO (not ESRCH/EPERM) to trigger error logging
             def killpg_side_effect(pgid, sig):
                 if sig == 0:
                     raise OSError(errno.EIO, "I/O error")
+
             mock_killpg.side_effect = killpg_side_effect
 
             stop_process_group(1234, "test_process", mock_logger)
@@ -438,9 +414,7 @@ class TestGetSanitizedGitConfigJson:
     def test_sanitizes_url_credentials(self):
         mock_logger = MagicMock()
         # Use a non-.git/config origin so the line is not skipped
-        output = (
-            'file:/home/user/project/.git/config\tremote.origin.url=https://user:pass@github.com/org/repo.git\n'
-        )
+        output = "file:/home/user/project/.git/config\tremote.origin.url=https://user:pass@github.com/org/repo.git\n"
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
         assert "user" not in result["remote.origin.url"]
@@ -449,21 +423,21 @@ class TestGetSanitizedGitConfigJson:
 
     def test_strips_credential_from_url(self):
         mock_logger = MagicMock()
-        output = 'credential.helper\tstore\n'
+        output = "credential.helper\tstore\n"
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
         assert "credential.helper" not in result
 
     def test_skips_file_origin(self):
         mock_logger = MagicMock()
-        output = 'file:.git/config\tuser.name\tTest User\n'
+        output = "file:.git/config\tuser.name\tTest User\n"
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
         assert "user.name" not in result
 
     def test_skips_credential_dot_prefix(self):
         mock_logger = MagicMock()
-        output = 'credential.helper\tstore\ncredential.https://github.com.username\tmyuser\n'
+        output = "credential.helper\tstore\ncredential.https://github.com.username\tmyuser\n"
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
         assert "credential.helper" not in result
@@ -471,23 +445,21 @@ class TestGetSanitizedGitConfigJson:
 
     def test_returns_empty_dict_on_git_error(self):
         mock_logger = MagicMock()
-        with patch("util.subprocess.check_output",
-                   side_effect=subprocess.CalledProcessError(1, "git")):
+        with patch("util.subprocess.check_output", side_effect=subprocess.CalledProcessError(1, "git")):
             result = get_sanitized_git_config_json(mock_logger)
         assert result == "{}"
 
     def test_returns_empty_dict_on_missing_git(self):
         mock_logger = MagicMock()
-        with patch("util.subprocess.check_output",
-                   side_effect=FileNotFoundError):
+        with patch("util.subprocess.check_output", side_effect=FileNotFoundError):
             result = get_sanitized_git_config_json(mock_logger)
         assert result == "{}"
 
     def test_normal_config_works(self):
         mock_logger = MagicMock()
         output = (
-            'file:/home/user/project/.git/config\tremote.origin.url=https://github.com/org/repo.git\n'
-            'file:/home/user/project/.git/config\tuser.email=test@example.com\n'
+            "file:/home/user/project/.git/config\tremote.origin.url=https://github.com/org/repo.git\n"
+            "file:/home/user/project/.git/config\tuser.email=test@example.com\n"
         )
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
@@ -496,17 +468,14 @@ class TestGetSanitizedGitConfigJson:
 
     def test_strips_http_credentials(self):
         mock_logger = MagicMock()
-        output = 'file:/home/user/project/.git/config\tremote.origin.url=http://admin:secret@github.com/org/repo.git\n'
+        output = "file:/home/user/project/.git/config\tremote.origin.url=http://admin:secret@github.com/org/repo.git\n"
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
         assert result["remote.origin.url"] == "http://github.com/org/repo.git"
 
     def test_strips_https_credentials(self):
         mock_logger = MagicMock()
-        output = 'file:/home/user/project/.git/config\tremote.origin.url=https://admin:secret@github.com/org/repo.git\n'
+        output = "file:/home/user/project/.git/config\tremote.origin.url=https://admin:secret@github.com/org/repo.git\n"
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
         assert result["remote.origin.url"] == "https://github.com/org/repo.git"
-
-
-

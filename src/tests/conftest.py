@@ -18,14 +18,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # the session via the pytest_sessionfinish hook.
 _original_exit = sys.exit
 
+
 def _noop_exit(*args, **kwargs):
     pass
+
 
 sys.exit = _noop_exit
 
 # Also patch it on the modules that will be imported.  Some code may hold
 # a direct reference to sys.exit, so we patch both.
-import os
+
 
 def pytest_sessionfinish(session, exitstatus):
     sys.exit = _original_exit

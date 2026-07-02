@@ -1,4 +1,5 @@
 import sys
+
 sys.dont_write_bytecode = True
 
 """Container network + proxy lifecycle management."""
@@ -11,13 +12,15 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from config import ADMIN_PASSWORD, CONFIG_DIR, PROXY_FORWARD_ENV, REPO_ROOT
 from runtimes import ContainerRuntime
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -60,15 +63,16 @@ def scan_config_env_refs(config: dict) -> list[str]:
 
 # ─── Container Network Manager ───────────────────────────────────────────
 
+
 class ContainerNetworkManager:
     def __init__(
         self,
-        container_runtime: 'str | ContainerRuntime',
+        container_runtime: str | ContainerRuntime,
         network_name: str,
         proxy_image: str,
         proxy_name: str = "proxy",
-        config_dir: Optional[Path] = None,
-        llama_ports: Optional[str] = None,
+        config_dir: Path | None = None,
+        llama_ports: str | None = None,
         ipv6: bool = False,
     ) -> None:
         # Accept either a runtime name (used by tests) or a ready ContainerRuntime.
@@ -82,18 +86,18 @@ class ContainerNetworkManager:
         self.proxy_image: str = proxy_image
         self.proxy_name: str = proxy_name
         self.config_dir: Path = config_dir or CONFIG_DIR
-        self.llama_ports: Optional[str] = llama_ports
+        self.llama_ports: str | None = llama_ports
         self.ipv6: bool = ipv6
 
         # Shared directory for synchronization across different run.py processes
         self.lock_dir: Path = REPO_ROOT / "pi-coding-agent-proxy" / ".locks"
-        self.paths: Dict[str, Path] = {
+        self.paths: dict[str, Path] = {
             "lock_dir": self.lock_dir,
             "ref_count_lock": self.lock_dir / ".network_manager.lock",
             "ref_count_file": self.lock_dir / ".network_manager.refcount",
         }
 
-    def _pull_secrets_from_config(self) -> Dict[str, str]:
+    def _pull_secrets_from_config(self) -> dict[str, str]:
         """Pull secrets required by the mounted token_replacer config.
 
         Scans the config file for ``${ENV:VAR}`` references (no default value)
@@ -119,7 +123,7 @@ class ContainerNetworkManager:
             logger.info("No required env-var secrets found in token replacer config.")
             return {}
 
-        secrets: Dict[str, str] = {}
+        secrets: dict[str, str] = {}
         for var in required_vars:
             value = os.environ.get(var, "")
             if value:
@@ -132,9 +136,9 @@ class ContainerNetworkManager:
                 )
         return secrets
 
-    def _env_flags(self, secrets: Dict[str, str]) -> List[str]:
+    def _env_flags(self, secrets: dict[str, str]) -> list[str]:
         """Convert a secrets dict into ``--env KEY=VALUE`` flag pairs."""
-        flags: List[str] = []
+        flags: list[str] = []
         for k, v in sorted(secrets.items()):
             flags.extend(["--env", f"{k}={v}"])
         return flags
@@ -174,11 +178,11 @@ class ContainerNetworkManager:
                 f"running proxy)."
             )
 
-    def __enter__(self) -> 'ContainerNetworkManager':
+    def __enter__(self) -> ContainerNetworkManager:
         self.start()
         return self
 
-    def __exit__(self, exc_type: Optional[Type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[Any]) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any | None) -> None:
         self.stop()
 
     def start(self) -> None:
@@ -237,14 +241,14 @@ class ContainerNetworkManager:
         # Create the isolated internal network (skip if it already exists).
         logger.info(f"Checking network {self.network_name}...")
         result = subprocess.run(
-            [self.container_runtime, "network", "inspect", self.network_name],
-            capture_output=True, text=True
+            [self.container_runtime, "network", "inspect", self.network_name], capture_output=True, text=True
         )
         if result.returncode != 0:
             logger.info(f"Creating network {self.network_name} (ipv6={self.ipv6})...")
             subprocess.run(
                 [self.container_runtime, *self.runtime.create_isolated_network_argv(self.network_name, ipv6=self.ipv6)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         else:
             logger.info(f"Network {self.network_name} already exists, skipping creation.")
@@ -259,7 +263,7 @@ class ContainerNetworkManager:
         # Mount the host addon configs over the image's baked defaults. Each is
         # only mounted if present so a missing host config falls back to the
         # (fail-closed) default baked into the image.
-        config_mounts: List[str] = []
+        config_mounts: list[str] = []
         for host_name, container_path in (
             ("token_replacer.yaml", "/home/mitmproxy/config/token_replacer.yaml"),
             ("allowlist.yaml", "/home/mitmproxy/config/allowlist.yaml"),
@@ -272,17 +276,26 @@ class ContainerNetworkManager:
 
         cmd = [
             self.container_runtime,
-            "run", "-d", "--rm", "--name", self.proxy_name,
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            self.proxy_name,
             *self.runtime.proxy_network_args(self.network_name),
             *self.runtime.proxy_extra_run_args(),
-            "--cap-add", "NET_ADMIN",
-            "--dns", "1.1.1.1",
-            "-p", "8081:8081",
+            "--cap-add",
+            "NET_ADMIN",
+            "--dns",
+            "1.1.1.1",
+            "-p",
+            "8081:8081",
             # IPv6 policy: --sysctl toggle (VM runtimes) + env flag the proxy
             # entrypoint reads to mirror (or tear down) v6 firewall rules.
             *self.runtime.ipv6_run_args(self.ipv6, forwarding=True),
-            "--env", f"IPV6_ENABLED={str(self.ipv6).lower()}",
-            "--env", f"ADMIN_PASSWORD={ADMIN_PASSWORD}",
+            "--env",
+            f"IPV6_ENABLED={str(self.ipv6).lower()}",
+            "--env",
+            f"ADMIN_PASSWORD={ADMIN_PASSWORD}",
             *(["--env", f"LLAMA_PORTS={self.llama_ports}"] if self.llama_ports else []),
             *(["--env", f"LLAMA_HOST_ADDR={llama_host_addr}"] if llama_host_addr else []),
             # Per-protocol forwarding opt-ins (uninspected protocols).
@@ -297,8 +310,7 @@ class ContainerNetworkManager:
         connect_argv = self.runtime.proxy_secondary_connect_argv(self.proxy_name, self.network_name)
         if connect_argv:
             subprocess.run(
-                [self.container_runtime, *connect_argv],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                [self.container_runtime, *connect_argv], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
 
         # Wait for proxy to be ready via health probe
@@ -306,7 +318,9 @@ class ContainerNetworkManager:
 
     def _actually_stop(self) -> None:
         logger.info(f"Stopping proxy container {self.proxy_name}...")
-        subprocess.run([self.container_runtime, "stop", self.proxy_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            [self.container_runtime, "stop", self.proxy_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
 
         delete_argv = self.runtime.delete_isolated_network_argv(self.network_name)
         if delete_argv:
@@ -326,7 +340,7 @@ class ContainerNetworkManager:
         elapsed = 0
         while elapsed < timeout:
             try:
-                resp = urllib.request.urlopen(url, timeout=2)
+                urllib.request.urlopen(url, timeout=2)
                 logger.info(f"Proxy container is healthy ({elapsed}s)")
                 return
             except urllib.error.HTTPError as e:

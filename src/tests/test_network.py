@@ -10,11 +10,9 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from network import ContainerNetworkManager, scan_config_env_refs
-
 
 # ---------------------------------------------------------------------------
 # ScanConfigEnvRefs
@@ -23,13 +21,7 @@ from network import ContainerNetworkManager, scan_config_env_refs
 
 class TestScanConfigEnvRefs:
     def test_finds_env_refs(self):
-        config = {
-            "rules": [
-                {
-                    "replace_with": {"value": "${ENV:API_KEY}"}
-                }
-            ]
-        }
+        config = {"rules": [{"replace_with": {"value": "${ENV:API_KEY}"}}]}
         result = scan_config_env_refs(config)
         assert result == ["API_KEY"]
 
@@ -91,11 +83,7 @@ class TestScanConfigEnvRefs:
 
     def test_nested_in_non_replace_with(self):
         """Refs outside replace_with.value should be ignored."""
-        config = {
-            "rules": [
-                {"name": "${ENV:IGNORED}", "replace_with": {"value": "safe"}}
-            ]
-        }
+        config = {"rules": [{"name": "${ENV:IGNORED}", "replace_with": {"value": "safe"}}]}
         result = scan_config_env_refs(config)
         assert result == []
 
@@ -137,13 +125,10 @@ class TestContainerNetworkManagerPullSecrets:
         assert secrets == {}
 
     def test_reads_env_refs_from_config(self, tmp_path):
-        config = {
-            "rules": [
-                {"replace_with": {"value": "${ENV:MY_SECRET}"}}
-            ]
-        }
+        config = {"rules": [{"replace_with": {"value": "${ENV:MY_SECRET}"}}]}
         config_file = tmp_path / "token_replacer.yaml"
         import yaml
+
         config_file.write_text(yaml.dump(config))
 
         with patch.dict(os.environ, {"MY_SECRET": "s3cret"}):
@@ -153,13 +138,10 @@ class TestContainerNetworkManagerPullSecrets:
         assert secrets == {"MY_SECRET": "s3cret"}
 
     def test_skips_missing_env_vars(self, tmp_path):
-        config = {
-            "rules": [
-                {"replace_with": {"value": "${ENV:MISSING_VAR}"}}
-            ]
-        }
+        config = {"rules": [{"replace_with": {"value": "${ENV:MISSING_VAR}"}}]}
         config_file = tmp_path / "token_replacer.yaml"
         import yaml
+
         config_file.write_text(yaml.dump(config))
 
         with patch.dict(os.environ, {}, clear=True):

@@ -21,10 +21,13 @@ import logging
 import os
 import re
 import uuid
+from typing import TYPE_CHECKING
 from urllib import parse as urlparse
 
 import yaml
-from mitmproxy import http
+
+if TYPE_CHECKING:
+    from mitmproxy import http
 
 log = logging.getLogger(__name__)
 
@@ -140,12 +143,7 @@ def _matches_hostname(hostname: str, patterns: list[str]) -> bool:
             # Escape the pattern, then convert glob wildcards back to regex:
             # ``*`` → ``.*`` (match any number of characters)
             # ``?`` → ``.`` (match exactly one character)
-            regex_pattern = (
-                "^" + re.escape(pattern)
-                .replace(r"\*", ".*")
-                .replace(r"\?", ".")
-                + "$"
-            )
+            regex_pattern = "^" + re.escape(pattern).replace(r"\*", ".*").replace(r"\?", ".") + "$"
             if re.match(regex_pattern, hostname, re.IGNORECASE):
                 return True
     return False
@@ -190,6 +188,7 @@ def _apply_strategy(original_value: str, strategy: str, replacement_value: str) 
 # ---------------------------------------------------------------------------
 # Content matchers
 # ---------------------------------------------------------------------------
+
 
 class JsonBodyMatcher:
     """Match and replace tokens inside a JSON request body using JSONPath-like dots."""
@@ -314,7 +313,7 @@ class HeaderMatcher:
         # Headers in mitmproxy are case-insensitive but stored with original casing.
         # We need to find the actual key.
         actual_key = None
-        for key in headers.keys():
+        for key in headers:
             if key.lower() == self.header_name.lower():
                 actual_key = key
                 break
@@ -347,22 +346,14 @@ class HeaderMatcher:
                         # Replace the non-captured portion before this group
                         if group_start > last_end:
                             non_captured = m.group(0)[last_end:group_start]
-                            result_parts.append(
-                                _apply_strategy(
-                                    non_captured, self.strategy, self.replacement_value
-                                )
-                            )
+                            result_parts.append(_apply_strategy(non_captured, self.strategy, self.replacement_value))
                         # Preserve the capture group as-is
                         result_parts.append(m.group(i))
                         last_end = group_end
                     # Handle any non-captured portion after the last group
                     if last_end < len(m.group(0)):
                         non_captured = m.group(0)[last_end:]
-                        result_parts.append(
-                            _apply_strategy(
-                                non_captured, self.strategy, self.replacement_value
-                            )
-                        )
+                        result_parts.append(_apply_strategy(non_captured, self.strategy, self.replacement_value))
                     return "".join(result_parts)
                 else:
                     # No capture groups — replace the full match
@@ -478,31 +469,24 @@ def _validate_rule(rule: dict) -> None:
     strategy = replace.get("strategy", "static")
     if strategy not in _VALID_STRATEGIES:
         raise ValueError(
-            f"Rule '{name}': invalid replacement strategy '{strategy}'. "
-            f"Valid strategies: {sorted(_VALID_STRATEGIES)}"
+            f"Rule '{name}': invalid replacement strategy '{strategy}'. Valid strategies: {sorted(_VALID_STRATEGIES)}"
         )
 
     content_patterns = rule.get("content_patterns")
     if not isinstance(content_patterns, list):
-        raise ValueError(
-            f"Rule '{name}': 'content_patterns' must be a list, got "
-            f"'{type(content_patterns).__name__}'"
-        )
+        raise ValueError(f"Rule '{name}': 'content_patterns' must be a list, got '{type(content_patterns).__name__}'")
 
     for i, pattern_def in enumerate(content_patterns):
         field = pattern_def.get("field", "<missing>")
         if field not in _VALID_FIELDS:
             raise ValueError(
-                f"Rule '{name}' pattern[{i}]: invalid field type '{field}'. "
-                f"Valid fields: {sorted(_VALID_FIELDS)}"
+                f"Rule '{name}' pattern[{i}]: invalid field type '{field}'. Valid fields: {sorted(_VALID_FIELDS)}"
             )
 
         if field == "body.json":
             json_path = pattern_def.get("path", "")
             if not json_path:
-                raise ValueError(
-                    f"Rule '{name}' pattern[{i}]: 'path' is required for body.json"
-                )
+                raise ValueError(f"Rule '{name}' pattern[{i}]: 'path' is required for body.json")
             if not pattern_def.get("regex"):
                 raise ValueError(
                     f"Rule '{name}' pattern[{i}]: 'regex' is required for body.json. "
@@ -516,9 +500,7 @@ def _validate_rule(rule: dict) -> None:
                 )
         elif field == "body.form":
             if not pattern_def.get("field_name"):
-                raise ValueError(
-                    f"Rule '{name}' pattern[{i}]: 'field_name' is required for body.form"
-                )
+                raise ValueError(f"Rule '{name}' pattern[{i}]: 'field_name' is required for body.form")
             if not pattern_def.get("regex"):
                 raise ValueError(
                     f"Rule '{name}' pattern[{i}]: 'regex' is required for body.form. "
@@ -527,22 +509,14 @@ def _validate_rule(rule: dict) -> None:
                 )
         elif field == "body.query":
             if not pattern_def.get("field_name"):
-                raise ValueError(
-                    f"Rule '{name}' pattern[{i}]: 'field_name' is required for body.query"
-                )
+                raise ValueError(f"Rule '{name}' pattern[{i}]: 'field_name' is required for body.query")
             if not pattern_def.get("regex"):
-                raise ValueError(
-                    f"Rule '{name}' pattern[{i}]: 'regex' is required for body.query"
-                )
+                raise ValueError(f"Rule '{name}' pattern[{i}]: 'regex' is required for body.query")
         elif field == "headers":
             if not pattern_def.get("header_name"):
-                raise ValueError(
-                    f"Rule '{name}' pattern[{i}]: 'header_name' is required for headers"
-                )
+                raise ValueError(f"Rule '{name}' pattern[{i}]: 'header_name' is required for headers")
             if not pattern_def.get("regex"):
-                raise ValueError(
-                    f"Rule '{name}' pattern[{i}]: 'regex' is required for headers"
-                )
+                raise ValueError(f"Rule '{name}' pattern[{i}]: 'regex' is required for headers")
 
 
 # ---------------------------------------------------------------------------
@@ -597,6 +571,7 @@ def _remove_chunked_encoding_if_present(headers) -> None:
 # Rule engine
 # ---------------------------------------------------------------------------
 
+
 def _build_matchers(rule: dict) -> list:
     """Build matcher instances from a rule's content_patterns definitions."""
     matchers = []
@@ -609,47 +584,54 @@ def _build_matchers(rule: dict) -> list:
         field = pattern_def.get("field", "body.raw")
 
         if field == "body.json":
-            matchers.append(JsonBodyMatcher(
-                json_path=pattern_def.get("path", ""),
-                regex=pattern_def.get("regex"),
-                strategy=strategy,
-                replacement_value=replacement_value,
-            ))
+            matchers.append(
+                JsonBodyMatcher(
+                    json_path=pattern_def.get("path", ""),
+                    regex=pattern_def.get("regex"),
+                    strategy=strategy,
+                    replacement_value=replacement_value,
+                )
+            )
         elif field == "body.form":
-            matchers.append(FormBodyMatcher(
-                field_name=pattern_def.get("field_name", ""),
-                regex=pattern_def["regex"],
-                strategy=strategy,
-                replacement_value=replacement_value,
-            ))
+            matchers.append(
+                FormBodyMatcher(
+                    field_name=pattern_def.get("field_name", ""),
+                    regex=pattern_def["regex"],
+                    strategy=strategy,
+                    replacement_value=replacement_value,
+                )
+            )
         elif field == "body.query":
-            matchers.append(QueryStringMatcher(
-                field_name=pattern_def.get("field_name", ""),
-                regex=pattern_def.get("regex", ".*"),
-                strategy=strategy,
-                replacement_value=replacement_value,
-            ))
+            matchers.append(
+                QueryStringMatcher(
+                    field_name=pattern_def.get("field_name", ""),
+                    regex=pattern_def.get("regex", ".*"),
+                    strategy=strategy,
+                    replacement_value=replacement_value,
+                )
+            )
         elif field == "body.raw":
-            matchers.append(RawBodyMatcher(
-                regex=pattern_def["regex"],
-                strategy=strategy,
-                replacement_value=replacement_value,
-            ))
+            matchers.append(
+                RawBodyMatcher(
+                    regex=pattern_def["regex"],
+                    strategy=strategy,
+                    replacement_value=replacement_value,
+                )
+            )
         elif field == "headers":
-            matchers.append(HeaderMatcher(
-                header_name=pattern_def["header_name"],
-                regex=pattern_def["regex"],
-                strategy=strategy,
-                replacement_value=replacement_value,
-            ))
+            matchers.append(
+                HeaderMatcher(
+                    header_name=pattern_def["header_name"],
+                    regex=pattern_def["regex"],
+                    strategy=strategy,
+                    replacement_value=replacement_value,
+                )
+            )
         else:
             log.warning(f"Unknown content field type: {field}")
 
     if not matchers:
-        log.warning(
-            f"Rule '{rule.get('name', 'unnamed')}': has no content_patterns, "
-            f"will not match anything."
-        )
+        log.warning(f"Rule '{rule.get('name', 'unnamed')}': has no content_patterns, will not match anything.")
 
     return matchers
 
@@ -678,7 +660,7 @@ class TokenReplacerAddon:
             log.info("No config file provided or file not found; no replacement rules loaded.")
             return
 
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config = yaml.safe_load(f)
 
         if not config:
@@ -759,9 +741,7 @@ class TokenReplacerAddon:
 
             if total_tokens_found > 0:
                 status = "DRY RUN (no modification)" if dry_run else "replaced"
-                log.info(
-                    f"[token-replacer] {total_tokens_found} token(s) {status} in request to {hostname}"
-                )
+                log.info(f"[token-replacer] {total_tokens_found} token(s) {status} in request to {hostname}")
 
     def response(self, flow: http.HTTPFlow) -> None:
         """Mirror of request(): inspect and potentially modify HTTP responses.
@@ -809,9 +789,7 @@ class TokenReplacerAddon:
                     total_tokens_found += len(rule_tokens)
 
             if total_tokens_found > 0:
-                log.info(
-                    f"[token-replacer] {total_tokens_found} token(s) {status} in response to {hostname}"
-                )
+                log.info(f"[token-replacer] {total_tokens_found} token(s) {status} in response to {hostname}")
 
     def _collect_findings_from_rule(self, target, rule: dict) -> list[str]:
         """Collect all token findings from a rule's matchers without modifying the target."""
@@ -830,10 +808,7 @@ class TokenReplacerAddon:
                     _, tokens = matcher.match_and_replace(data, collect_only=True)
                     return tokens
                 except (json.JSONDecodeError, TypeError) as e:
-                    log.debug(
-                        f"[token-replacer] Skipping body.json matcher: "
-                        f"content is not valid JSON (error: {e})"
-                    )
+                    log.debug(f"[token-replacer] Skipping body.json matcher: content is not valid JSON (error: {e})")
                     return []
         elif isinstance(matcher, FormBodyMatcher):
             body = target.get_content()
@@ -842,7 +817,7 @@ class TokenReplacerAddon:
                 tokens = matcher.match_and_replace_pairs(parsed_pairs, collect_only=True)
                 return tokens
         elif isinstance(matcher, QueryStringMatcher):
-            if hasattr(target, 'query'):
+            if hasattr(target, "query"):
                 pairs = list(target.query)
                 tokens = matcher.match_and_replace_pairs(pairs, collect_only=True)
                 return tokens
@@ -856,9 +831,7 @@ class TokenReplacerAddon:
             return matcher.match_and_replace(target.headers, collect_only=True)
         return []
 
-    def _apply_all_modifications(
-        self, target, rules: list[dict], is_response: bool = False
-    ) -> None:
+    def _apply_all_modifications(self, target, rules: list[dict], is_response: bool = False) -> None:
         """Apply modifications from all rules' matchers, grouped by content type.
 
         Each content type (JSON / form / raw) is parsed once from the original
@@ -964,7 +937,7 @@ class TokenReplacerAddon:
 
         # --- Query string: parse once, apply all matchers, write back once ---
         # Note: Query strings are request-only; skip query matchers for responses
-        if query_matchers and hasattr(target, 'query') and not is_response:
+        if query_matchers and hasattr(target, "query") and not is_response:
             pairs = list(target.query)
             for matcher in query_matchers:
                 matcher.match_and_replace_pairs(pairs)
@@ -984,7 +957,7 @@ class TokenReplacerAddon:
         for header_key_lower, matchers_for_header in header_groups.items():
             # Find the actual header key (preserves original casing)
             actual_key = None
-            for key in target.headers.keys():
+            for key in target.headers:
                 if key.lower() == header_key_lower:
                     actual_key = key
                     break
@@ -1011,7 +984,8 @@ class TokenReplacerAddon:
                                 parts.append(
                                     _apply_strategy(
                                         m.group(0)[last_end:gs],
-                                        matcher.strategy, matcher.replacement_value,
+                                        matcher.strategy,
+                                        matcher.replacement_value,
                                     )
                                 )
                             parts.append(m.group(gi))
@@ -1020,14 +994,13 @@ class TokenReplacerAddon:
                             parts.append(
                                 _apply_strategy(
                                     m.group(0)[last_end:],
-                                    matcher.strategy, matcher.replacement_value,
+                                    matcher.strategy,
+                                    matcher.replacement_value,
                                 )
                             )
                         new_text = "".join(parts)
                     else:
-                        new_text = _apply_strategy(
-                            original, matcher.strategy, matcher.replacement_value
-                        )
+                        new_text = _apply_strategy(original, matcher.strategy, matcher.replacement_value)
                     replacements.append((m.start(), m.end(), new_text))
 
             if replacements:
@@ -1049,9 +1022,7 @@ class TokenReplacerAddon:
 
                 # Apply replacements from end to start to preserve positions
                 for start, end, new_text in reversed(filtered):
-                    original_value = (
-                        original_value[:start] + new_text + original_value[end:]
-                    )
+                    original_value = original_value[:start] + new_text + original_value[end:]
                 target.headers[actual_key] = original_value
 
 
@@ -1065,7 +1036,6 @@ class TokenReplacerAddon:
 #
 # To use a different config path, modify this line or set the environment
 # variable TOKEN_REPLACER_CONFIG_PATH.
-import os
 
 _config_path = os.environ.get(
     "TOKEN_REPLACER_CONFIG_PATH",

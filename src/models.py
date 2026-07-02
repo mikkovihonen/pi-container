@@ -1,4 +1,5 @@
 import sys
+
 sys.dont_write_bytecode = True
 
 """Model configuration dataclasses and the downloadable Model."""
@@ -8,7 +9,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from huggingface_hub import hf_hub_download
 
@@ -19,17 +20,18 @@ logger = logging.getLogger(__name__)
 
 # ─── Configuration Dataclasses ───────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class ModelConfig:
     file_flag: str
     repo: str
     file: str
     directory: Path
-    additional_server_flags: List[Any]
-    sha256: Optional[str] = None
+    additional_server_flags: list[Any]
+    sha256: str | None = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ModelConfig':
+    def from_dict(cls, data: dict[str, Any]) -> ModelConfig:
         return cls(
             file_flag=data["fileFlag"],
             repo=data["repo"],
@@ -39,23 +41,20 @@ class ModelConfig:
             sha256=data.get("sha256"),
         )
 
+
 @dataclass(frozen=True)
 class ServerConfig:
-    hf_models: Dict[str, ModelConfig]
-    flags: List[Any]
+    hf_models: dict[str, ModelConfig]
+    flags: list[Any]
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ServerConfig':
-        hf_models = {
-            label: ModelConfig.from_dict(m_info)
-            for label, m_info in data.get("hfModels", {}).items()
-        }
-        return cls(
-            hf_models=hf_models,
-            flags=data.get("flags", [])
-        )
+    def from_dict(cls, data: dict[str, Any]) -> ServerConfig:
+        hf_models = {label: ModelConfig.from_dict(m_info) for label, m_info in data.get("hfModels", {}).items()}
+        return cls(hf_models=hf_models, flags=data.get("flags", []))
+
 
 # ─── Model Class ──────────────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class Model:
@@ -124,7 +123,7 @@ class Model:
                     repo_id=self.config.repo,
                     filename=self.config.file,
                     local_dir=str(self.models_dir / self.config.directory),
-                    local_dir_use_symlinks=False
+                    local_dir_use_symlinks=False,
                 )
                 logger.info(f"[Model: {self.label}] Download complete.")
 

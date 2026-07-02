@@ -1,4 +1,5 @@
 import sys
+
 sys.dont_write_bytecode = True
 
 """Container-runtime abstraction layer.
@@ -41,12 +42,12 @@ import json
 import logging
 import subprocess
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def _vm_ipv6_run_args(enabled: bool, forwarding: bool) -> List[str]:
+def _vm_ipv6_run_args(enabled: bool, forwarding: bool) -> list[str]:
     """``--sysctl`` flags enforcing the IPv6 policy for VM runtimes.
 
     Rootless podman/docker namespaces forbid writing ``net.*`` sysctls from
@@ -91,8 +92,8 @@ class ContainerRuntime(ABC):
 
     def __init__(
         self,
-        bridge_interface: Optional[str] = None,
-        upstream_network: Optional[str] = None,
+        bridge_interface: str | None = None,
+        upstream_network: str | None = None,
     ) -> None:
         # Explicit env overrides win; otherwise use the runtime's default.
         self.bridge_interface: str = bridge_interface or self.default_bridge_interface
@@ -103,10 +104,10 @@ class ContainerRuntime(ABC):
     def create(
         cls,
         runtime_name: str,
-        bridge_interface: Optional[str] = None,
-        upstream_network: Optional[str] = None,
-    ) -> "ContainerRuntime":
-        registry: Dict[str, Type["ContainerRuntime"]] = {
+        bridge_interface: str | None = None,
+        upstream_network: str | None = None,
+    ) -> ContainerRuntime:
+        registry: dict[str, type[ContainerRuntime]] = {
             "container": AppleContainerRuntime,
             "podman": PodmanRuntime,
             "docker": DockerRuntime,
@@ -115,13 +116,12 @@ class ContainerRuntime(ABC):
             runtime_cls = registry[runtime_name]
         except KeyError:
             raise ValueError(
-                f"Unsupported container runtime '{runtime_name}'. "
-                f"Supported: {', '.join(sorted(registry))}."
-            )
+                f"Unsupported container runtime '{runtime_name}'. Supported: {', '.join(sorted(registry))}."
+            ) from None
         return runtime_cls(bridge_interface=bridge_interface, upstream_network=upstream_network)
 
     # ── Isolated network lifecycle ───────────────────────────────────────
-    def _ipv6_network_flags(self) -> List[str]:
+    def _ipv6_network_flags(self) -> list[str]:
         """``network create`` flags that give the isolated net an IPv6 subnet.
 
         podman/docker accept ``--ipv6`` and auto-assign a ULA subnet. Apple
@@ -130,7 +130,7 @@ class ContainerRuntime(ABC):
         """
         return ["--ipv6"]
 
-    def create_isolated_network_argv(self, network_name: str, ipv6: bool = False) -> List[str]:
+    def create_isolated_network_argv(self, network_name: str, ipv6: bool = False) -> list[str]:
         """Argv (after the CLI binary) that creates the internal isolated network.
 
         All three runtimes accept ``network create --internal <name>``. When
@@ -145,7 +145,7 @@ class ContainerRuntime(ABC):
         return argv
 
     # ── Upstream IPv6 capability (option 2: inspect network config) ──────
-    def upstream_network_has_ipv6(self) -> Optional[bool]:
+    def upstream_network_has_ipv6(self) -> bool | None:
         """Whether the upstream network is *configured* for IPv6 (best-effort).
 
         Runs ``network inspect <upstream>`` and delegates parsing of the
@@ -160,7 +160,9 @@ class ContainerRuntime(ABC):
         try:
             result = subprocess.run(
                 [self.name, "network", "inspect", self.upstream_network],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode != 0:
                 return None
@@ -174,7 +176,7 @@ class ContainerRuntime(ABC):
             return None
         return self._network_entry_has_ipv6(entry)
 
-    def _network_entry_has_ipv6(self, entry: Dict[str, Any]) -> Optional[bool]:
+    def _network_entry_has_ipv6(self, entry: dict[str, Any]) -> bool | None:
         """Parse a ``network inspect`` entry for IPv6 enablement.
 
         Base returns ``None`` (unknown); runtimes whose JSON format is known
@@ -183,7 +185,7 @@ class ContainerRuntime(ABC):
         """
         return None
 
-    def delete_isolated_network_argv(self, network_name: str) -> Optional[List[str]]:
+    def delete_isolated_network_argv(self, network_name: str) -> list[str] | None:
         """Argv that removes the isolated network on shutdown (``None`` to skip).
 
         ``network rm`` is understood by podman and docker, and accepted by Apple
@@ -193,12 +195,10 @@ class ContainerRuntime(ABC):
 
     # ── Proxy container networking ───────────────────────────────────────
     @abstractmethod
-    def proxy_network_args(self, isolated_network: str) -> List[str]:
+    def proxy_network_args(self, isolated_network: str) -> list[str]:
         """``run`` flags attaching the proxy to upstream (eth0) + isolated (eth1)."""
 
-    def proxy_secondary_connect_argv(
-        self, proxy_name: str, isolated_network: str
-    ) -> Optional[List[str]]:
+    def proxy_secondary_connect_argv(self, proxy_name: str, isolated_network: str) -> list[str] | None:
         """Post-``run`` argv to connect a second network (``None`` if attached at run).
 
         Only Docker needs this: ``docker run`` attaches a single network, so the
@@ -206,11 +206,11 @@ class ContainerRuntime(ABC):
         """
         return None
 
-    def proxy_extra_run_args(self) -> List[str]:
+    def proxy_extra_run_args(self) -> list[str]:
         """Extra runtime-specific ``run`` flags for the proxy container."""
         return []
 
-    def ipv6_run_args(self, enabled: bool, forwarding: bool = False) -> List[str]:
+    def ipv6_run_args(self, enabled: bool, forwarding: bool = False) -> list[str]:
         """``run`` flags that enforce the IPv6 policy for a container.
 
         The base (Apple ``container``) returns nothing: its containers can write
@@ -225,7 +225,7 @@ class ContainerRuntime(ABC):
         return []
 
     # ── Agent container networking (identical across runtimes) ───────────
-    def agent_network_args(self, isolated_network: str, proxy_isolated_ip: str) -> List[str]:
+    def agent_network_args(self, isolated_network: str, proxy_isolated_ip: str) -> list[str]:
         """``run`` flags for the agent: isolated network only, routed via the proxy.
 
         The isolated network has no gateway, so the default route and DNS are
@@ -233,19 +233,23 @@ class ContainerRuntime(ABC):
         run ``ip route replace default via $DEFAULT_ROUTE``.
         """
         return [
-            "--network", isolated_network,
-            "--dns", proxy_isolated_ip,
-            "--cap-add", "NET_ADMIN",
-            "--env", f"DEFAULT_ROUTE={proxy_isolated_ip}",
+            "--network",
+            isolated_network,
+            "--dns",
+            proxy_isolated_ip,
+            "--cap-add",
+            "NET_ADMIN",
+            "--env",
+            f"DEFAULT_ROUTE={proxy_isolated_ip}",
         ]
 
     # ── Mounts ───────────────────────────────────────────────────────────
-    def tmpfs_args(self, destination: str) -> List[str]:
+    def tmpfs_args(self, destination: str) -> list[str]:
         """Flags mounting a writable tmpfs at ``destination``."""
         return ["--tmpfs", destination]
 
     # ── Host llama-server reachability ───────────────────────────────────
-    def llama_host_addr(self) -> Optional[str]:
+    def llama_host_addr(self) -> str | None:
         """Static hint for the address the proxy should DNAT llama traffic to.
 
         ``None`` means "let the proxy resolve its own default gateway" (the
@@ -254,7 +258,7 @@ class ContainerRuntime(ABC):
         """
         return None
 
-    def resolve_llama_host_addr(self, probe_image: Optional[str] = None) -> Optional[str]:
+    def resolve_llama_host_addr(self, probe_image: str | None = None) -> str | None:
         """Concrete value to inject as the proxy's ``LLAMA_HOST_ADDR``.
 
         Defaults to the static :meth:`llama_host_addr`. Runtimes whose host
@@ -289,11 +293,11 @@ class AppleContainerRuntime(ContainerRuntime):
     default_upstream_network = "default"
     ipv6_upstream_egress = False
 
-    def _ipv6_network_flags(self) -> List[str]:
+    def _ipv6_network_flags(self) -> list[str]:
         # Apple `container` rejects --ipv6; give it an explicit v6 subnet.
         return ["--subnet-v6", self.ipv6_ula_subnet]
 
-    def proxy_network_args(self, isolated_network: str) -> List[str]:
+    def proxy_network_args(self, isolated_network: str) -> list[str]:
         # First --network becomes eth0, second becomes eth1.
         return ["--network", self.upstream_network, "--network", isolated_network]
 
@@ -321,7 +325,7 @@ class PodmanRuntime(ContainerRuntime):
     #: when the hostname cannot be resolved via a probe container.
     HOST_INTERNAL_FALLBACK_IP = "192.168.127.254"
 
-    def create_isolated_network_argv(self, network_name: str, ipv6: bool = False) -> List[str]:
+    def create_isolated_network_argv(self, network_name: str, ipv6: bool = False) -> list[str]:
         # --disable-dns stops podman's aardvark-dns from occupying the network's
         # .1 address and shadowing the agent's resolver. Without it the agent's
         # resolv.conf points at aardvark instead of the proxy, so the "llama"
@@ -333,19 +337,21 @@ class PodmanRuntime(ContainerRuntime):
         argv.append(network_name)
         return argv
 
-    def proxy_network_args(self, isolated_network: str) -> List[str]:
+    def proxy_network_args(self, isolated_network: str) -> list[str]:
         # Attach both networks at run time and pin interface names. Podman does
         # not name interfaces by --network order, so pinning is required to keep
         # the isolated network on eth1 (matching the proxy entrypoint).
         return [
-            "--network", f"{self.upstream_network}:interface_name=eth0",
-            "--network", f"{isolated_network}:interface_name=eth1",
+            "--network",
+            f"{self.upstream_network}:interface_name=eth0",
+            "--network",
+            f"{isolated_network}:interface_name=eth1",
         ]
 
-    def tmpfs_args(self, destination: str) -> List[str]:
+    def tmpfs_args(self, destination: str) -> list[str]:
         return ["--mount", f"type=tmpfs,tmpfs-mode=1777,destination={destination}"]
 
-    def _network_entry_has_ipv6(self, entry: Dict[str, Any]) -> Optional[bool]:
+    def _network_entry_has_ipv6(self, entry: dict[str, Any]) -> bool | None:
         # netavark inspect: `ipv6_enabled` bool, plus `subnets[].subnet`.
         if entry.get("ipv6_enabled") is True:
             return True
@@ -354,20 +360,20 @@ class PodmanRuntime(ContainerRuntime):
                 return True
         return False
 
-    def proxy_extra_run_args(self) -> List[str]:
+    def proxy_extra_run_args(self) -> list[str]:
         # Rootless podman forbids writing net.ipv4.ip_forward from inside the
         # container, so set it at run time instead.
         return ["--sysctl", "net.ipv4.ip_forward=1"]
 
-    def ipv6_run_args(self, enabled: bool, forwarding: bool = False) -> List[str]:
+    def ipv6_run_args(self, enabled: bool, forwarding: bool = False) -> list[str]:
         # Rootless podman forbids writing net.ipv6.* sysctls from inside the
         # container, so the IPv6 policy is set at run time.
         return _vm_ipv6_run_args(enabled, forwarding)
 
-    def llama_host_addr(self) -> Optional[str]:
+    def llama_host_addr(self) -> str | None:
         return self.HOST_INTERNAL_HOSTNAME
 
-    def resolve_llama_host_addr(self, probe_image: Optional[str] = None) -> Optional[str]:
+    def resolve_llama_host_addr(self, probe_image: str | None = None) -> str | None:
         """Resolve ``host.containers.internal`` to a numeric IP.
 
         Podman drops the ``host.containers.internal`` /etc/hosts entry when a
@@ -379,9 +385,21 @@ class PodmanRuntime(ContainerRuntime):
         if probe_image:
             try:
                 result = subprocess.run(
-                    [self.name, "run", "--rm", "--network", self.upstream_network,
-                     "--entrypoint", "getent", probe_image, "hosts", self.HOST_INTERNAL_HOSTNAME],
-                    capture_output=True, text=True, timeout=20,
+                    [
+                        self.name,
+                        "run",
+                        "--rm",
+                        "--network",
+                        self.upstream_network,
+                        "--entrypoint",
+                        "getent",
+                        probe_image,
+                        "hosts",
+                        self.HOST_INTERNAL_HOSTNAME,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
                 )
                 tokens = result.stdout.split()
                 if tokens:
@@ -409,31 +427,26 @@ class DockerRuntime(ContainerRuntime):
     default_bridge_interface = "docker0"
     default_upstream_network = "bridge"
 
-    def proxy_network_args(self, isolated_network: str) -> List[str]:
+    def proxy_network_args(self, isolated_network: str) -> list[str]:
         # Only the upstream network is attached at run time; the isolated
         # network is connected post-run (see proxy_secondary_connect_argv).
         return ["--network", self.upstream_network]
 
-    def proxy_secondary_connect_argv(
-        self, proxy_name: str, isolated_network: str
-    ) -> Optional[List[str]]:
+    def proxy_secondary_connect_argv(self, proxy_name: str, isolated_network: str) -> list[str] | None:
         return ["network", "connect", isolated_network, proxy_name]
 
-    def _network_entry_has_ipv6(self, entry: Dict[str, Any]) -> Optional[bool]:
+    def _network_entry_has_ipv6(self, entry: dict[str, Any]) -> bool | None:
         # docker inspect: `EnableIPv6` bool, plus a v6 subnet in IPAM.Config.
         if entry.get("EnableIPv6") is True:
             return True
         ipam = entry.get("IPAM", {}) or {}
-        for cfg in ipam.get("Config", []) or []:
-            if isinstance(cfg, dict) and ":" in str(cfg.get("Subnet", "")):
-                return True
-        return False
+        return any(isinstance(cfg, dict) and ":" in str(cfg.get("Subnet", "")) for cfg in ipam.get("Config", []) or [])
 
-    def proxy_extra_run_args(self) -> List[str]:
+    def proxy_extra_run_args(self) -> list[str]:
         return ["--sysctl", "net.ipv4.ip_forward=1"]
 
-    def ipv6_run_args(self, enabled: bool, forwarding: bool = False) -> List[str]:
+    def ipv6_run_args(self, enabled: bool, forwarding: bool = False) -> list[str]:
         return _vm_ipv6_run_args(enabled, forwarding)
 
-    def llama_host_addr(self) -> Optional[str]:
+    def llama_host_addr(self) -> str | None:
         return "host.docker.internal"

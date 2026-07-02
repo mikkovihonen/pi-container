@@ -6,23 +6,28 @@ Run with:
 """
 
 import json
+import os
 import re
-import yaml
+
+# We import the module directly — these tests do not require a running mitmproxy instance.
+# For flow-level testing we use MagicMock to simulate mitmproxy HTTPFlow objects.
+import sys
 from unittest.mock import MagicMock, patch
 from urllib import parse as urlparse
 
 import pytest
-
-# We import the module directly — these tests do not require a running mitmproxy instance.
-# For flow-level testing we use MagicMock to simulate mitmproxy HTTPFlow objects.
-
-import sys
-import os
+import yaml
 
 # Ensure the parent directory is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from token_replacer import (
+    FormBodyMatcher,
+    HeaderMatcher,
+    JsonBodyMatcher,
+    QueryStringMatcher,
+    RawBodyMatcher,
+    TokenReplacerAddon,
     _apply_strategy,
     _is_raw_regex,
     _matches_hostname,
@@ -30,21 +35,16 @@ from token_replacer import (
     _strip_port,
     _validate_rule,
     scan_config_env_refs,
-    HeaderMatcher,
-    JsonBodyMatcher,
-    RawBodyMatcher,
-    FormBodyMatcher,
-    QueryStringMatcher,
-    TokenReplacerAddon,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_flow(method: str = "POST", host: str = "api.example.com",
-               path: str = "/", headers: dict = None, body: bytes = b""):
+
+def _make_flow(
+    method: str = "POST", host: str = "api.example.com", path: str = "/", headers: dict = None, body: bytes = b""
+):
     """Build a MagicMock HTTPFlow with the given properties."""
     flow = MagicMock()
     flow.request = MagicMock()
@@ -93,14 +93,17 @@ def _make_headers_mock(headers_dict: dict[str, str]):
 
     def _getitem(k):
         return headers_dict.get(k, "")
+
     mock.__getitem__ = MagicMock(side_effect=_getitem)
 
     def _setitem(k, v):
         headers_dict[k] = v
+
     mock.__setitem__ = MagicMock(side_effect=_setitem)
 
     def _delitem(k):
         headers_dict.pop(k, None)
+
     mock.__delitem__ = MagicMock(side_effect=_delitem)
 
     mock.__contains__ = MagicMock(side_effect=lambda k: k in headers_dict)
@@ -110,6 +113,7 @@ def _make_headers_mock(headers_dict: dict[str, str]):
 # ---------------------------------------------------------------------------
 # _matches_hostname tests
 # ---------------------------------------------------------------------------
+
 
 class TestMatchesHostname:
     def test_exact_match(self):
@@ -145,6 +149,7 @@ class TestMatchesHostname:
 # _apply_strategy tests
 # ---------------------------------------------------------------------------
 
+
 class TestIsRawRegex:
     def test_star_is_glob(self):
         assert _is_raw_regex("*.example.com") is False
@@ -169,6 +174,7 @@ class TestApplyStrategy:
 
     def test_hash(self):
         import hashlib
+
         result = _apply_strategy("secret123", "hash", "anything")
         expected = hashlib.sha256(b"secret123").hexdigest()
         assert result == expected
@@ -185,11 +191,10 @@ class TestApplyStrategy:
         assert result == "REPLACED"
 
 
-
-
 # ---------------------------------------------------------------------------
 # JsonBodyMatcher tests
 # ---------------------------------------------------------------------------
+
 
 class TestJsonBodyMatcher:
     def test_simple_replacement(self):
@@ -208,11 +213,11 @@ class TestJsonBodyMatcher:
     def test_no_match_when_regex_does_not_fit(self):
         matcher = JsonBodyMatcher(
             json_path="$.token",
-            regex="ak_[A-Z]{5}",          # expects uppercase only
+            regex="ak_[A-Z]{5}",  # expects uppercase only
             strategy="static",
             replacement_value="X",
         )
-        data = {"token": "ak_abcde"}   # lowercase — no match
+        data = {"token": "ak_abcde"}  # lowercase — no match
         modified, found = matcher.match_and_replace(data)
         assert modified["token"] == "ak_abcde"  # unchanged
         assert found == []
@@ -305,6 +310,7 @@ class TestJsonBodyMatcher:
 # HeaderMatcher tests
 # ---------------------------------------------------------------------------
 
+
 class TestHeaderMatcher:
     def _make_headers(self, items: dict):
         return _make_headers_mock(items)
@@ -341,9 +347,11 @@ class TestHeaderMatcher:
             replacement_value="REPLACED",
         )
         # Use a real dict so we can inspect setitem order
-        headers_dict: dict[str, str] = {"Content-Type": "application/json",
-                                        "Authorization": "Bearer secret123",
-                                        "X-Custom": "value"}
+        headers_dict: dict[str, str] = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer secret123",
+            "X-Custom": "value",
+        }
 
         h = _make_headers_mock(headers_dict)
         # Track setitem order: intercept the mock's side_effect
@@ -366,6 +374,7 @@ class TestHeaderMatcher:
 # ---------------------------------------------------------------------------
 # FormBodyMatcher tests
 # ---------------------------------------------------------------------------
+
 
 class TestFormBodyMatcher:
     def test_form_field_replacement(self):
@@ -400,7 +409,7 @@ class TestFormBodyMatcher:
             strategy="static",
             replacement_value="X",
         )
-        pairs = [("token", "secret_abcde")]   # lowercase — no match
+        pairs = [("token", "secret_abcde")]  # lowercase — no match
         found = matcher.match_and_replace_pairs(pairs)
         assert found == []
         assert pairs == [("token", "secret_abcde")]
@@ -438,6 +447,7 @@ class TestFormBodyMatcher:
 # ---------------------------------------------------------------------------
 # QueryStringMatcher tests
 # ---------------------------------------------------------------------------
+
 
 class TestQueryStringMatcher:
     def test_query_field_replacement(self):
@@ -496,6 +506,7 @@ class TestQueryStringMatcher:
 # RawBodyMatcher tests
 # ---------------------------------------------------------------------------
 
+
 class TestRawBodyMatcher:
     def test_jwt_replacement(self):
         matcher = RawBodyMatcher(
@@ -503,7 +514,7 @@ class TestRawBodyMatcher:
             strategy="static",
             replacement_value="REDACTED_JWT",
         )
-        body = 'Some text before eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123XYZ more text'
+        body = "Some text before eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123XYZ more text"
         modified, found = matcher.match_and_replace(body)
         assert "REDACTED_JWT" in modified
         assert "eyJhbGciOiJIUzI1NiJ9" not in modified
@@ -535,6 +546,7 @@ class TestRawBodyMatcher:
 # ---------------------------------------------------------------------------
 # TokenReplacerAddon integration tests
 # ---------------------------------------------------------------------------
+
 
 class TestStripPort:
     def test_with_port(self):
@@ -569,14 +581,18 @@ class TestRawBodyMatcherTokenOrder:
 
     def test_tokens_in_order(self):
         matcher = RawBodyMatcher(
-            regex=r"TOKEN\d", strategy="static", replacement_value="X",
+            regex=r"TOKEN\d",
+            strategy="static",
+            replacement_value="X",
         )
         _, found = matcher.match_and_replace("TOKEN1 TOKEN2 TOKEN3")
         assert found == ["TOKEN1", "TOKEN2", "TOKEN3"]
 
     def test_collect_only_preserves_order(self):
         matcher = RawBodyMatcher(
-            regex=r"TOKEN\d", strategy="static", replacement_value="X",
+            regex=r"TOKEN\d",
+            strategy="static",
+            replacement_value="X",
         )
         _, found = matcher.match_and_replace("TOKEN1 TOKEN2", collect_only=True)
         assert found == ["TOKEN1", "TOKEN2"]
@@ -835,9 +851,7 @@ class TestTokenReplacerAddon:
             {
                 "name": "json_api_key",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.json", "path": "$.api_key", "regex": None}
-                ],
+                "content_patterns": [{"field": "body.json", "path": "$.api_key", "regex": None}],
                 "replace_with": {"strategy": "static", "value": "REDACTED"},
                 "_matchers": [
                     JsonBodyMatcher(
@@ -867,9 +881,7 @@ class TestTokenReplacerAddon:
             {
                 "name": "json_api_key",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.json", "path": "$.api_key", "regex": None}
-                ],
+                "content_patterns": [{"field": "body.json", "path": "$.api_key", "regex": None}],
                 "replace_with": {"strategy": "static", "value": "REDACTED"},
                 "_matchers": [
                     JsonBodyMatcher(
@@ -897,9 +909,7 @@ class TestTokenReplacerAddon:
             {
                 "name": "json_api_key",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.json", "path": "$.api_key", "regex": None}
-                ],
+                "content_patterns": [{"field": "body.json", "path": "$.api_key", "regex": None}],
                 "replace_with": {"strategy": "static", "value": "REDACTED"},
                 "_matchers": [
                     JsonBodyMatcher(
@@ -933,9 +943,7 @@ class TestTokenReplacerAddon:
             {
                 "name": "rule_a",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.json", "path": "$.key_a", "regex": None}
-                ],
+                "content_patterns": [{"field": "body.json", "path": "$.key_a", "regex": None}],
                 "replace_with": {"strategy": "static", "value": "REPLACED_A"},
                 "_matchers": [
                     JsonBodyMatcher(
@@ -990,9 +998,7 @@ class TestTokenReplacerAddon:
             {
                 "name": "rule_a",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.raw", "regex": r"TOKEN_A"}
-                ],
+                "content_patterns": [{"field": "body.raw", "regex": r"TOKEN_A"}],
                 "replace_with": {"strategy": "static", "value": "REPLACED_A"},
                 "_matchers": [
                     RawBodyMatcher(
@@ -1005,9 +1011,7 @@ class TestTokenReplacerAddon:
             {
                 "name": "rule_b",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.raw", "regex": r"TOKEN_B"}
-                ],
+                "content_patterns": [{"field": "body.raw", "regex": r"TOKEN_B"}],
                 "replace_with": {"strategy": "static", "value": "REPLACED_B"},
                 "_matchers": [
                     RawBodyMatcher(
@@ -1085,9 +1089,7 @@ class TestTokenReplacerAddon:
             {
                 "name": "rule_a",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.raw", "regex": r"TOKEN_A"}
-                ],
+                "content_patterns": [{"field": "body.raw", "regex": r"TOKEN_A"}],
                 "replace_with": {"strategy": "static", "value": "REPLACED_A"},
                 "_matchers": [
                     RawBodyMatcher(
@@ -1100,9 +1102,7 @@ class TestTokenReplacerAddon:
             {
                 "name": "rule_b",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.raw", "regex": r"TOKEN_A_B"}
-                ],
+                "content_patterns": [{"field": "body.raw", "regex": r"TOKEN_A_B"}],
                 "replace_with": {"strategy": "static", "value": "REPLACED_AB"},
                 "_matchers": [
                     RawBodyMatcher(
@@ -1153,8 +1153,6 @@ class TestTokenReplacerAddon:
         ]
         addon.global_config = {"log_replacements": False, "dry_run": False}
 
-        import hashlib
-
         flow = _make_flow(host="session.example.com")
         original_cookie = "session=abcdef1234567890abcdef1234567890"
 
@@ -1169,9 +1167,9 @@ class TestTokenReplacerAddon:
         # The session= prefix must be preserved
         assert new_value.startswith("session=")
         # The value after session= should be a SHA-256 hash (64 hex chars)
-        hash_part = new_value[len("session="):]
+        hash_part = new_value[len("session=") :]
         assert len(hash_part) == 64
-        assert all(c in '0123456789abcdef' for c in hash_part)
+        assert all(c in "0123456789abcdef" for c in hash_part)
 
     def test_on_request_header_no_cross_rule_interference(self):
         """Header Phase 2 must operate on original values — one rule's replacement
@@ -1182,8 +1180,7 @@ class TestTokenReplacerAddon:
                 "name": "rule_a",
                 "hostnames": ["api.example.com"],
                 "content_patterns": [
-                    {"field": "headers", "header_name": "Authorization",
-                     "regex": r"(Bearer\s+)\S+"},
+                    {"field": "headers", "header_name": "Authorization", "regex": r"(Bearer\s+)\S+"},
                 ],
                 "replace_with": {"strategy": "static", "value": "REPLACED_A"},
                 "_matchers": [
@@ -1199,8 +1196,7 @@ class TestTokenReplacerAddon:
                 "name": "rule_b",
                 "hostnames": ["api.example.com"],
                 "content_patterns": [
-                    {"field": "headers", "header_name": "Authorization",
-                     "regex": "REPLACED_A"},
+                    {"field": "headers", "header_name": "Authorization", "regex": "REPLACED_A"},
                 ],
                 "replace_with": {"strategy": "static", "value": "REPLACED_B"},
                 "_matchers": [
@@ -1216,9 +1212,7 @@ class TestTokenReplacerAddon:
         addon.global_config = {"log_replacements": False, "dry_run": False}
 
         flow = _make_flow(host="api.example.com")
-        flow.request.headers = _make_headers_mock(
-            {"Authorization": "Bearer my_secret_token_12345"}
-        )
+        flow.request.headers = _make_headers_mock({"Authorization": "Bearer my_secret_token_12345"})
 
         addon.request(flow)
 
@@ -1226,7 +1220,6 @@ class TestTokenReplacerAddon:
         assert new_value == "Bearer REPLACED_A"
         # Rule B's regex should NOT have matched Rule A's replacement
         assert "REPLACED_B" not in new_value
-
 
     def test_on_request_query_string_replacement(self):
         """Query string tokens should be replaced via _set_query."""
@@ -1282,7 +1275,7 @@ class TestTokenReplacerAddon:
         flow.request._set_query.assert_called()
         call_pairs = flow.request._set_query.call_args[0][0]
         # The api_key should be replaced
-        api_key_value = dict(call_pairs).get("api_key", "")
+        dict(call_pairs).get("api_key", "")
         # There may be duplicate keys, so check all values
         key_values = [v for k, v in call_pairs if k == "api_key"]
         assert "REDACTED" in key_values
@@ -1328,9 +1321,7 @@ class TestTokenReplacerAddon:
         flow.request.headers.keys = MagicMock(return_value=iter([]))
         flow.request.headers.__setitem__ = MagicMock()
         flow.request.headers.__delitem__ = MagicMock()
-        flow.request.query = (
-            ("api_key", "ak_abcdefghijklmnopqrstuvwxyz012345"),
-        )
+        flow.request.query = (("api_key", "ak_abcdefghijklmnopqrstuvwxyz012345"),)
         flow.request._set_query = MagicMock()
 
         addon.request(flow)
@@ -1343,6 +1334,7 @@ class TestTokenReplacerAddon:
 # on_response integration tests
 # ---------------------------------------------------------------------------
 
+
 class TestOnResponse:
     def test_on_response_json_replacement(self):
         """Response JSON body tokens should be replaced just like request tokens."""
@@ -1351,14 +1343,14 @@ class TestOnResponse:
             {
                 "name": "json_api_key",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.json", "path": "$.api_key", "regex": None}
-                ],
+                "content_patterns": [{"field": "body.json", "path": "$.api_key", "regex": None}],
                 "replace_with": {"strategy": "static", "value": "REDACTED"},
                 "_matchers": [
                     JsonBodyMatcher(
-                        json_path="$.api_key", regex=None,
-                        strategy="static", replacement_value="REDACTED",
+                        json_path="$.api_key",
+                        regex=None,
+                        strategy="static",
+                        replacement_value="REDACTED",
                     )
                 ],
             }
@@ -1382,14 +1374,14 @@ class TestOnResponse:
             {
                 "name": "json_api_key",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.json", "path": "$.api_key", "regex": None}
-                ],
+                "content_patterns": [{"field": "body.json", "path": "$.api_key", "regex": None}],
                 "replace_with": {"strategy": "static", "value": "REDACTED"},
                 "_matchers": [
                     JsonBodyMatcher(
-                        json_path="$.api_key", regex=None,
-                        strategy="static", replacement_value="REDACTED",
+                        json_path="$.api_key",
+                        regex=None,
+                        strategy="static",
+                        replacement_value="REDACTED",
                     )
                 ],
             }
@@ -1410,14 +1402,14 @@ class TestOnResponse:
             {
                 "name": "json_api_key",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.json", "path": "$.api_key", "regex": None}
-                ],
+                "content_patterns": [{"field": "body.json", "path": "$.api_key", "regex": None}],
                 "replace_with": {"strategy": "static", "value": "REDACTED"},
                 "_matchers": [
                     JsonBodyMatcher(
-                        json_path="$.api_key", regex=None,
-                        strategy="static", replacement_value="REDACTED",
+                        json_path="$.api_key",
+                        regex=None,
+                        strategy="static",
+                        replacement_value="REDACTED",
                     )
                 ],
             }
@@ -1439,14 +1431,14 @@ class TestOnResponse:
             {
                 "name": "json_api_key",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.json", "path": "$.api_key", "regex": None}
-                ],
+                "content_patterns": [{"field": "body.json", "path": "$.api_key", "regex": None}],
                 "replace_with": {"strategy": "static", "value": "REDACTED"},
                 "_matchers": [
                     JsonBodyMatcher(
-                        json_path="$.api_key", regex=None,
-                        strategy="static", replacement_value="REDACTED",
+                        json_path="$.api_key",
+                        regex=None,
+                        strategy="static",
+                        replacement_value="REDACTED",
                     )
                 ],
             }
@@ -1476,14 +1468,15 @@ class TestOnResponse:
                 "_matchers": [
                     RawBodyMatcher(
                         regex=r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
-                        strategy="static", replacement_value="REDACTED_JWT",
+                        strategy="static",
+                        replacement_value="REDACTED_JWT",
                     )
                 ],
             }
         ]
         addon.global_config = {"log_replacements": False, "dry_run": False}
 
-        payload = b'Some text eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123XYZ more text'
+        payload = b"Some text eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123XYZ more text"
         flow = _make_response_flow(host="api.example.com", body=payload)
 
         addon.response(flow)
@@ -1512,14 +1505,13 @@ class TestOnResponse:
                     HeaderMatcher(
                         header_name="X-Auth-Token",
                         regex=r"(token=)[a-f0-9]{32}",
-                        strategy="hash", replacement_value="ignored",
+                        strategy="hash",
+                        replacement_value="ignored",
                     )
                 ],
             }
         ]
         addon.global_config = {"log_replacements": False, "dry_run": False}
-
-        import hashlib
 
         flow = _make_response_flow(host="api.example.com")
         original_token = "token=abcdef1234567890abcdef1234567890"
@@ -1531,9 +1523,9 @@ class TestOnResponse:
         call_args = flow.response.headers.__setitem__.call_args[0]
         new_value = call_args[1]
         assert new_value.startswith("token=")
-        hash_part = new_value[len("token="):]
+        hash_part = new_value[len("token=") :]
         assert len(hash_part) == 64
-        assert all(c in '0123456789abcdef' for c in hash_part)
+        assert all(c in "0123456789abcdef" for c in hash_part)
 
     def test_on_response_removes_chunked_encoding(self):
         """When modifying a chunked response body, Transfer-Encoding must be removed."""
@@ -1542,14 +1534,14 @@ class TestOnResponse:
             {
                 "name": "json_api_key",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.json", "path": "$.api_key", "regex": None}
-                ],
+                "content_patterns": [{"field": "body.json", "path": "$.api_key", "regex": None}],
                 "replace_with": {"strategy": "static", "value": "REDACTED"},
                 "_matchers": [
                     JsonBodyMatcher(
-                        json_path="$.api_key", regex=None,
-                        strategy="static", replacement_value="REDACTED",
+                        json_path="$.api_key",
+                        regex=None,
+                        strategy="static",
+                        replacement_value="REDACTED",
                     )
                 ],
             }
@@ -1902,7 +1894,7 @@ class TestHeaderMultipleCaptureGroups:
         assert len(found) == 1
         new_value = headers["Cookie"]
         assert new_value.startswith("session=")
-        hash_part = new_value[len("session="):]
+        hash_part = new_value[len("session=") :]
         assert len(hash_part) == 64
 
     def test_header_multi_group_preserves_all_groups(self):
@@ -1994,9 +1986,7 @@ class TestHeaderNoCrossRuleInterferenceInResponse:
         addon.global_config = {"log_replacements": False, "dry_run": False}
 
         flow = _make_response_flow(host="api.example.com")
-        flow.response.headers = _make_headers_mock(
-            {"Authorization": "Bearer my_secret_token_12345"}
-        )
+        flow.response.headers = _make_headers_mock({"Authorization": "Bearer my_secret_token_12345"})
 
         addon.response(flow)
 
@@ -2015,9 +2005,7 @@ class TestRawBodyOverlappingReplacements:
             {
                 "name": "rule_a",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.raw", "regex": r"SHORT"}
-                ],
+                "content_patterns": [{"field": "body.raw", "regex": r"SHORT"}],
                 "replace_with": {"strategy": "static", "value": "REPLACED_SHORT"},
                 "_matchers": [
                     RawBodyMatcher(
@@ -2030,9 +2018,7 @@ class TestRawBodyOverlappingReplacements:
             {
                 "name": "rule_b",
                 "hostnames": ["api.example.com"],
-                "content_patterns": [
-                    {"field": "body.raw", "regex": r"SHORT_TOKEN"}
-                ],
+                "content_patterns": [{"field": "body.raw", "regex": r"SHORT_TOKEN"}],
                 "replace_with": {"strategy": "static", "value": "REPLACED_LONG"},
                 "_matchers": [
                     RawBodyMatcher(

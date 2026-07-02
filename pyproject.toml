@@ -48,6 +48,7 @@ select = [
     "TCH", # flake8-type-checking
 ]
 ignore = [
+    "E402",  # module level import not at top (intentional: sys.dont_write_bytecode)
     "E501",  # line too long (handled by formatter)
     "B008",  # do not perform function calls in argument defaults
 ]

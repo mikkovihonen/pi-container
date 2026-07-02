@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from models import Model, ModelConfig, ServerConfig
 
-
 # ---------------------------------------------------------------------------
 # ModelConfig
 # ---------------------------------------------------------------------------
@@ -142,14 +141,16 @@ class TestServerConfig:
 
 class TestModelVerifySha256:
     def test_no_sha256_skips_verification(self):
-        mc = ModelConfig.from_dict({
-            "fileFlag": "--model",
-            "repo": "org/repo",
-            "file": "model.gguf",
-            "dir": "models",
-            "additionalServerFlags": [],
-            "sha256": None,
-        })
+        mc = ModelConfig.from_dict(
+            {
+                "fileFlag": "--model",
+                "repo": "org/repo",
+                "file": "model.gguf",
+                "dir": "models",
+                "additionalServerFlags": [],
+                "sha256": None,
+            }
+        )
         model = Model(label="test", config=mc, models_dir=Path("/tmp"))
         # Should not raise
         with patch("models.logger") as mock_logger:
@@ -157,21 +158,24 @@ class TestModelVerifySha256:
         mock_logger.warning.assert_called()
 
     def test_matching_sha256_passes(self, tmp_path):
-        mc = ModelConfig.from_dict({
-            "fileFlag": "--model",
-            "repo": "org/repo",
-            "file": "model.gguf",
-            "dir": "models",
-            "additionalServerFlags": [],
-            "sha256": "abc123",
-        })
-        model = Model(label="test", config=mc, models_dir=tmp_path)
+        mc = ModelConfig.from_dict(
+            {
+                "fileFlag": "--model",
+                "repo": "org/repo",
+                "file": "model.gguf",
+                "dir": "models",
+                "additionalServerFlags": [],
+                "sha256": "abc123",
+            }
+        )
+        Model(label="test", config=mc, models_dir=tmp_path)
         model_path = tmp_path / "models" / "model.gguf"
         model_path.parent.mkdir(parents=True, exist_ok=True)
         model_path.write_bytes(b"test data")
 
         # Compute real SHA256
         import hashlib
+
         h = hashlib.sha256(b"test data").hexdigest()
 
         mc_with_hash = ModelConfig(
@@ -189,14 +193,16 @@ class TestModelVerifySha256:
         mock_logger.info.assert_called()
 
     def test_mismatched_sha256_raises(self, tmp_path):
-        mc = ModelConfig.from_dict({
-            "fileFlag": "--model",
-            "repo": "org/repo",
-            "file": "model.gguf",
-            "dir": "models",
-            "additionalServerFlags": [],
-            "sha256": "WRONG_HASH_VALUE_123456789012345678901234567890123456789012345678901234",
-        })
+        mc = ModelConfig.from_dict(
+            {
+                "fileFlag": "--model",
+                "repo": "org/repo",
+                "file": "model.gguf",
+                "dir": "models",
+                "additionalServerFlags": [],
+                "sha256": "WRONG_HASH_VALUE_123456789012345678901234567890123456789012345678901234",
+            }
+        )
         model = Model(label="test", config=mc, models_dir=tmp_path)
         model_path = tmp_path / "models" / "model.gguf"
         model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -213,45 +219,48 @@ class TestModelVerifySha256:
 
 class TestModelDownload:
     def test_skips_existing_model(self, tmp_path):
-        mc = ModelConfig.from_dict({
-            "fileFlag": "--model",
-            "repo": "org/repo",
-            "file": "model.gguf",
-            "dir": "models",
-            "additionalServerFlags": [],
-            "sha256": None,
-        })
+        mc = ModelConfig.from_dict(
+            {
+                "fileFlag": "--model",
+                "repo": "org/repo",
+                "file": "model.gguf",
+                "dir": "models",
+                "additionalServerFlags": [],
+                "sha256": None,
+            }
+        )
         model = Model(label="test", config=mc, models_dir=tmp_path)
         model_path = tmp_path / "models" / "model.gguf"
         model_path.parent.mkdir(parents=True, exist_ok=True)
         model_path.write_text("existing")
 
-        with patch("models.logger") as mock_logger, \
-             patch("models.hf_hub_download") as mock_hf:
-
+        with patch("models.logger") as mock_logger, patch("models.hf_hub_download") as mock_hf:
             model.download()
             mock_hf.assert_not_called()
             mock_logger.info.assert_called()
 
     def test_downloads_when_missing(self, tmp_path):
-        mc = ModelConfig.from_dict({
-            "fileFlag": "--model",
-            "repo": "org/repo",
-            "file": "model.gguf",
-            "dir": "models",
-            "additionalServerFlags": [],
-            "sha256": None,
-        })
+        mc = ModelConfig.from_dict(
+            {
+                "fileFlag": "--model",
+                "repo": "org/repo",
+                "file": "model.gguf",
+                "dir": "models",
+                "additionalServerFlags": [],
+                "sha256": None,
+            }
+        )
         model = Model(label="test", config=mc, models_dir=tmp_path)
 
-        with patch("models.hf_hub_download") as mock_hf, \
-             patch("models.logger") as mock_logger, \
-             patch("models.hashlib") as mock_hashlib, \
-             patch("models.fcntl") as mock_fcntl, \
-             patch("models.LLAMA_SERVER_LOCK_DIR", tmp_path / "locks"):
-
+        with (
+            patch("models.hf_hub_download") as mock_hf,
+            patch("models.logger") as mock_logger,
+            patch("models.hashlib") as mock_hashlib,
+            patch("models.fcntl") as mock_fcntl,
+            patch("models.LLAMA_SERVER_LOCK_DIR", tmp_path / "locks"),
+        ):
             # Mock lock to be a context manager
-            mock_lock_file = MagicMock()
+            MagicMock()
             mock_fcntl.flock = MagicMock()
 
             mock_hashlib.sha256.return_value.hexdigest.return_value = "abc"
@@ -261,14 +270,16 @@ class TestModelDownload:
             mock_logger.info.assert_called()
 
     def test_path_property(self, tmp_path):
-        mc = ModelConfig.from_dict({
-            "fileFlag": "--model",
-            "repo": "org/repo",
-            "file": "model.gguf",
-            "dir": "subdir",
-            "additionalServerFlags": [],
-            "sha256": None,
-        })
+        mc = ModelConfig.from_dict(
+            {
+                "fileFlag": "--model",
+                "repo": "org/repo",
+                "file": "model.gguf",
+                "dir": "subdir",
+                "additionalServerFlags": [],
+                "sha256": None,
+            }
+        )
         model = Model(label="test", config=mc, models_dir=tmp_path)
         assert model.path == tmp_path / "subdir" / "model.gguf"
 
@@ -282,7 +293,7 @@ class TestModelCleanupLockDir:
     def test_removes_empty_dir(self, tmp_path):
         lock_dir = tmp_path / "model_download"
         lock_dir.mkdir()
-        with patch("models.logger") as mock_logger:
+        with patch("models.logger"):
             Model.cleanup_download_lock_dir(lock_dir)
         assert not lock_dir.exists()
 

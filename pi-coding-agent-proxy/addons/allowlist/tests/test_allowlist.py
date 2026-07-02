@@ -6,12 +6,9 @@ Run with:
 """
 
 import ipaddress
-from unittest.mock import MagicMock, patch
-
-import pytest
-
-import sys
 import os
+import sys
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -26,7 +23,6 @@ from allowlist import (
     _parse_server_address,
     _strip_port,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers: hostname pattern matching
@@ -83,8 +79,7 @@ class TestMatchesHostname:
         assert not _matches_hostname("api.other.com", ["*.example.com"])
 
     def test_regex_match(self):
-        assert _matches_hostname("auth.v1.example.com",
-                                 ["^auth\\..*\\.example\\.com$"])
+        assert _matches_hostname("auth.v1.example.com", ["^auth\\..*\\.example\\.com$"])
 
     def test_case_insensitive(self):
         assert _matches_hostname("API.Example.COM", ["api.example.com"])
@@ -248,34 +243,40 @@ class TestIsPrivateIp:
 
 class TestAllowlistRule:
     def test_allow_hostname_match(self):
-        rule = AllowlistRule({
-            "name": "test-allow",
-            "mode": "allow",
-            "hostnames": ["api.example.com", "*.staging.com"],
-            "ip_ranges": [],
-        })
+        rule = AllowlistRule(
+            {
+                "name": "test-allow",
+                "mode": "allow",
+                "hostnames": ["api.example.com", "*.staging.com"],
+                "ip_ranges": [],
+            }
+        )
         assert rule.evaluate("api.example.com", None) == "allow"
         assert rule.evaluate("dev.staging.com", None) == "allow"
         assert rule.evaluate("other.com", None) is None
 
     def test_allow_ip_match(self):
-        rule = AllowlistRule({
-            "name": "test-ip-allow",
-            "mode": "allow",
-            "hostnames": [],
-            "ip_ranges": ["10.0.0.0/8"],
-        })
+        rule = AllowlistRule(
+            {
+                "name": "test-ip-allow",
+                "mode": "allow",
+                "hostnames": [],
+                "ip_ranges": ["10.0.0.0/8"],
+            }
+        )
         assert rule.evaluate("unknown.host.com", "10.1.2.3") == "allow"
         assert rule.evaluate("unknown.host.com", "8.8.8.8") is None
 
     def test_allow_hostname_and_ip(self):
         """Either hostname or IP match should be sufficient for allow."""
-        rule = AllowlistRule({
-            "name": "test-or-allow",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": ["10.0.0.0/8"],
-        })
+        rule = AllowlistRule(
+            {
+                "name": "test-or-allow",
+                "mode": "allow",
+                "hostnames": ["api.example.com"],
+                "ip_ranges": ["10.0.0.0/8"],
+            }
+        )
         # Hostname match only
         assert rule.evaluate("api.example.com", "8.8.8.8") == "allow"
         # IP match only
@@ -284,61 +285,73 @@ class TestAllowlistRule:
         assert rule.evaluate("unknown.com", "8.8.8.8") is None
 
     def test_block_hostname_match(self):
-        rule = AllowlistRule({
-            "name": "test-block",
-            "mode": "block",
-            "hostnames": ["ads.example.com", "*.tracker.net"],
-            "ip_ranges": [],
-        })
+        rule = AllowlistRule(
+            {
+                "name": "test-block",
+                "mode": "block",
+                "hostnames": ["ads.example.com", "*.tracker.net"],
+                "ip_ranges": [],
+            }
+        )
         assert rule.evaluate("ads.example.com", None) == "deny"
         assert rule.evaluate("bad.tracker.net", None) == "deny"
         assert rule.evaluate("good.com", None) is None
 
     def test_block_ip_match(self):
-        rule = AllowlistRule({
-            "name": "test-ip-block",
-            "mode": "block",
-            "hostnames": [],
-            "ip_ranges": ["203.0.113.0/24"],
-        })
+        rule = AllowlistRule(
+            {
+                "name": "test-ip-block",
+                "mode": "block",
+                "hostnames": [],
+                "ip_ranges": ["203.0.113.0/24"],
+            }
+        )
         assert rule.evaluate("unknown.com", "203.0.113.5") == "deny"
         assert rule.evaluate("unknown.com", "1.2.3.4") is None
 
     def test_disabled_rule(self):
-        rule = AllowlistRule({
-            "name": "test-disabled",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": [],
-            "enabled": False,
-        })
+        rule = AllowlistRule(
+            {
+                "name": "test-disabled",
+                "mode": "allow",
+                "hostnames": ["api.example.com"],
+                "ip_ranges": [],
+                "enabled": False,
+            }
+        )
         assert rule.evaluate("api.example.com", None) is None
 
     def test_regex_hostname(self):
-        rule = AllowlistRule({
-            "name": "test-regex",
-            "mode": "allow",
-            "hostnames": ["^v\\d+\\.api\\.example\\.com$"],
-            "ip_ranges": [],
-        })
+        rule = AllowlistRule(
+            {
+                "name": "test-regex",
+                "mode": "allow",
+                "hostnames": ["^v\\d+\\.api\\.example\\.com$"],
+                "ip_ranges": [],
+            }
+        )
         assert rule.evaluate("v1.api.example.com", None) == "allow"
         assert rule.evaluate("v2.api.example.com", None) == "allow"
         assert rule.evaluate("api.example.com", None) is None
 
     def test_multiple_rules_first_wins(self):
         """Multiple rules; first matching rule determines outcome."""
-        rule1 = AllowlistRule({
-            "name": "block-first",
-            "mode": "block",
-            "hostnames": ["evil.com"],
-            "ip_ranges": [],
-        })
-        rule2 = AllowlistRule({
-            "name": "allow-second",
-            "mode": "allow",
-            "hostnames": ["evil.com"],
-            "ip_ranges": [],
-        })
+        rule1 = AllowlistRule(
+            {
+                "name": "block-first",
+                "mode": "block",
+                "hostnames": ["evil.com"],
+                "ip_ranges": [],
+            }
+        )
+        rule2 = AllowlistRule(
+            {
+                "name": "allow-second",
+                "mode": "allow",
+                "hostnames": ["evil.com"],
+                "ip_ranges": [],
+            }
+        )
 
         # In a real scenario, _check_rules iterates rules in order.
         assert rule1.evaluate("evil.com", None) == "deny"
@@ -350,8 +363,7 @@ class TestAllowlistRule:
 # ---------------------------------------------------------------------------
 
 
-def _make_flow(host: str, server_ip: str | None = None,
-               method: str = "GET", path: str = "/"):
+def _make_flow(host: str, server_ip: str | None = None, method: str = "GET", path: str = "/"):
     """Build a MagicMock HTTPFlow for testing."""
     flow = MagicMock()
     flow.request = MagicMock()
@@ -391,6 +403,7 @@ class TestAllowlistAddonConfig:
         }
         config_file = tmp_path / "config.yaml"
         import yaml
+
         with open(config_file, "w") as f:
             yaml.dump(config, f)
 
@@ -423,6 +436,7 @@ class TestAllowlistAddonConfig:
         }
         config_file = tmp_path / "config.yaml"
         import yaml
+
         with open(config_file, "w") as f:
             yaml.dump(config, f)
 
@@ -439,12 +453,16 @@ class TestAllowlistAddonOnRequest:
         addon = AllowlistAddon(config_path="")
         addon._mode = "allow"
         addon._default_action = "block"
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": ["api.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         flow = _make_flow("api.example.com", "93.184.216.34")
         addon.request(flow)
@@ -455,12 +473,16 @@ class TestAllowlistAddonOnRequest:
         addon = AllowlistAddon(config_path="")
         addon._mode = "allow"
         addon._default_action = "block"
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": ["api.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         flow = _make_flow("evil.com", "1.2.3.4")
         addon.request(flow)
@@ -471,12 +493,16 @@ class TestAllowlistAddonOnRequest:
         addon = AllowlistAddon(config_path="")
         addon._mode = "allow"
         addon._default_action = "block"
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": [],
-            "ip_ranges": ["10.0.0.0/8"],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": [],
+                    "ip_ranges": ["10.0.0.0/8"],
+                }
+            )
+        ]
 
         flow = _make_flow("unknown.host.com", "10.1.2.3")
         addon.request(flow)
@@ -486,12 +512,16 @@ class TestAllowlistAddonOnRequest:
         addon = AllowlistAddon(config_path="")
         addon._mode = "allow"
         addon._default_action = "block"
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": [],
-            "ip_ranges": ["10.0.0.0/8"],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": [],
+                    "ip_ranges": ["10.0.0.0/8"],
+                }
+            )
+        ]
 
         flow = _make_flow("unknown.host.com", "8.8.8.8")
         addon.request(flow)
@@ -501,12 +531,16 @@ class TestAllowlistAddonOnRequest:
         addon = AllowlistAddon(config_path="")
         addon._mode = "block"
         addon._default_action = "allow"
-        addon.rules = [AllowlistRule({
-            "name": "block-ads",
-            "mode": "block",
-            "hostnames": ["*.ads.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "block-ads",
+                    "mode": "block",
+                    "hostnames": ["*.ads.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         flow = _make_flow("tracker.ads.example.com", "93.184.216.34")
         addon.request(flow)
@@ -517,12 +551,16 @@ class TestAllowlistAddonOnRequest:
         addon = AllowlistAddon(config_path="")
         addon._mode = "block"
         addon._default_action = "allow"
-        addon.rules = [AllowlistRule({
-            "name": "block-ads",
-            "mode": "block",
-            "hostnames": ["*.ads.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "block-ads",
+                    "mode": "block",
+                    "hostnames": ["*.ads.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         flow = _make_flow("good.example.com", "93.184.216.34")
         addon.request(flow)
@@ -544,12 +582,16 @@ class TestAllowlistAddonOnRequest:
         addon = AllowlistAddon(config_path="")
         addon._mode = "allow"
         addon._default_action = "block"
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": ["api.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         # Private IP should always be allowed regardless of allowlist rules.
         flow = _make_flow("some-private-host", "192.168.1.100")
@@ -561,12 +603,16 @@ class TestAllowlistAddonOnRequest:
         addon._mode = "allow"
         addon._default_action = "block"
         addon._dry_run = True
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": ["api.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         flow = _make_flow("evil.com", "1.2.3.4")
         addon.request(flow)
@@ -578,12 +624,16 @@ class TestAllowlistAddonOnRequest:
         addon._mode = "allow"
         addon._default_action = "block"
         addon._status_code = 444
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": ["api.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         flow = _make_flow("evil.com", "1.2.3.4")
         addon.request(flow)
@@ -594,12 +644,16 @@ class TestAllowlistAddonOnRequest:
         addon = AllowlistAddon(config_path="")
         addon._mode = "allow"
         addon._default_action = "block"
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": ["api.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         flow = _make_flow("evil.com", "1.2.3.4")
         addon.request(flow)
@@ -611,12 +665,16 @@ class TestAllowlistAddonOnRequest:
         addon = AllowlistAddon(config_path="")
         addon._mode = "allow"
         addon._default_action = "block"
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": ["api.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         flow = _make_flow("evil.com", "1.2.3.4")
         addon.request(flow)
@@ -627,12 +685,16 @@ class TestAllowlistAddonOnRequest:
         addon = AllowlistAddon(config_path="")
         addon._mode = "block"
         addon._default_action = "allow"
-        addon.rules = [AllowlistRule({
-            "name": "block-ads",
-            "mode": "block",
-            "hostnames": ["*.ads.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "block-ads",
+                    "mode": "block",
+                    "hostnames": ["*.ads.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         flow = _make_flow("tracker.ads.example.com", "93.184.216.34")
         addon.request(flow)
@@ -641,12 +703,16 @@ class TestAllowlistAddonOnRequest:
 
     def test_skips_completed_flows(self):
         addon = AllowlistAddon(config_path="")
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": ["api.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         # Flow already has a response → should be skipped
         flow = _make_flow("api.example.com", "93.184.216.34")
@@ -655,12 +721,16 @@ class TestAllowlistAddonOnRequest:
 
     def test_skipserrored_flows(self):
         addon = AllowlistAddon(config_path="")
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": ["api.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         # Flow has an error → should be skipped
         flow = _make_flow("api.example.com", "93.184.216.34")
@@ -669,12 +739,16 @@ class TestAllowlistAddonOnRequest:
 
     def test_skips_dead_flows(self):
         addon = AllowlistAddon(config_path="")
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": ["api.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         # Flow is not live → should be skipped
         flow = _make_flow("api.example.com", "93.184.216.34")
@@ -685,12 +759,16 @@ class TestAllowlistAddonOnRequest:
         addon = AllowlistAddon(config_path="")
         addon._mode = "allow"
         addon._default_action = "allow"
-        addon.rules = [AllowlistRule({
-            "name": "test",
-            "mode": "allow",
-            "hostnames": ["api.example.com"],
-            "ip_ranges": [],
-        })]
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "test",
+                    "mode": "allow",
+                    "hostnames": ["api.example.com"],
+                    "ip_ranges": [],
+                }
+            )
+        ]
 
         # No matching rule, default is allow → should pass through.
         flow = _make_flow("unknown.com", "8.8.8.8")
@@ -702,18 +780,22 @@ class TestAllowlistAddonOnRequest:
         addon._mode = "allow"
         addon._default_action = "block"
         addon.rules = [
-            AllowlistRule({
-                "name": "block-first",
-                "mode": "block",
-                "hostnames": ["evil.com"],
-                "ip_ranges": [],
-            }),
-            AllowlistRule({
-                "name": "allow-second",
-                "mode": "allow",
-                "hostnames": ["evil.com"],
-                "ip_ranges": [],
-            }),
+            AllowlistRule(
+                {
+                    "name": "block-first",
+                    "mode": "block",
+                    "hostnames": ["evil.com"],
+                    "ip_ranges": [],
+                }
+            ),
+            AllowlistRule(
+                {
+                    "name": "allow-second",
+                    "mode": "allow",
+                    "hostnames": ["evil.com"],
+                    "ip_ranges": [],
+                }
+            ),
         ]
 
         # First rule (block) should win
@@ -785,6 +867,7 @@ class TestIntegration:
         }
         config_file = tmp_path / "config.yaml"
         import yaml
+
         with open(config_file, "w") as f:
             yaml.dump(config, f)
 
@@ -836,6 +919,7 @@ class TestIntegration:
         }
         config_file = tmp_path / "config.yaml"
         import yaml
+
         with open(config_file, "w") as f:
             yaml.dump(config, f)
 

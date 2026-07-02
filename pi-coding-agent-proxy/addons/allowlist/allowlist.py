@@ -64,9 +64,7 @@ def _glob_to_regex(pattern: str) -> str:
     ``*`` → ``.*`` (match any number of characters)
     ``?`` → ``.`` (match exactly one character)
     """
-    regex_pattern = "^" + re.escape(pattern) \
-        .replace(r"\*", ".*") \
-        .replace(r"\?", ".") + "$"
+    regex_pattern = "^" + re.escape(pattern).replace(r"\*", ".*").replace(r"\?", ".") + "$"
     return regex_pattern
 
 
@@ -139,18 +137,16 @@ def _ip_matches(ip_str: str, parsed_patterns: list) -> bool:
                 if pattern.version == 6 and addr in pattern:
                     return True
                 # Check IPv4-mapped IPv6
-                if pattern.version == 6 and addr.ipv4_mapped:
-                    if ipaddress.ip_network(pattern).version == 4:
-                        pass  # Already handled above
+                if pattern.version == 6 and addr.ipv4_mapped and ipaddress.ip_network(pattern).version == 4:
+                    return False  # Handled by IPv4 check above
         else:
             # Single IP comparison (also covers IPv4-mapped IPv6)
             if addr == pattern:
                 return True
             # For IPv6 addresses that are IPv4-mapped, compare against
             # IPv4 patterns.
-            if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
-                if addr.ipv4_mapped == pattern:
-                    return True
+            if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped and addr.ipv4_mapped == pattern:
+                return True
     return False
 
 
@@ -201,7 +197,7 @@ def _strip_port(hostname: str) -> str:
     if hostname.startswith("["):
         bracket_end = hostname.find("]")
         if bracket_end != -1 and bracket_end + 1 < len(hostname) and hostname[bracket_end + 1] == ":":
-            return hostname[:bracket_end + 1]
+            return hostname[: bracket_end + 1]
         return hostname
     if hostname.count(":") > 1:
         return hostname
@@ -213,6 +209,7 @@ def _strip_port(hostname: str) -> str:
 # ---------------------------------------------------------------------------
 # Rule engine
 # ---------------------------------------------------------------------------
+
 
 class AllowlistRule:
     """A single allowlist rule.
@@ -291,11 +288,10 @@ class AllowlistRule:
             # it's allowed.
             if hostname_match or ip_match:
                 return "allow"
-        elif self.mode == "block":
+        elif self.mode == "block" and (hostname_match or ip_match):
             # If the request matches this blocklist rule on any dimension,
             # it's denied.
-            if hostname_match or ip_match:
-                return "deny"
+            return "deny"
 
         return None
 
@@ -303,6 +299,7 @@ class AllowlistRule:
 # ---------------------------------------------------------------------------
 # Main addon class
 # ---------------------------------------------------------------------------
+
 
 class AllowlistAddon:
     """
@@ -393,11 +390,13 @@ class AllowlistAddon:
         self.global_config = {}
 
         if not config_path or not os.path.isfile(config_path):
-            log.info("[allowlist] No config file provided or file not found; "
-                     "allowlist will only use mitmproxy --set options.")
+            log.info(
+                "[allowlist] No config file provided or file not found; "
+                "allowlist will only use mitmproxy --set options."
+            )
             return
 
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config = yaml.safe_load(f)
 
         if not config:
@@ -431,13 +430,15 @@ class AllowlistAddon:
             flat_hostnames = self.global_config.get("hostnames", [])
             flat_ips = self.global_config.get("ip_ranges", [])
             if flat_hostnames or flat_ips:
-                rule = AllowlistRule({
-                    "name": "global-allowlist",
-                    "mode": self._mode,
-                    "hostnames": flat_hostnames,
-                    "ip_ranges": flat_ips,
-                    "enabled": True,
-                })
+                rule = AllowlistRule(
+                    {
+                        "name": "global-allowlist",
+                        "mode": self._mode,
+                        "hostnames": flat_hostnames,
+                        "ip_ranges": flat_ips,
+                        "enabled": True,
+                    }
+                )
                 self.rules.append(rule)
                 log.info(
                     f"[allowlist] No named rules; using flat allowlist: "
@@ -484,8 +485,7 @@ class AllowlistAddon:
         # Always allow localhost
         if self._is_localhost(hostname) or (server_ip and self._is_private_ip(server_ip)):
             if self._log_allowed:
-                log.info(f"[allowlist] ALLOW (localhost/private) {hostname}"
-                         f"{' ' + server_ip if server_ip else ''}")
+                log.info(f"[allowlist] ALLOW (localhost/private) {hostname}{' ' + server_ip if server_ip else ''}")
             return
 
         # Check rules
@@ -493,14 +493,12 @@ class AllowlistAddon:
 
         if result == "allow":
             if self._log_allowed:
-                log.info(f"[allowlist] ALLOW {hostname}"
-                         f"{' ' + server_ip if server_ip else ''}")
+                log.info(f"[allowlist] ALLOW {hostname}{' ' + server_ip if server_ip else ''}")
             return
 
         if result == "deny":
             if self._log_blocked:
-                log.info(f"[allowlist] DENY (rule matched) {hostname}"
-                         f"{' ' + server_ip if server_ip else ''}")
+                log.info(f"[allowlist] DENY (rule matched) {hostname}{' ' + server_ip if server_ip else ''}")
             if self._dry_run:
                 return
             self._block_flow(flow, reason="rule matched")
@@ -509,14 +507,12 @@ class AllowlistAddon:
         # No rule matched — apply default action
         if self._default_action == "allow":
             if self._log_allowed:
-                log.info(f"[allowlist] ALLOW (default) {hostname}"
-                         f"{' ' + server_ip if server_ip else ''}")
+                log.info(f"[allowlist] ALLOW (default) {hostname}{' ' + server_ip if server_ip else ''}")
             return
 
         # Default is block
         if self._log_blocked:
-            log.info(f"[allowlist] DENY (default action) {hostname}"
-                     f"{' ' + server_ip if server_ip else ''}")
+            log.info(f"[allowlist] DENY (default action) {hostname}{' ' + server_ip if server_ip else ''}")
         if self._dry_run:
             return
         self._block_flow(flow, reason="default action")
@@ -533,7 +529,7 @@ class AllowlistAddon:
         # Visual indicator for mitmweb UI — marked flows show a 🔴 in the
         # flow list and can be filtered with the ``@marked`` view spec.
         flow.marked = ":no_entry_sign:"
-        flow.comment = f"Blocked by allowlist"
+        flow.comment = "Blocked by allowlist"
         if reason:
             flow.comment += f" ({reason})"
 
@@ -541,6 +537,7 @@ class AllowlistAddon:
             flow.kill()
         else:
             from mitmproxy.net.http.status_codes import NO_RESPONSE
+
             if self._status_code == NO_RESPONSE:
                 flow.kill()
             else:

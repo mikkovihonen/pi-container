@@ -17,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from models import ModelConfig, ServerConfig
 from server import Server
 
-
 # ---------------------------------------------------------------------------
 # ServerGetBridgeIp
 # ---------------------------------------------------------------------------
@@ -49,11 +48,13 @@ class TestServerGetBridgeIp:
     def test_falls_back_to_ifconfig(self, tmp_path):
         s = self._make_server(tmp_path)
         ifconfig_output = "bridge100: flags=... mtu 1500\n    inet 10.0.0.1 netmask 0xffffff00\n"
-        with patch("server.subprocess.check_output",
-                   side_effect=[
-                       subprocess.CalledProcessError(1, "ip"),
-                       ifconfig_output,
-                   ]):
+        with patch(
+            "server.subprocess.check_output",
+            side_effect=[
+                subprocess.CalledProcessError(1, "ip"),
+                ifconfig_output,
+            ],
+        ):
             result = s._get_bridge_ip()
         assert result == "10.0.0.1"
 
@@ -77,14 +78,16 @@ class TestServerGetBridgeIp:
 
 class TestServerGetServerFlags:
     def _make_server(self, tmp_path):
-        mc = ModelConfig.from_dict({
-            "fileFlag": "--model",
-            "repo": "org/repo",
-            "file": "model.gguf",
-            "dir": "models",
-            "additionalServerFlags": ["--threads", "4"],
-            "sha256": None,
-        })
+        mc = ModelConfig.from_dict(
+            {
+                "fileFlag": "--model",
+                "repo": "org/repo",
+                "file": "model.gguf",
+                "dir": "models",
+                "additionalServerFlags": ["--threads", "4"],
+                "sha256": None,
+            }
+        )
         sc = ServerConfig(
             hf_models={"main": mc},
             flags=["--ctx-size", "4096"],
@@ -226,8 +229,7 @@ class TestServerIsExistingServerHealthy:
     def test_pid_file_valid_but_health_check_fails(self, tmp_path):
         s = self._make_server(tmp_path)
         s.paths["pid_file"].write_text("1234\n8080\n")
-        with patch("os.kill"), \
-             patch("urllib.request.urlopen", side_effect=Exception("fail")):
+        with patch("os.kill"), patch("urllib.request.urlopen", side_effect=Exception("fail")):
             healthy, pid, port = s._is_existing_server_healthy()
         assert healthy is False
         assert pid == 1234
@@ -243,8 +245,7 @@ class TestServerIsExistingServerHealthy:
         mock_ctx.__enter__ = MagicMock(return_value=mock_resp)
         mock_ctx.__exit__ = MagicMock(return_value=False)
 
-        with patch("os.kill"), \
-             patch("urllib.request.urlopen", return_value=mock_ctx):
+        with patch("os.kill"), patch("urllib.request.urlopen", return_value=mock_ctx):
             healthy, pid, port = s._is_existing_server_healthy()
         assert healthy is True
         assert pid == 1234
@@ -258,14 +259,16 @@ class TestServerIsExistingServerHealthy:
 
 class TestServerStartNewProcess:
     def _make_server(self, tmp_path):
-        mc = ModelConfig.from_dict({
-            "fileFlag": "--model",
-            "repo": "org/repo",
-            "file": "model.gguf",
-            "dir": "models",
-            "additionalServerFlags": [],
-            "sha256": None,
-        })
+        mc = ModelConfig.from_dict(
+            {
+                "fileFlag": "--model",
+                "repo": "org/repo",
+                "file": "model.gguf",
+                "dir": "models",
+                "additionalServerFlags": [],
+                "sha256": None,
+            }
+        )
         sc = ServerConfig(
             hf_models={"main": mc},
             flags=["--ctx-size", "4096"],
@@ -301,14 +304,15 @@ class TestServerStartNewProcess:
         mock_context.__enter__ = MagicMock(return_value=mock_resp)
         mock_context.__exit__ = MagicMock(return_value=False)
 
-        with patch("server.subprocess.Popen", return_value=mock_proc), \
-             patch("server.get_free_port", return_value=18080), \
-             patch("server.urllib.request.urlopen", return_value=mock_context), \
-             patch("server.stop_process_group"), \
-             patch("server.logger"), \
-             patch("server.subprocess.check_output", return_value="inet 192.168.50.1/24"), \
-             patch("server.os.kill"):
-
+        with (
+            patch("server.subprocess.Popen", return_value=mock_proc),
+            patch("server.get_free_port", return_value=18080),
+            patch("server.urllib.request.urlopen", return_value=mock_context),
+            patch("server.stop_process_group"),
+            patch("server.logger"),
+            patch("server.subprocess.check_output", return_value="inet 192.168.50.1/24"),
+            patch("server.os.kill"),
+        ):
             s._start_new_server_process()
 
         assert s.server_pid == 1234
@@ -320,12 +324,13 @@ class TestServerStartNewProcess:
         mock_proc.pid = 1234
         mock_proc.poll.return_value = 1  # died immediately
 
-        with patch("server.subprocess.Popen", return_value=mock_proc), \
-             patch("server.get_free_port", return_value=18080), \
-             patch("server.stop_process_group"):
-
-            with pytest.raises(Exception, match="died immediately"):
-                s._start_new_server_process()
+        with (
+            patch("server.subprocess.Popen", return_value=mock_proc),
+            patch("server.get_free_port", return_value=18080),
+            patch("server.stop_process_group"),
+            pytest.raises(Exception, match="died immediately"),
+        ):
+            s._start_new_server_process()
 
 
 # ---------------------------------------------------------------------------

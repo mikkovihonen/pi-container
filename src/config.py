@@ -1,4 +1,5 @@
 import sys
+
 sys.dont_write_bytecode = True
 
 """Shared configuration for the run orchestration.
@@ -15,7 +16,6 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Optional
 
 from util import load_dotenv
 
@@ -34,16 +34,16 @@ load_dotenv(DOTENV_PATH)
 
 log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
-logging.basicConfig(level=log_level, format='%(levelname)s: %(message)s')
+logging.basicConfig(level=log_level, format="%(levelname)s: %(message)s")
 
 # ─── Constants ──────────────────────────────────────────────────────────────
 
 IMAGE_TAG: str = os.environ.get("IMAGE_TAG", "pi-coding-agent:local")
-LLAMA_BIN: Optional[str] = os.environ.get("LLAMA_BIN") or shutil.which("llama-server")
+LLAMA_BIN: str | None = os.environ.get("LLAMA_BIN") or shutil.which("llama-server")
 MAX_STARTUP_ATTEMPTS: int = int(os.environ.get("MAX_STARTUP_ATTEMPTS", 2))
 MODELS_DIR: Path = REPO_ROOT / "llama-server" / "models"
 LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / "llama-server" / ".locks"
-ADMIN_PASSWORD: str = os.environ.get('ADMIN_PASSWORD', '')
+ADMIN_PASSWORD: str = os.environ.get("ADMIN_PASSWORD", "")
 
 # Directory on the host where the proxy container's config files live.
 # The token_replacer config is mounted into the container at runtime so that
@@ -53,8 +53,8 @@ CONFIG_DIR: Path = REPO_ROOT / ".pi-container"
 
 # Optional explicit network overrides. ``None`` means "use the runtime's
 # default"; a non-empty value forces it for the selected runtime.
-BRIDGE_INTERFACE_ENV: Optional[str] = os.environ.get("BRIDGE_INTERFACE") or None
-PROXY_UPSTREAM_NETWORK_ENV: Optional[str] = os.environ.get("PROXY_UPSTREAM_NETWORK") or None
+BRIDGE_INTERFACE_ENV: str | None = os.environ.get("BRIDGE_INTERFACE") or None
+PROXY_UPSTREAM_NETWORK_ENV: str | None = os.environ.get("PROXY_UPSTREAM_NETWORK") or None
 
 
 def env_truthy(name: str, default: bool = False) -> bool:
@@ -85,6 +85,4 @@ PROXY_FORWARD_ENV_VARS = (
     "PROXY_ALLOW_TCP_PORTS",
     "PROXY_ALLOW_UDP_PORTS",
 )
-PROXY_FORWARD_ENV: dict[str, str] = {
-    k: os.environ[k] for k in PROXY_FORWARD_ENV_VARS if os.environ.get(k)
-}
+PROXY_FORWARD_ENV: dict[str, str] = {k: os.environ[k] for k in PROXY_FORWARD_ENV_VARS if os.environ.get(k)}
