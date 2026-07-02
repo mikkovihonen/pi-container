@@ -161,7 +161,7 @@ class TestTmpfsArgs:
     def test_podman_uses_mount_syntax(self):
         assert PodmanRuntime().tmpfs_args("/home/pi/") == [
             "--mount",
-            "type=tmpfs,tmpfs-mode=1777,destination=/home/pi/",
+            "type=tmpfs,tmpfs-mode=1777,notmpcopyup,destination=/home/pi/",
         ]
 
 

@@ -8,4 +8,12 @@
 #     - /workspace/build_artifacts
 #     - /workspace/tmp
 #     - /workspace/cache
-paths: []
+paths: [
+  "/workspace/.venv",
+  "/workspace/.pytest_cache",
+  "/workspace/.ruff_cache",
+  "/workspace/.ruff_cache",
+  "/workspace/src/__pycache__",
+  "/workspace/pi-coding-agent-proxy/.pytest_cache",
+  "/workspace/pi-coding-agent-proxy/__pycache__"
+]

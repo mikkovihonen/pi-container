@@ -216,13 +216,13 @@ def main() -> None:
                     *RUNTIME.tmpfs_args("/home/pi/"),
                     "--volume",
                     f"{REPO_ROOT}/pi-coding-agent/home/.pi:/home/pi/.pi",
-                    *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
-                    # Transient tmpfs mounts for build artifacts, caches, etc.
-                    *[flag for path in tmpfs_paths for flag in ("--tmpfs", path)],
                     "--volume",
                     f"{PROJECT_DIR}:/workspace",
                     "--workdir",
                     "/workspace",
+                    *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
+                    # Transient tmpfs mounts for build artifacts, caches, etc.
+                    *[flag for path in tmpfs_paths for flag in RUNTIME.tmpfs_args(path)],
                     "--env",
                     f"LLAMA_PORTS={portconfig}",
                     "--env",

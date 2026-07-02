@@ -349,7 +349,12 @@ class PodmanRuntime(ContainerRuntime):
         ]
 
     def tmpfs_args(self, destination: str) -> list[str]:
-        return ["--mount", f"type=tmpfs,tmpfs-mode=1777,destination={destination}"]
+        # notmpcopyup: leave the tmpfs empty rather than copying up the content
+        # of the underlying directory (image layer or, for a nested mount, the
+        # bind volume beneath it). Matches Apple `container`, whose tmpfs always
+        # starts empty, so a mount like /workspace/.venv is a clean scratch dir
+        # on both runtimes instead of a copy of the host's (macOS) .venv.
+        return ["--mount", f"type=tmpfs,tmpfs-mode=1777,notmpcopyup,destination={destination}"]
 
     def _network_entry_has_ipv6(self, entry: dict[str, Any]) -> bool | None:
         # netavark inspect: `ipv6_enabled` bool, plus `subnets[].subnet`.
