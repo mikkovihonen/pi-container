@@ -90,8 +90,8 @@ flowchart TB
     net --- eth1
 
     %% Proxy internal: L4 interception & forwarding
-    eth1 -->|REDIRECT 80/443 → :8080| mitm
-    eth1 -->|REDIRECT 53 → :5353| dns
+    eth1 -->|REDIRECT<br/>80/443 → :8080| mitm
+    eth1 -->|REDIRECT<br/>53 → :5353| dns
     eth1 -->|DNAT llama:<cp> → llama_net| llama_net
     mitm -->|egress| eth0
     dns -->|egress| eth0
