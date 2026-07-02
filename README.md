@@ -62,10 +62,12 @@ flowchart TB
         direction TB
         agent_eth["eth0<br/>isolated-net"]
     end
+    style agent fill:none,text-align:left
 
     subgraph net["isolated-net<br/>(--internal, no gateway)"]
         direction TB
     end
+    style net fill:none,text-align:left
 
     subgraph proxy["<b>pi-coding-agent-proxy</b>"]
         direction TB
@@ -74,10 +76,12 @@ flowchart TB
         dns["mitmproxy<br/>DNS :5353<br/>resolves 'llama' → eth1 IP"]
         eth0["eth0<br/>upstream network<br/>internet + MASQUERADE"]
     end
+    style proxy fill:none,text-align:left
 
     subgraph host["<b>Host</b><br/>llama-server (host process)"]
         direction TB
     end
+    style host fill:none,text-align:left
 
     %% L3 routing: agent → isolated-net → proxy eth1
     agent_eth -.->|L3 routed via proxy eth1 IP| eth1
@@ -99,6 +103,7 @@ flowchart TB
         podman_net["podman<br/>host.containers.internal<br/>(gvproxy)"]
         docker_net["docker<br/>host.docker.internal<br/>(gvproxy)"]
     end
+    style llama_net fill:none,text-align:left
 
     llama_net --> host
 ```
