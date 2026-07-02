@@ -107,6 +107,8 @@ flowchart TB
 
 The proxy's iptables rules enforce a **default-deny** forward policy — HTTP, HTTPS, and DNS from the agent are intercepted by mitmproxy (via `REDIRECT` to ports 8080/5353, bypassing the `FORWARD` chain entirely). Every other protocol is **denied by default**; opt-in forwarding (`PROXY_ALLOW_SSH`, `PROXY_ALLOW_SMTP`, `PROXY_ALLOW_GIT`, `PROXY_ALLOW_NTP`, custom TCP/UDP ports) uses plain NAT and is **not inspected** by mitmproxy. The `isolated-net` is created with `--internal` (no external gateway), so the agent has no route to the internet except the default route and DNS pointed at the proxy.
 
+By default the whole stack is **IPv4-only**: the isolated network has no IPv6 subnet and both containers disable IPv6 (via sysctl) so no agent traffic can escape the transparent-proxy REDIRECT over v6. Set `IPV6_ENABLED=true` in `.env` to create the network with an IPv6 subnet (`--ipv6` for podman/docker, `--subnet-v6` for Apple `container`), mirror the proxy's REDIRECT/NAT/FORWARD rules in `ip6tables`, and give the agent an IPv6 default route through the proxy. This requires the container runtime **and** host to actually have IPv6 egress. Apple `container`'s `vmnet` networking NATs IPv4 only — a container gets no global IPv6 address or v6 route (verified) — so enabling it there logs a warning and v6 connections still fail. It is intended for **Linux hosts running podman/docker with working host IPv6**; leave it `false` on macOS.
+
 <a name="proxy-egress-policy"></a>
 ### Proxy egress policy
 
@@ -246,7 +248,7 @@ The script reads `pi-coding-agent/home/.pi/agent/models.json` to determine which
 
 Once the server is ready, you can interact with the agent through the terminal. The current directory is mounted to `/workspace` inside the container, allowing the agent to read and write files in your project.
 
-The agent's entrypoint automatically installs apt packages listed in `.pi/dependencies/apt/packages.txt` if present in the mounted workspace, points the container's default route and DNS at the proxy, and applies the host's git config. Reaching the host `llama-server` is handled by the proxy (via a host-side `socat` bridge for Apple `container`, or `host.containers.internal` for podman/docker) — see [Architecture](#architecture).
+The agent's entrypoint automatically installs apt packages listed in `.pi-container/dependencies/apt/packages.txt` if present in the mounted workspace, points the container's default route and DNS at the proxy, and applies the host's git config. Reaching the host `llama-server` is handled by the proxy (via a host-side `socat` bridge for Apple `container`, or `host.containers.internal` for podman/docker) — see [Architecture](#architecture).
 
 ### 5. Using the Proxy
 
@@ -278,6 +280,7 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 | `ADMIN_PASSWORD` | Password for mitmproxy Web UI | `CHANGEME` |
 | `MAX_STARTUP_ATTEMPTS` | Number of llama-server startup attempts per model | `2` |
 | `CONTAINER_RUNTIME` | Container CLI to use (`container`, `docker`, or `podman`) | Auto-detected (prefers `container` > `docker` > `podman`) |
+| `IPV6_ENABLED` | Whether the network stack supports IPv6. When `false`, IPv6 is explicitly disabled across both containers; when `true`, the isolated network gets an IPv6 subnet and the proxy mirrors its rules in `ip6tables` (requires runtime + host v6 egress) | `false` |
 | `PROXY_ALLOW_SSH`, `PROXY_ALLOW_SMTP`, `PROXY_ALLOW_GIT`, `PROXY_ALLOW_NTP`, `PROXY_ALLOW_TCP_PORTS`, `PROXY_ALLOW_UDP_PORTS` | Opt-in egress for uninspected non-HTTP protocols (see [Proxy egress policy](#proxy-egress-policy)) | unset (denied) |
 
 `BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` are derived from `CONTAINER_RUNTIME` and rarely need setting; provide them only to override the per-runtime default for your host.

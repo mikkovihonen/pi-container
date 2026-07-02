@@ -23,6 +23,7 @@ from config import (
     BRIDGE_INTERFACE_ENV,
     CONFIG_DIR,
     IMAGE_TAG,
+    IPV6_ENABLED,
     LLAMA_BIN,
     LLAMA_SERVER_LOCK_DIR,
     MODELS_DIR,
@@ -35,6 +36,42 @@ from network import ContainerNetworkManager, scan_config_env_refs  # noqa: F401
 from server import Server
 
 logger = logging.getLogger(__name__)
+
+
+def _warn_if_proxy_lacks_ipv6_egress(runtime_bin: str, upstream_iface: str = "eth0") -> None:
+    """Confirm the *running* proxy actually has IPv6 egress on its upstream NIC.
+
+    This is the definitive, observed check (option 5): static capability and
+    upstream-network config are checked preflight in ContainerNetworkManager,
+    but only the live proxy tells us whether eth0 got a global v6 address AND a
+    v6 default route. Warns (does not fail) when either is missing, since IPv4
+    still works and the agent's own IPv6 is disabled unless a route was found.
+    """
+    try:
+        addr = subprocess.run(
+            [runtime_bin, "exec", "proxy", "ip", "-6", "addr", "show", upstream_iface],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+        route = subprocess.run(
+            [runtime_bin, "exec", "proxy", "ip", "-6", "route", "show", "default"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except Exception as e:
+        logger.warning(f"Could not verify proxy IPv6 egress: {e}")
+        return
+
+    has_global = bool(re.search(r'inet6\s+[0-9a-fA-F:]+/\d+\s+scope global', addr))
+    has_default = bool(route.strip())
+    if not (has_global and has_default):
+        logger.warning(
+            f"IPV6_ENABLED=true but the proxy has no working IPv6 egress on {upstream_iface} "
+            f"(global address: {has_global}, default route: {has_default}); this runtime/host "
+            f"does not route IPv6 to the internet, so agent IPv6 connections will fail. "
+            f"Set IPV6_ENABLED=false to silence this."
+        )
+    else:
+        logger.info(f"Proxy has IPv6 egress on {upstream_iface} (global address + default route present).")
+
 
 # ─── Startup validation ───────────────────────────────────────────────────
 
@@ -117,8 +154,10 @@ def main() -> None:
                 "pi-coding-agent-proxy:local",
                 config_dir=CONFIG_DIR,
                 llama_ports=portconfig,
+                ipv6=IPV6_ENABLED,
             ) as _:
                 proxy_isolated_ip: Optional[str] = None
+                proxy_isolated_ip6: Optional[str] = None
                 try:
                     result_ip = subprocess.run(
                         [CONTAINER_RUNTIME, "exec", "proxy", "ip", "addr", "show", RUNTIME.proxy_isolated_interface],
@@ -131,6 +170,17 @@ def main() -> None:
                     if match_ip:
                         proxy_isolated_ip = match_ip.group(1)
                         logger.info(f"Found proxy {RUNTIME.proxy_isolated_interface} IP address: {proxy_isolated_ip}")
+                    if IPV6_ENABLED:
+                        # Global-scope v6 address only (skip fe80:: link-local).
+                        match_ip6 = re.search(r'inet6\s+([0-9a-fA-F:]+)/\d+\s+scope global', result_ip.stdout)
+                        if match_ip6:
+                            proxy_isolated_ip6 = match_ip6.group(1)
+                            logger.info(f"Found proxy {RUNTIME.proxy_isolated_interface} IPv6 address: {proxy_isolated_ip6}")
+                        else:
+                            logger.warning(
+                                f"IPV6_ENABLED but no global IPv6 address found on proxy "
+                                f"{RUNTIME.proxy_isolated_interface}; the agent will have no IPv6 default route."
+                            )
                 except Exception as e:
                     logger.warning(f"Could not retrieve proxy network info: {e}")
 
@@ -140,12 +190,21 @@ def main() -> None:
                         f"the agent cannot be routed through the proxy."
                     )
 
+                if IPV6_ENABLED:
+                    _warn_if_proxy_lacks_ipv6_egress(CONTAINER_RUNTIME)
+
                 pi_container_cmd = [
                     CONTAINER_RUNTIME, "run",
                     "--rm",
                     "--interactive",
                     "--tty",
                     *RUNTIME.agent_network_args("isolated-net", proxy_isolated_ip),
+                    # IPv6 policy for the agent: --sysctl toggle (VM runtimes) +
+                    # env flag its entrypoint reads. When enabled, DEFAULT_ROUTE6
+                    # points the v6 default route at the proxy's eth1 v6 address.
+                    *RUNTIME.ipv6_run_args(IPV6_ENABLED),
+                    "--env", f"IPV6_ENABLED={str(IPV6_ENABLED).lower()}",
+                    *(["--env", f"DEFAULT_ROUTE6={proxy_isolated_ip6}"] if proxy_isolated_ip6 else []),
                     *RUNTIME.tmpfs_args("/home/pi/"),
                     "--volume", f"{REPO_ROOT}/pi-coding-agent/home/.pi:/home/pi/.pi",
                     *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),

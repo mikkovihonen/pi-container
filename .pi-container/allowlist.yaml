@@ -1,5 +1,6 @@
-# Only permit Python package servers (pypi.org / files.pythonhosted.org)
-# and npm package registries. All other traffic is blocked by default.
+# Only permit Python package servers (pypi.org / files.pythonhosted.org),
+# npm package registries, and Debian/Ubuntu apt infrastructure. All other
+# traffic is blocked by default.
 global:
   mode: "allow"
   default_action: "block"
@@ -39,4 +40,16 @@ global:
       hostnames:
         - "registry.yarnpkg.com"
         - "*.yarnpkg.com"
+      ip_ranges: []
+
+    - name: "debian-apt-allow"
+      mode: "allow"
+      hostnames:
+        - "debian.map.fastlydns.net"
+        - "deb.debian.org"
+        - "*.deb.debian.org"
+        - "security.debian.org"
+        - "*.security.debian.org"
+        - "packages.debian.org"
+        - "*.packages.debian.org"
       ip_ranges: []

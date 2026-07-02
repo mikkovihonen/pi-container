@@ -14,6 +14,37 @@ fi
 # connectivity, which is easier to diagnose than an opaque container exit.
 sysctl -w net.ipv4.ip_forward=1 || echo "WARNING: could not set net.ipv4.ip_forward=1"
 
+# ─── IPv6 policy (IPV6_ENABLED, forwarded by run.py) ──────────────────────
+# Off (default): explicitly tear IPv6 down so no agent traffic can escape
+# UNINSPECTED over v6 — the transparent REDIRECT + allowlist below are IPv4
+# rules, so a working v6 path would bypass mitmproxy entirely.
+# On: enable v6 forwarding and mirror the v4 REDIRECT/NAT/FORWARD rules in
+# ip6tables (see the `ipt` helper). VM runtimes also pin these sysctls at
+# `run` time via --sysctl, so a failure here (rootless) is tolerated.
+if [ "${IPV6_ENABLED}" = "true" ]; then
+    echo "[ipv6] IPV6_ENABLED=true — enabling IPv6 forwarding and ip6tables rules"
+    sysctl -w net.ipv6.conf.all.forwarding=1 || echo "WARNING: could not enable IPv6 forwarding"
+else
+    echo "[ipv6] IPV6_ENABLED=false — disabling IPv6"
+    # VM runtimes already set this at run time via --sysctl (rootless mounts
+    # /proc/sys/net read-only, so the write below fails harmlessly). Only warn
+    # if IPv6 is STILL enabled afterwards.
+    sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
+    sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
+    _v6_all=/proc/sys/net/ipv6/conf/all/disable_ipv6
+    if [ -e "$_v6_all" ] && [ "$(cat "$_v6_all" 2>/dev/null)" != "1" ]; then
+        echo "WARNING: could not disable IPv6 (all)"
+    fi
+fi
+
+# Run an (ip6)tables rule against every active address family: always IPv4, and
+# IPv6 too when enabled. Used for the family-agnostic REDIRECT/NAT/FORWARD rules
+# whose syntax is identical for both (no literal addresses). The llama DNAT
+# stays IPv4-only (the host llama-server is reached over v4).
+IP_FAMILIES=(iptables)
+[ "${IPV6_ENABLED}" = "true" ] && IP_FAMILIES+=(ip6tables)
+ipt() { for _fam in "${IP_FAMILIES[@]}"; do "$_fam" "$@"; done; }
+
 # ─── Resolve "llama" hostname to this container's eth1 IP ─────────────────
 # mitmproxy's DNS addon reads /etc/hosts by default (dns_use_hosts_file=True),
 # so the pi-coding-agent can use http://llama:<cp>/v1 in models.json and
@@ -27,14 +58,14 @@ else
 fi
 
 # Redirect HTTP (80) to mitmproxy (8080)
-iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 80 -j REDIRECT --to-port 8080
+ipt -t nat -A PREROUTING -i eth1 -p tcp --dport 80 -j REDIRECT --to-port 8080
 
 # Redirect HTTPS (443) to mitmproxy (8080)
-iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 443 -j REDIRECT --to-port 8080
+ipt -t nat -A PREROUTING -i eth1 -p tcp --dport 443 -j REDIRECT --to-port 8080
 
 # Redirect DNS from isolated-net to mitmproxy's unprivileged DNS port
-iptables -t nat -A PREROUTING -i eth1 -p udp --dport 53 -j REDIRECT --to-port 5353
-iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 53 -j REDIRECT --to-port 5353
+ipt -t nat -A PREROUTING -i eth1 -p udp --dport 53 -j REDIRECT --to-port 5353
+ipt -t nat -A PREROUTING -i eth1 -p tcp --dport 53 -j REDIRECT --to-port 5353
 
 # ─── Llama-server port forwarding (isolated-net → host) ───────────────────
 # The pi-coding-agent resolves "llama" via this container's mitmproxy DNS
@@ -79,13 +110,13 @@ fi
 # allowlist. So the FORWARD chain defaults to DROP and operators opt specific
 # protocols in via PROXY_ALLOW_* env vars (see .env). Traffic allowed this way is
 # NOT inspected by mitmproxy — it is plain NAT forwarding.
-iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-iptables -P FORWARD DROP
-iptables -A FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+ipt -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+ipt -P FORWARD DROP
+ipt -A FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
 _truthy() { case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in true|1|yes|on) return 0;; *) return 1;; esac; }
 _allow_fwd() {  # $1=proto  $2=comma-separated dports  $3=label
-    iptables -A FORWARD -i eth1 -o eth0 -p "$1" -m multiport --dports "$2" -j ACCEPT
+    ipt -A FORWARD -i eth1 -o eth0 -p "$1" -m multiport --dports "$2" -j ACCEPT
     echo "[forward-allow] $3 → $1/$2 (UNINSPECTED)"
 }
 

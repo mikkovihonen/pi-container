@@ -56,6 +56,22 @@ CONFIG_DIR: Path = REPO_ROOT / ".pi-container"
 BRIDGE_INTERFACE_ENV: Optional[str] = os.environ.get("BRIDGE_INTERFACE") or None
 PROXY_UPSTREAM_NETWORK_ENV: Optional[str] = os.environ.get("PROXY_UPSTREAM_NETWORK") or None
 
+
+def env_truthy(name: str, default: bool = False) -> bool:
+    """Interpret an env var as a boolean (true/1/yes/on, case-insensitive)."""
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+# Whether the proxy/agent network stack supports IPv6. Default: disabled, in
+# which case IPv6 is explicitly turned off across both containers so the agent
+# cannot egress uninspected over v6 (bypassing mitmproxy + the allowlist). When
+# enabled, the isolated network gets an IPv6 subnet and the proxy mirrors its
+# v4 REDIRECT/NAT rules in ip6tables. See .env.example for the caveats.
+IPV6_ENABLED: bool = env_truthy("IPV6_ENABLED", default=False)
+
 # Per-protocol forwarding opt-ins for the proxy. Only HTTP/HTTPS/DNS are
 # intercepted by mitmproxy; every other protocol the agent emits is forwarded
 # UNINSPECTED, so the proxy defaults to denying it. Setting one of these (in

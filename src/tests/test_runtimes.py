@@ -70,6 +70,26 @@ class TestIsolatedNetworkCreate:
         argv = PodmanRuntime().create_isolated_network_argv("isolated-net")
         assert argv == ["network", "create", "--internal", "--disable-dns", "isolated-net"]
 
+    def test_docker_ipv6_uses_ipv6_flag(self):
+        argv = DockerRuntime().create_isolated_network_argv("isolated-net", ipv6=True)
+        assert argv == ["network", "create", "--internal", "--ipv6", "isolated-net"]
+
+    def test_apple_container_ipv6_uses_subnet_v6(self):
+        """Apple `container` rejects --ipv6; it needs an explicit --subnet-v6."""
+        rt = AppleContainerRuntime()
+        argv = rt.create_isolated_network_argv("isolated-net", ipv6=True)
+        assert argv == ["network", "create", "--internal", "--subnet-v6", rt.ipv6_ula_subnet, "isolated-net"]
+
+    def test_podman_ipv6_flag_appended(self):
+        argv = PodmanRuntime().create_isolated_network_argv("isolated-net", ipv6=True)
+        assert argv == ["network", "create", "--internal", "--disable-dns", "--ipv6", "isolated-net"]
+
+    @pytest.mark.parametrize("name", ["container", "podman", "docker"])
+    def test_ipv6_default_is_v4_only(self, name):
+        """Default (ipv6=False) must not append --ipv6 for any runtime."""
+        argv = ContainerRuntime.create(name).create_isolated_network_argv("isolated-net")
+        assert "--ipv6" not in argv
+
 
 # ---------------------------------------------------------------------------
 # Proxy network attachment
@@ -192,3 +212,92 @@ class TestProxyExtraRunArgs:
     def test_podman_and_docker_set_ip_forward(self):
         assert PodmanRuntime().proxy_extra_run_args() == ["--sysctl", "net.ipv4.ip_forward=1"]
         assert DockerRuntime().proxy_extra_run_args() == ["--sysctl", "net.ipv4.ip_forward=1"]
+
+
+# ---------------------------------------------------------------------------
+# IPv6 run-time --sysctl policy
+# ---------------------------------------------------------------------------
+
+
+class TestIpv6RunArgs:
+    def test_apple_container_defers_to_entrypoint(self):
+        """Apple container can write net.ipv6.* from the entrypoint, so no
+        run-time --sysctl flags are emitted in any mode."""
+        rt = AppleContainerRuntime()
+        assert rt.ipv6_run_args(enabled=False) == []
+        assert rt.ipv6_run_args(enabled=True, forwarding=True) == []
+
+    @pytest.mark.parametrize("name", ["podman", "docker"])
+    def test_vm_disables_ipv6_when_off(self, name):
+        rt = ContainerRuntime.create(name)
+        assert rt.ipv6_run_args(enabled=False) == ["--sysctl", "net.ipv6.conf.all.disable_ipv6=1"]
+
+    @pytest.mark.parametrize("name", ["podman", "docker"])
+    def test_vm_enables_forwarding_for_proxy(self, name):
+        rt = ContainerRuntime.create(name)
+        assert rt.ipv6_run_args(enabled=True, forwarding=True) == ["--sysctl", "net.ipv6.conf.all.forwarding=1"]
+
+    @pytest.mark.parametrize("name", ["podman", "docker"])
+    def test_vm_agent_needs_no_flag_when_on(self, name):
+        """An enabled endpoint container (agent, forwarding=False) needs no flag:
+        the default is IPv6-on, no-forwarding — exactly right."""
+        rt = ContainerRuntime.create(name)
+        assert rt.ipv6_run_args(enabled=True, forwarding=False) == []
+
+
+class TestIpv6UpstreamEgress:
+    def test_apple_container_has_no_ipv6_egress(self):
+        """Apple container's vmnet NATs IPv4 only (verified empirically)."""
+        assert AppleContainerRuntime().ipv6_upstream_egress is False
+
+    @pytest.mark.parametrize("name", ["podman", "docker"])
+    def test_vm_runtimes_assume_egress(self, name):
+        assert ContainerRuntime.create(name).ipv6_upstream_egress is True
+
+
+# ---------------------------------------------------------------------------
+# Upstream network IPv6 config inspection (option 2)
+# ---------------------------------------------------------------------------
+
+
+class TestUpstreamNetworkHasIpv6:
+    def test_docker_enable_ipv6_flag(self):
+        assert DockerRuntime()._network_entry_has_ipv6({"EnableIPv6": True}) is True
+
+    def test_docker_ipam_v6_subnet(self):
+        entry = {"EnableIPv6": False, "IPAM": {"Config": [{"Subnet": "fd00::/64"}]}}
+        assert DockerRuntime()._network_entry_has_ipv6(entry) is True
+
+    def test_docker_v4_only(self):
+        entry = {"EnableIPv6": False, "IPAM": {"Config": [{"Subnet": "172.17.0.0/16"}]}}
+        assert DockerRuntime()._network_entry_has_ipv6(entry) is False
+
+    def test_podman_ipv6_enabled_flag(self):
+        assert PodmanRuntime()._network_entry_has_ipv6({"ipv6_enabled": True}) is True
+
+    def test_podman_subnet_v6(self):
+        entry = {"ipv6_enabled": False, "subnets": [{"subnet": "fd00::/64"}]}
+        assert PodmanRuntime()._network_entry_has_ipv6(entry) is True
+
+    def test_podman_v4_only(self):
+        entry = {"ipv6_enabled": False, "subnets": [{"subnet": "10.89.0.0/24"}]}
+        assert PodmanRuntime()._network_entry_has_ipv6(entry) is False
+
+    def test_base_returns_unknown(self):
+        """Apple container inherits the base (None) — it's short-circuited by the
+        static ipv6_upstream_egress=False gate, so parsing is never reached."""
+        assert AppleContainerRuntime()._network_entry_has_ipv6({"anything": True}) is None
+
+    def test_inspect_command_failure_returns_none(self):
+        from unittest.mock import MagicMock, patch
+        rt = DockerRuntime()
+        failed = MagicMock(returncode=1, stdout="")
+        with patch("runtimes.subprocess.run", return_value=failed):
+            assert rt.upstream_network_has_ipv6() is None
+
+    def test_inspect_parses_json(self):
+        from unittest.mock import MagicMock, patch
+        rt = DockerRuntime()
+        completed = MagicMock(returncode=0, stdout='[{"EnableIPv6": true}]')
+        with patch("runtimes.subprocess.run", return_value=completed):
+            assert rt.upstream_network_has_ipv6() is True

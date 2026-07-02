@@ -69,6 +69,7 @@ class ContainerNetworkManager:
         proxy_name: str = "proxy",
         config_dir: Optional[Path] = None,
         llama_ports: Optional[str] = None,
+        ipv6: bool = False,
     ) -> None:
         # Accept either a runtime name (used by tests) or a ready ContainerRuntime.
         self.runtime: ContainerRuntime = (
@@ -82,6 +83,7 @@ class ContainerNetworkManager:
         self.proxy_name: str = proxy_name
         self.config_dir: Path = config_dir or CONFIG_DIR
         self.llama_ports: Optional[str] = llama_ports
+        self.ipv6: bool = ipv6
 
         # Shared directory for synchronization across different run.py processes
         self.lock_dir: Path = REPO_ROOT / "pi-coding-agent-proxy" / ".locks"
@@ -137,6 +139,41 @@ class ContainerNetworkManager:
             flags.extend(["--env", f"{k}={v}"])
         return flags
 
+    def _preflight_ipv6_egress(self) -> None:
+        """Warn if IPv6 was requested but the runtime likely can't egress it.
+
+        Layered, cheapest first:
+          1. Static per-runtime capability (``ipv6_upstream_egress``) — short-
+             circuit for runtimes known to NAT IPv4 only (e.g. Apple container).
+          2. Inspect the upstream network's config for IPv6 enablement.
+        The definitive check against the proxy's real ``eth0`` happens after the
+        proxy starts (in run.py).
+        """
+        # (1) Static: runtime known to lack IPv6 egress entirely.
+        if not self.runtime.ipv6_upstream_egress:
+            logger.warning(
+                f"IPV6_ENABLED=true but runtime '{self.container_runtime}' provides no "
+                f"IPv6 egress on the upstream network (it NATs IPv4 only); the proxy will "
+                f"have no IPv6 route out, so agent IPv6 connections will fail. Set "
+                f"IPV6_ENABLED=false unless you are on a runtime/host with working IPv6 egress."
+            )
+            return
+
+        # (2) Inspect the upstream network config.
+        has_v6 = self.runtime.upstream_network_has_ipv6()
+        if has_v6 is False:
+            logger.warning(
+                f"IPV6_ENABLED=true but the upstream network '{self.runtime.upstream_network}' "
+                f"is not configured for IPv6; the proxy will likely have no IPv6 route out and "
+                f"agent IPv6 connections may fail."
+            )
+        elif has_v6 is None:
+            logger.info(
+                f"Could not determine IPv6 config of upstream network "
+                f"'{self.runtime.upstream_network}'; proceeding (egress is re-checked on the "
+                f"running proxy)."
+            )
+
     def __enter__(self) -> 'ContainerNetworkManager':
         self.start()
         return self
@@ -191,6 +228,12 @@ class ContainerNetworkManager:
         # Pull secrets required by the mounted token_replacer config
         secrets = self._pull_secrets_from_config()
 
+        # IPv6 can be plumbed on the isolated side, but it only works end-to-end
+        # if the runtime also provides IPv6 egress on the upstream network.
+        # Preflight this so we warn rather than fail confusingly later.
+        if self.ipv6:
+            self._preflight_ipv6_egress()
+
         # Create the isolated internal network (skip if it already exists).
         logger.info(f"Checking network {self.network_name}...")
         result = subprocess.run(
@@ -198,9 +241,9 @@ class ContainerNetworkManager:
             capture_output=True, text=True
         )
         if result.returncode != 0:
-            logger.info(f"Creating network {self.network_name}...")
+            logger.info(f"Creating network {self.network_name} (ipv6={self.ipv6})...")
             subprocess.run(
-                [self.container_runtime, *self.runtime.create_isolated_network_argv(self.network_name)],
+                [self.container_runtime, *self.runtime.create_isolated_network_argv(self.network_name, ipv6=self.ipv6)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
         else:
@@ -235,6 +278,10 @@ class ContainerNetworkManager:
             "--cap-add", "NET_ADMIN",
             "--dns", "1.1.1.1",
             "-p", "8081:8081",
+            # IPv6 policy: --sysctl toggle (VM runtimes) + env flag the proxy
+            # entrypoint reads to mirror (or tear down) v6 firewall rules.
+            *self.runtime.ipv6_run_args(self.ipv6, forwarding=True),
+            "--env", f"IPV6_ENABLED={str(self.ipv6).lower()}",
             "--env", f"ADMIN_PASSWORD={ADMIN_PASSWORD}",
             *(["--env", f"LLAMA_PORTS={self.llama_ports}"] if self.llama_ports else []),
             *(["--env", f"LLAMA_HOST_ADDR={llama_host_addr}"] if llama_host_addr else []),

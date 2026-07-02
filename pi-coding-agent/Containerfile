@@ -40,6 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     openssl \
     iproute2 \
+    procps \
     locales \
     libssl3 \
     libsqlite3-0 \
@@ -54,7 +55,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     uuid-runtime \
     patch \
     xxd \
-    curl \
     && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
     && locale-gen en_US.UTF-8
 
