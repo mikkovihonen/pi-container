@@ -7,24 +7,24 @@
   </linearGradient>
   <clipPath id="r"><rect width="114" height="20" rx="3"/></clipPath>
   <g clip-path="url(#r)">
-    <rect width="53" height="20" fill="#555"/>
-    <rect x="53" width="61" height="20" fill="#4c1"/>
+    <rect width="76" height="20" fill="#555"/>
+    <rect x="76" width="38" height="20" fill="#4c1"/>
     <rect width="114" height="20" fill="url(#s)"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
     <g transform="scale(.1)">
       <g aria-hidden="true" fill="#010101">
-        <text x="265" y="150" fill-opacity=".8" filter="url(#blur)">coverage</text>
-        <text x="265" y="150" fill-opacity=".3" textLength="530">coverage</text>
+        <text x="380" y="150" fill-opacity=".8" filter="url(#blur)">coverage</text>
+        <text x="380" y="150" fill-opacity=".3" textLength="530">coverage</text>
       </g>
-      <text x="265" y="140" textLength="530">coverage</text>
+      <text x="380" y="140" textLength="530">coverage</text>
     </g>
     <g transform="scale(.1)">
       <g aria-hidden="true" fill="#010101">
-        <text x="835" y="150" fill-opacity=".8" filter="url(#blur)">91%</text>
-        <text x="835" y="150" fill-opacity=".3" textLength="280">91%</text>
+        <text x="950" y="150" fill-opacity=".8" filter="url(#blur)">91%</text>
+        <text x="950" y="150" fill-opacity=".3" textLength="280">91%</text>
       </g>
-      <text x="835" y="140" textLength="280">91%</text>
+      <text x="950" y="140" textLength="280">91%</text>
     </g>
   </g>
 </svg>
