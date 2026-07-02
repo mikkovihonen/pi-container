@@ -8,19 +8,6 @@
 
 A containerized environment for running the `pi-coding-agent` with local LLM inference and full auditability. A transparent proxy container based on `mitmproxy` intercepts all HTTP/HTTPS/DNS traffic from the agent container, enforcing allowlisting and injecting secrets as needed. Supports macOS, Linux, and WSL2.
 
-<a name="coverage"></a>
-## Coverage
-
-[![Coverage](badges/coverage.svg)](#coverage)
-
-Test coverage is enforced by CI (minimum 90%). Coverage is measured with `pytest-cov` and a badge SVG is auto-committed to `badges/coverage.svg` on every push to `main`.
-
-Run locally:
-
-```bash
-uv run pytest --cov --cov-report=term-missing
-```
-
 ## Prerequisites
 
 Before running, ensure you have the following installed on your host machine:
@@ -383,3 +370,16 @@ The Python sources run directly from `src/` (uv treats the project as a
 into `.venv` but the project itself is not built or installed). `build.sh` and
 `run.sh` wrap `uv run --project <repo>`, so they use this environment while
 still operating on the caller's working directory.
+
+<a name="coverage"></a>
+## Coverage
+
+[![Coverage](badges/coverage.svg)](#coverage)
+
+Test coverage is enforced by CI (minimum 90%). Coverage is measured with `pytest-cov` and a badge SVG is auto-committed to `badges/coverage.svg` on every push to `main`.
+
+Run locally:
+
+```bash
+uv run pytest --cov --cov-report=term-missing
+```
