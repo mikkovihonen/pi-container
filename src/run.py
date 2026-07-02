@@ -216,8 +216,7 @@ def _resolve_flows_filenames(exports_dir: Path, client_ips: list[str] | None) ->
         return [candidates[0].name]
     if candidates:
         logger.warning(
-            f"Agent IP unknown and {len(candidates)} flow files present; "
-            f"cannot attribute — skipping flow export."
+            f"Agent IP unknown and {len(candidates)} flow files present; cannot attribute — skipping flow export."
         )
     return []
 

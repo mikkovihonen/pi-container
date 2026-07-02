@@ -125,14 +125,11 @@ class TestExportMitmwebFlows:
         exports.mkdir()
         _make_session(sessions, "sid")
         (exports / "flows-10.0.0.5.jsonl").write_text(
-            '{"id": "v4-b", "timestamp_start": 20}\n'
-            '{"id": "v4-a", "timestamp_start": 10}\n'
+            '{"id": "v4-b", "timestamp_start": 20}\n{"id": "v4-a", "timestamp_start": 10}\n'
         )
         (exports / "flows-fd00--2.jsonl").write_text('{"id": "v6", "timestamp_start": 15}\n')
 
-        out = run.export_mitmweb_flows(
-            sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5", "fd00::2"]
-        )
+        out = run.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5", "fd00::2"])
 
         ids = [f["id"] for f in json.loads(out.read_text())["flows"]]
         assert ids == ["v4-a", "v6", "v4-b"]  # merged and sorted by timestamp_start
@@ -148,9 +145,7 @@ class TestExportMitmwebFlows:
         v4.write_text('{"id": "a"}\n')
         v6.write_text('{"id": "b"}\n')
 
-        out = run.export_mitmweb_flows(
-            sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5", "fd00::2"]
-        )
+        out = run.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5", "fd00::2"])
 
         assert out.exists()  # snapshot written
         assert not v4.exists() and not v6.exists()  # raw files removed
@@ -226,8 +221,7 @@ class TestSanitizeIp:
 class TestLoadFlowsFromMount:
     def test_reads_jsonl_flows(self, tmp_path):
         (tmp_path / "flows-10.0.0.5.jsonl").write_text(
-            '{"id": "f1", "request": {"url": "http://a/"}}\n'
-            '{"id": "f2", "error": "Connection killed."}\n'
+            '{"id": "f1", "request": {"url": "http://a/"}}\n{"id": "f2", "error": "Connection killed."}\n'
         )
         flows = run._load_flows_from_mount(exports_dir=tmp_path, flows_filename="flows-10.0.0.5.jsonl")
         assert [f["id"] for f in flows] == ["f1", "f2"]
@@ -235,10 +229,7 @@ class TestLoadFlowsFromMount:
     def test_skips_blank_and_malformed_lines(self, tmp_path):
         # blank lines and a truncated final line (as a hard kill can leave)
         (tmp_path / "flows.jsonl").write_text(
-            '{"id": "f1"}\n'
-            "\n"
-            '{"id": "f2"}\n'
-            '{"id": "partial", "request": {'  # truncated, no newline
+            '{"id": "f1"}\n\n{"id": "f2"}\n{"id": "partial", "request": {'  # truncated, no newline
         )
         flows = run._load_flows_from_mount(exports_dir=tmp_path)
         assert [f["id"] for f in flows] == ["f1", "f2"]

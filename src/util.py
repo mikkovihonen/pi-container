@@ -61,9 +61,7 @@ def run_quiet(
             log.error(msg)
             # Raise with ``name`` (not the raw argv) so command-line secrets
             # are not embedded in the exception string.
-            raise subprocess.CalledProcessError(
-                result.returncode, name, output=result.stdout, stderr=result.stderr
-            )
+            raise subprocess.CalledProcessError(result.returncode, name, output=result.stdout, stderr=result.stderr)
         log.warning(msg)
     return result
 
