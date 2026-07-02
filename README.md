@@ -58,11 +58,7 @@ The system consists of three components running as containers or processes:
 
 ```mermaid
 flowchart TB
-    subgraph agent["<b>pi-coding-agent</b>"]
-        direction TB
-        agent_eth["eth0<br/>isolated-net"]
-    end
-    style agent fill:none,text-align:left
+    agent_eth["<b>pi-coding-agent</b><br/><br/>eth0<br/>isolated-net"]
 
     subgraph net["isolated-net<br/>(--internal, no gateway)"]
         direction TB
