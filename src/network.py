@@ -25,6 +25,36 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ─── Tmpfs Config Scanner ─────────────────────────────────────────────────
+
+
+def scan_tmpfs_paths(config_dir: Path | None = None) -> list[str]:
+    """Scan the tmpfs config for transient paths to mount as tmpfs.
+
+    Reads ``.pi-container/tmpfs.yaml`` and returns a deduplicated, sorted
+    list of absolute container paths that should be mounted as tmpfs.
+
+    Args:
+        config_dir: Override the default CONFIG_DIR. Defaults to CONFIG_DIR.
+
+    Returns:
+        A deduplicated, sorted list of tmpfs mount paths.
+    """
+    import yaml as _yaml
+
+    config_path = (config_dir or CONFIG_DIR) / "tmpfs.yaml"
+    if not config_path.exists():
+        logger.debug(f"Tmpfs config not found at {config_path}; no tmpfs mounts will be added.")
+        return []
+
+    with config_path.open("r") as f:
+        config = _yaml.safe_load(f) or {}
+
+    paths = config.get("paths", []) or []
+    # Deduplicate and sort for deterministic output
+    return sorted({str(p) for p in paths})
+
+
 # ─── Token Replacer Config Scanner (duplicated from pi-coding-agent-proxy/addons/token_replacer)
 #
 # run.py lives outside pi-coding-agent-proxy and must not import from it.

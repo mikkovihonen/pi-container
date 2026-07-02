@@ -25,7 +25,7 @@ from config import (
     REPO_ROOT,
 )
 from models import Model, ModelConfig, ServerConfig  # noqa: F401  (re-exported for callers/tests)
-from network import ContainerNetworkManager, scan_config_env_refs  # noqa: F401
+from network import ContainerNetworkManager, scan_config_env_refs, scan_tmpfs_paths  # noqa: F401
 from runtimes import ContainerRuntime
 from server import Server
 from util import (
@@ -196,6 +196,9 @@ def main() -> None:
                 if IPV6_ENABLED:
                     _warn_if_proxy_lacks_ipv6_egress(CONTAINER_RUNTIME)
 
+                # Scan tmpfs config for transient paths to mount as tmpfs.
+                tmpfs_paths = scan_tmpfs_paths(CONFIG_DIR)
+
                 pi_container_cmd = [
                     CONTAINER_RUNTIME,
                     "run",
@@ -214,6 +217,8 @@ def main() -> None:
                     "--volume",
                     f"{REPO_ROOT}/pi-coding-agent/home/.pi:/home/pi/.pi",
                     *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
+                    # Transient tmpfs mounts for build artifacts, caches, etc.
+                    *[flag for path in tmpfs_paths for flag in ("--tmpfs", path)],
                     "--volume",
                     f"{PROJECT_DIR}:/workspace",
                     "--workdir",

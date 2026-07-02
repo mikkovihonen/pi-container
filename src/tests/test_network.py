@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from network import ContainerNetworkManager, scan_config_env_refs
+from network import ContainerNetworkManager, scan_config_env_refs, scan_tmpfs_paths
 
 # ---------------------------------------------------------------------------
 # ScanConfigEnvRefs
@@ -253,3 +253,48 @@ class TestContainerNetworkManagerRefCount:
 
         # Ref count file should be removed
         assert not mgr.paths["ref_count_file"].exists()
+
+
+# ---------------------------------------------------------------------------
+# ScanTmpfsPaths
+# ---------------------------------------------------------------------------
+
+
+class TestScanTmpfsPaths:
+    def test_empty_config(self, tmp_path):
+        config = tmp_path / "tmpfs.yaml"
+        config.write_text("paths: []\n")
+        result = scan_tmpfs_paths(tmp_path)
+        assert result == []
+
+    def test_single_path(self, tmp_path):
+        config = tmp_path / "tmpfs.yaml"
+        config.write_text("paths:\n  - /workspace/build\n")
+        result = scan_tmpfs_paths(tmp_path)
+        assert result == ["/workspace/build"]
+
+    def test_multiple_paths_sorted(self, tmp_path):
+        config = tmp_path / "tmpfs.yaml"
+        config.write_text("paths:\n  - /workspace/cache\n  - /workspace/build\n  - /workspace/tmp\n")
+        result = scan_tmpfs_paths(tmp_path)
+        assert result == ["/workspace/build", "/workspace/cache", "/workspace/tmp"]
+
+    def test_deduplicates_paths(self, tmp_path):
+        config = tmp_path / "tmpfs.yaml"
+        config.write_text("paths:\n  - /workspace/build\n  - /workspace/build\n")
+        result = scan_tmpfs_paths(tmp_path)
+        assert result == ["/workspace/build"]
+
+    def test_missing_config(self, tmp_path):
+        result = scan_tmpfs_paths(tmp_path)
+        assert result == []
+
+    def test_empty_paths_key(self, tmp_path):
+        config = tmp_path / "tmpfs.yaml"
+        config.write_text("paths:\n")
+        result = scan_tmpfs_paths(tmp_path)
+        assert result == []
+
+    def test_nonexistent_dir(self):
+        result = scan_tmpfs_paths(Path("/nonexistent"))
+        assert result == []
