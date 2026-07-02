@@ -107,6 +107,9 @@ def _make_headers_mock(headers_dict: dict[str, str]):
     mock.__delitem__ = MagicMock(side_effect=_delitem)
 
     mock.__contains__ = MagicMock(side_effect=lambda k: k in headers_dict)
+    # __iter__ is required — MagicMock's default iter() yields nothing,
+    # which would leave HeaderMatcher's key lookup (for key in headers) at None.
+    mock.__iter__ = MagicMock(side_effect=lambda: iter(headers_dict.keys()))
     return mock
 
 
