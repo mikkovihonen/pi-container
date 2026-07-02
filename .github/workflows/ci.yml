@@ -35,7 +35,7 @@ jobs:
         run: uv sync --frozen --project .
 
       - name: Install ruff and pytest
-        run: uv tool install ruff pytest
+        run: uv tool install ruff && uv tool install pytest
 
       - name: Lint with ruff
         run: ruff check
