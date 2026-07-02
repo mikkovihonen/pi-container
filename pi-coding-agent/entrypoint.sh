@@ -1,11 +1,11 @@
 #!/bin/bash
 set -e
 
-if [ -f /workspace/.pi/dependencies/apt/packages.txt ]; then
+if [ -f /workspace/.pi-container/dependencies/apt/packages.txt ]; then
     echo "dependencies/apt/packages.txt exists in workdir. Installing apt dependencies from workspace."
     {
         apt-get update
-        cat /workspace/.pi/dependencies/apt/packages.txt | xargs -r apt-get install -y
+        cat /workspace/.pi-container/dependencies/apt/packages.txt | xargs -r apt-get install -y
         rm -rf /var/lib/apt/lists/*
     }  >/dev/null 2>&1
 fi

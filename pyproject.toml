@@ -2,42 +2,37 @@
 name = "pi-container"
 version = "0.1.0"
 description = "Containerized environment for running the pi-coding-agent with local LLM inference"
-requires-python = ">=3.10"
+requires-python = ">=3.14.6"
 dependencies = [
-    # Model downloads (hf_hub_download) and the `hf` CLI used by validate_environment.
-    "huggingface-hub[cli]>=0.34",
-    # Parsing token_replacer / allowlist YAML configs.
+    "huggingface_hub>=1.21.0",
     "pyyaml>=6.0",
+    "mitmproxy>=12.2.3",
 ]
 
 [dependency-groups]
-# Installed by default (`uv sync`); used for the project's own test suite + linting.
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
 ]
-# Heavy, opt-in group for the mitmproxy proxy-addon tests. Install with
-# `uv sync --group proxy-addons` (kept out of the default env so the common
-# workflow stays lean and unconstrained by mitmproxy's Python requirements).
-proxy-addons = [
-    "mitmproxy>=11",
-]
 
 [tool.uv]
-# This is a virtual project: uv installs the dependencies into .venv but does
-# not build/install pi-container itself as a package. The scripts run directly
-# from src/ (see run.sh / build.sh).
 package = false
 
 [tool.pytest.ini_options]
-# The proxy-addon tests live under pi-coding-agent-proxy/addons and require the
-# `proxy-addons` group; run them explicitly, e.g.
-#   uv run --group proxy-addons pytest pi-coding-agent-proxy/addons
-testpaths = ["src/tests"]
+testpaths = [
+    "src/tests",
+    "pi-coding-agent-proxy/addons/allowlist/tests",
+    "pi-coding-agent-proxy/addons/token_replacer/tests",
+]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py314"
 line-length = 120
+include = [
+    "src/**/*.py",
+    "pi-coding-agent-proxy/addons/allowlist/**/*.py",
+    "pi-coding-agent-proxy/addons/token_replacer/**/*.py",
+]
 
 [tool.ruff.lint]
 select = [
@@ -62,4 +57,7 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 
 [tool.ruff.lint.isort]
-known-first-party = ["util", "config", "runtimes", "models", "server", "network"]
+known-first-party = [
+    "util", "config", "runtimes", "models", "server", "network",
+    "allowlist", "token_replacer",  # pi-coding-agent-proxy/addons
+]

@@ -1,6 +1,6 @@
 # pi-container
 
-A containerized environment for running the `pi-coding-agent` with local LLM inference. Supports macOS, Linux, and WSL2.
+A containerized environment for running the `pi-coding-agent` with local LLM inference and full auditability. A transparent proxy container based on `mitmproxy` intercepts all HTTP/HTTPS/DNS traffic from the agent container, enforcing allowlisting and injecting secrets as needed. Supports macOS, Linux, and WSL2.
 
 ## Prerequisites
 
@@ -59,7 +59,7 @@ The system consists of three components running as containers or processes:
 ### Network topology
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph agent["<b>pi-coding-agent</b>"]
         direction TB
         agent_eth["eth0<br/>isolated-net"]

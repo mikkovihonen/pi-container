@@ -1,5 +1,42 @@
-# No internet connections needed for pi-container in this project
+# Only permit Python package servers (pypi.org / files.pythonhosted.org)
+# and npm package registries. All other traffic is blocked by default.
 global:
-   mode: "allow"
-   default_action: "block"
-   status_code: 403
+  mode: "allow"
+  default_action: "block"
+  status_code: 403
+  rules:
+    - name: "pypi-org-allow"
+      mode: "allow"
+      hostnames:
+        - "pypi.org"
+        - "*.pypi.org"
+      ip_ranges: []
+
+    - name: "pythonhosted-org-allow"
+      mode: "allow"
+      hostnames:
+        - "files.pythonhosted.org"
+        - "*.files.pythonhosted.org"
+      ip_ranges: []
+
+    - name: "npm-registry-allow"
+      mode: "allow"
+      hostnames:
+        - "registry.npmjs.org"
+        - "*.registry.npmjs.org"
+        - "*.npmjs.org"
+      ip_ranges: []
+
+    - name: "npm-cdn-allow"
+      mode: "allow"
+      hostnames:
+        - "codeload.github.com"
+        - "*.github.com"
+      ip_ranges: []
+
+    - name: "yarn-registry-allow"
+      mode: "allow"
+      hostnames:
+        - "registry.yarnpkg.com"
+        - "*.yarnpkg.com"
+      ip_ranges: []

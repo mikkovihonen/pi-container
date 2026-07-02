@@ -54,6 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     uuid-runtime \
     patch \
     xxd \
+    curl \
     && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
     && locale-gen en_US.UTF-8
 
@@ -81,9 +82,13 @@ RUN userdel --remove node 2>/dev/null || true \
  && useradd --uid ${PI_UID} --gid ${PI_GID} --create-home --shell /bin/bash pi
 
 ENV VIRTUAL_ENV=/home/pi/.venv
+
+ENV UV_SYSTEM_CERTS=1
 ENV UV_PROJECT_ENVIRONMENT=/home/pi/.venv
+
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
+
 
 RUN mkdir -p /usr/local/share/ca-certificates/extra
 COPY --from=pi-coding-agent-proxy:local /home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.pem
