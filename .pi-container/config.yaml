@@ -13,6 +13,25 @@ resources:
     memory: 4g
     cpus: 2
 
+# llama-server startup tuning (seconds to wait for /health; relaunch attempts).
+llama:
+  startup_timeout: 180
+  startup_attempts: 2
+
+# Network settings for this project's isolated stack.
+network:
+  ipv6: false
+  dns: "1.1.1.1"
+
+# Proxy container options. expose_ui: localhost (127.0.0.1 only) | lan (0.0.0.0).
+proxy:
+  expose_ui: localhost
+
+# Extra agent-container env vars / bind mounts (absolute host paths).
+agent:
+  env: {}
+  mounts: []
+
 # Transient tmpfs mounts inside the agent container (volatile; lost on stop).
 # These shadow this repo's own build/runtime artifacts so the agent works against
 # clean, empty dirs rather than the host's caches/locks/models.

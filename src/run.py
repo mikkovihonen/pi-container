@@ -19,7 +19,6 @@ from config import (
     ADMIN_PASSWORD,
     BRIDGE_INTERFACE_ENV,
     IMAGE_TAG,
-    IPV6_ENABLED,
     LLAMA_BIN,
     LLAMA_SERVER_LOCK_DIR,
     MODELS_DIR,
@@ -31,7 +30,10 @@ from flow_export import export_mitmweb_flows, poll_agent_container_ips
 from models import Model, ServerConfig
 from network import (
     ContainerNetworkManager,
+    read_agent_extras,
     read_flow_export_enabled,
+    read_llama_config,
+    read_network_config,
     read_resource_limits,
     resource_limit_args,
     scan_tmpfs_paths,
@@ -151,8 +153,12 @@ def main() -> None:
         logger.error(f"Config file not found: {config_path}")
         sys.exit(1)
 
-    # Per-project mitmweb flow-export toggle (config.yaml flow_export.enabled).
-    flow_export_enabled = read_flow_export_enabled(PROJECT_DIR / ".pi-container")
+    # Per-project settings from .pi-container/config.yaml.
+    pi_container_dir = PROJECT_DIR / ".pi-container"
+    flow_export_enabled = read_flow_export_enabled(pi_container_dir)
+    ipv6_enabled = read_network_config(pi_container_dir)["ipv6"]
+    llama_cfg = read_llama_config(pi_container_dir)
+    agent_extras = read_agent_extras(pi_container_dir)
 
     with config_path.open("r") as file:
         data = json.load(file)
@@ -182,6 +188,8 @@ def main() -> None:
                     server_id=item["name"],
                     container_port=container_port,
                     use_host_socat=RUNTIME.needs_host_socat(),
+                    startup_timeout=llama_cfg["startup_timeout"],
+                    startup_attempts=llama_cfg["startup_attempts"],
                 )
                 stack.enter_context(server)
                 servers.append(server)
@@ -206,9 +214,9 @@ def main() -> None:
                 network_name,
                 "pi-coding-agent-proxy:local",
                 proxy_name=proxy_name,
-                config_dir=PROJECT_DIR / ".pi-container",
+                config_dir=pi_container_dir,
                 llama_ports=portconfig,
-                ipv6=IPV6_ENABLED,
+                ipv6=ipv6_enabled,
             ) as netmgr:
                 mitmweb_url = netmgr.mitmweb_url()
                 if mitmweb_url:
@@ -227,7 +235,7 @@ def main() -> None:
                     if match_ip:
                         proxy_isolated_ip = match_ip.group(1)
                         logger.info(f"Found proxy {RUNTIME.proxy_isolated_interface} IP address: {proxy_isolated_ip}")
-                    if IPV6_ENABLED:
+                    if ipv6_enabled:
                         # Global-scope v6 address only (skip fe80:: link-local).
                         match_ip6 = re.search(r"inet6\s+([0-9a-fA-F:]+)/\d+\s+scope global", result_ip.stdout)
                         if match_ip6:
@@ -237,7 +245,7 @@ def main() -> None:
                             )
                         else:
                             logger.warning(
-                                f"IPV6_ENABLED but no global IPv6 address found on proxy "
+                                f"network.ipv6 is enabled but no global IPv6 address found on proxy "
                                 f"{RUNTIME.proxy_isolated_interface}; the agent will have no IPv6 default route."
                             )
                 except Exception as e:
@@ -249,21 +257,20 @@ def main() -> None:
                         f"the agent cannot be routed through the proxy."
                     )
 
-                if IPV6_ENABLED:
+                if ipv6_enabled:
                     netmgr.warn_if_proxy_lacks_ipv6_egress()
 
-                # Scan tmpfs config for transient paths to mount as tmpfs. These
-                # paths are all under /workspace (the mounted PROJECT_DIR), so the
-                # config that declares them is per-project — read it from the
-                # project's own .pi-container, not the repo's. Reading the repo's
-                # list here would mkdir this repo's transient mountpoints (e.g.
-                # pi-coding-agent-proxy/*) inside every foreign workspace.
-                tmpfs_paths = scan_tmpfs_paths(PROJECT_DIR / ".pi-container")
+                # Transient tmpfs paths (config.yaml tmpfs.paths) — all under
+                # /workspace (the mounted PROJECT_DIR), so the config that declares
+                # them is per-project. Reading the repo's list for a foreign
+                # workspace would mkdir this repo's mountpoints (e.g.
+                # pi-coding-agent-proxy/*) inside that workspace.
+                tmpfs_paths = scan_tmpfs_paths(pi_container_dir)
 
                 # The project's apt dependency manifest, bind-mounted read-only
                 # back over the tmpfs that hides the rest of .pi-container (see the
                 # mounts below).
-                deps_dir = PROJECT_DIR / ".pi-container" / "dependencies"
+                deps_dir = pi_container_dir / "dependencies"
 
                 pi_container_cmd = [
                     CONTAINER_RUNTIME,
@@ -277,9 +284,9 @@ def main() -> None:
                     # IPv6 policy for the agent: --sysctl toggle (VM runtimes) +
                     # env flag its entrypoint reads. When enabled, DEFAULT_ROUTE6
                     # points the v6 default route at the proxy's eth1 v6 address.
-                    *RUNTIME.ipv6_run_args(IPV6_ENABLED),
+                    *RUNTIME.ipv6_run_args(ipv6_enabled),
                     "--env",
-                    f"IPV6_ENABLED={str(IPV6_ENABLED).lower()}",
+                    f"IPV6_ENABLED={str(ipv6_enabled).lower()}",
                     *(["--env", f"DEFAULT_ROUTE6={proxy_isolated_ip6}"] if proxy_isolated_ip6 else []),
                     *RUNTIME.tmpfs_args("/home/pi/"),
                     "--volume",
@@ -287,9 +294,9 @@ def main() -> None:
                     "--volume",
                     f"{PROJECT_DIR}:/workspace",
                     *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
-                    # Hide the whole .pi-container from the agent — its YAML configs
-                    # (allowlist/token_replacer/tmpfs), flow-export captures and
-                    # agent secrets — by shadowing it with an empty tmpfs.
+                    # Hide the whole .pi-container from the agent — its config.yaml,
+                    # allowlist/token_replacer, flow-export captures and agent
+                    # secrets — by shadowing it with an empty tmpfs.
                     *RUNTIME.tmpfs_args("/workspace/.pi-container"),
                     # ...then bind the dependency manifest back on top (read-only)
                     # so the entrypoint can still install the project's apt packages.
@@ -308,8 +315,11 @@ def main() -> None:
                     f"LLAMA_PORTS={portconfig}",
                     "--env",
                     f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",
+                    # Extra agent env vars + bind mounts (config.yaml agent.env/agent.mounts).
+                    *[flag for k, v in agent_extras["env"].items() for flag in ("--env", f"{k}={v}")],
+                    *[flag for m in agent_extras["mounts"] for flag in ("--volume", m)],
                     # Resource limits for this project's agent (config.yaml resources.agent).
-                    *resource_limit_args(read_resource_limits(PROJECT_DIR / ".pi-container", "agent")),
+                    *resource_limit_args(read_resource_limits(pi_container_dir, "agent")),
                     IMAGE_TAG,
                     *sys.argv[1:],
                 ]
@@ -345,7 +355,7 @@ def main() -> None:
                     export_mitmweb_flows(
                         sessions_dir=agent_config_dir / "sessions",
                         client_ips=ip_holder.get("ips"),
-                        exports_dir=PROJECT_DIR / ".pi-container" / "exports",
+                        exports_dir=pi_container_dir / "exports",
                     )
 
             if result.returncode != 0:

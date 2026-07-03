@@ -273,7 +273,9 @@ class TestScanTmpfsPaths:
         assert scan_tmpfs_paths(tmp_path) == ["/workspace/build"]
 
     def test_multiple_paths_sorted(self, tmp_path):
-        self._write(tmp_path, "tmpfs:\n  paths:\n    - /workspace/cache\n    - /workspace/build\n    - /workspace/tmp\n")
+        self._write(
+            tmp_path, "tmpfs:\n  paths:\n    - /workspace/cache\n    - /workspace/build\n    - /workspace/tmp\n"
+        )
         assert scan_tmpfs_paths(tmp_path) == ["/workspace/build", "/workspace/cache", "/workspace/tmp"]
 
     def test_deduplicates_paths(self, tmp_path):
@@ -473,3 +475,106 @@ class TestReadResourceLimits:
         assert resource_limit_args({"memory": None, "cpus": 8}) == ["--cpus", "8"]
         assert resource_limit_args({"memory": "2g", "cpus": None}) == ["--memory", "2g"]
         assert resource_limit_args({"memory": None, "cpus": None}) == []
+
+
+# ---------------------------------------------------------------------------
+# New config.yaml readers: llama / network / proxy.expose_ui / agent extras
+# ---------------------------------------------------------------------------
+
+
+class TestReadLlamaConfig:
+    def _write(self, tmp_path, body):
+        (tmp_path / "config.yaml").write_text(body)
+
+    def test_defaults(self, tmp_path):
+        from network import read_llama_config
+
+        assert read_llama_config(tmp_path) == {"startup_timeout": 180, "startup_attempts": 2}
+
+    def test_configured(self, tmp_path):
+        from network import read_llama_config
+
+        self._write(tmp_path, "llama:\n  startup_timeout: 600\n  startup_attempts: 5\n")
+        assert read_llama_config(tmp_path) == {"startup_timeout": 600, "startup_attempts": 5}
+
+    def test_partial_fills_defaults(self, tmp_path):
+        from network import read_llama_config
+
+        self._write(tmp_path, "llama:\n  startup_timeout: 300\n")
+        assert read_llama_config(tmp_path) == {"startup_timeout": 300, "startup_attempts": 2}
+
+
+class TestReadNetworkConfig:
+    def _write(self, tmp_path, body):
+        (tmp_path / "config.yaml").write_text(body)
+
+    def test_defaults(self, tmp_path):
+        from network import read_network_config
+
+        assert read_network_config(tmp_path) == {"ipv6": False, "dns": "1.1.1.1"}
+
+    def test_configured(self, tmp_path):
+        from network import read_network_config
+
+        self._write(tmp_path, "network:\n  ipv6: true\n  dns: 9.9.9.9\n")
+        assert read_network_config(tmp_path) == {"ipv6": True, "dns": "9.9.9.9"}
+
+    def test_ipv6_truthy_string(self, tmp_path):
+        from network import read_network_config
+
+        self._write(tmp_path, "network:\n  ipv6: 'yes'\n")
+        assert read_network_config(tmp_path)["ipv6"] is True
+
+
+class TestReadProxyUiExpose:
+    def _write(self, tmp_path, body):
+        (tmp_path / "config.yaml").write_text(body)
+
+    def test_default_localhost(self, tmp_path):
+        from network import read_proxy_ui_expose
+
+        assert read_proxy_ui_expose(tmp_path) == "localhost"
+
+    def test_lan(self, tmp_path):
+        from network import read_proxy_ui_expose
+
+        self._write(tmp_path, "proxy:\n  expose_ui: lan\n")
+        assert read_proxy_ui_expose(tmp_path) == "lan"
+
+    def test_invalid_falls_back_to_localhost(self, tmp_path):
+        from network import read_proxy_ui_expose
+
+        self._write(tmp_path, "proxy:\n  expose_ui: everywhere\n")
+        assert read_proxy_ui_expose(tmp_path) == "localhost"
+
+    def test_publish_args_bind_scope(self, tmp_path):
+        mgr = ContainerNetworkManager(
+            container_runtime="docker",
+            network_name="net",
+            proxy_image="proxy:latest",
+            proxy_name="pi-proxy-x",
+            config_dir=tmp_path,
+        )
+        mgr.mitmweb_port = 49999
+        # default (no config) → localhost bind
+        assert mgr._mitmweb_publish_args() == ["-p", "127.0.0.1:49999:8081"]
+        (tmp_path / "config.yaml").write_text("proxy:\n  expose_ui: lan\n")
+        assert mgr._mitmweb_publish_args() == ["-p", "49999:8081"]
+
+
+class TestReadAgentExtras:
+    def _write(self, tmp_path, body):
+        (tmp_path / "config.yaml").write_text(body)
+
+    def test_defaults_empty(self, tmp_path):
+        from network import read_agent_extras
+
+        assert read_agent_extras(tmp_path) == {"env": {}, "mounts": []}
+
+    def test_env_and_mounts(self, tmp_path):
+        from network import read_agent_extras
+
+        self._write(tmp_path, "agent:\n  env:\n    FOO: bar\n    N: 3\n  mounts:\n    - /a:/b:ro\n")
+        extras = read_agent_extras(tmp_path)
+        assert extras["env"] == {"FOO": "bar", "N": "3"}
+        assert extras["mounts"] == ["/a:/b:ro"]

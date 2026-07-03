@@ -162,6 +162,66 @@ def resource_limit_args(limits: dict) -> list[str]:
     return args
 
 
+_DEFAULT_LLAMA = {"startup_timeout": 180, "startup_attempts": 2}
+_DEFAULT_NETWORK = {"ipv6": False, "dns": "1.1.1.1"}
+
+
+def read_llama_config(config_dir: Path | None = None) -> dict:
+    """llama-server startup tuning from config.yaml ``llama``.
+
+    Returns ``{"startup_timeout": <seconds>, "startup_attempts": <int>}`` — how
+    long to wait for ``/health`` and how many times to (re)launch a model before
+    giving up. Missing values fall back to :data:`_DEFAULT_LLAMA`.
+    """
+    section = load_project_config(config_dir).get("llama") or {}
+    return {
+        "startup_timeout": int(section.get("startup_timeout", _DEFAULT_LLAMA["startup_timeout"])),
+        "startup_attempts": int(section.get("startup_attempts", _DEFAULT_LLAMA["startup_attempts"])),
+    }
+
+
+def read_network_config(config_dir: Path | None = None) -> dict:
+    """Network settings from config.yaml ``network``.
+
+    Returns ``{"ipv6": <bool>, "dns": <str>}`` — whether to plumb IPv6 through the
+    isolated network/proxy, and the upstream resolver the proxy uses. Missing
+    values fall back to :data:`_DEFAULT_NETWORK`.
+    """
+    section = load_project_config(config_dir).get("network") or {}
+    return {
+        "ipv6": _egress_truthy(section.get("ipv6", _DEFAULT_NETWORK["ipv6"])),
+        "dns": str(section.get("dns") or _DEFAULT_NETWORK["dns"]),
+    }
+
+
+def read_proxy_ui_expose(config_dir: Path | None = None) -> str:
+    """Where the proxy's mitmweb UI is published, from config.yaml ``proxy.expose_ui``.
+
+    ``"localhost"`` (default) binds the auto-assigned port to 127.0.0.1 only;
+    ``"lan"`` binds 0.0.0.0 (reachable from other hosts). Unknown values fall back
+    to ``"localhost"``.
+    """
+    section = load_project_config(config_dir).get("proxy") or {}
+    value = str(section.get("expose_ui", "localhost")).strip().lower()
+    return value if value in ("localhost", "lan") else "localhost"
+
+
+def read_agent_extras(config_dir: Path | None = None) -> dict:
+    """Extra agent-container env vars and bind mounts from config.yaml ``agent``.
+
+    Returns ``{"env": {NAME: value, ...}, "mounts": ["host:container[:ro]", ...]}``
+    — passed through verbatim as ``--env``/``--volume`` flags. Use absolute host
+    paths for mounts. Empty when the section is absent.
+    """
+    section = load_project_config(config_dir).get("agent") or {}
+    env = section.get("env") or {}
+    mounts = section.get("mounts") or []
+    return {
+        "env": {str(k): str(v) for k, v in dict(env).items()},
+        "mounts": [str(m) for m in mounts],
+    }
+
+
 # ─── Token Replacer Config Scanner (duplicated from pi-coding-agent-proxy/addons/token_replacer)
 #
 # run.py lives outside pi-coding-agent-proxy and must not import from it.
@@ -313,10 +373,11 @@ class ContainerNetworkManager:
         # (1) Static: runtime known to lack IPv6 egress entirely.
         if not self.runtime.ipv6_upstream_egress:
             logger.warning(
-                f"IPV6_ENABLED=true but runtime '{self.container_runtime}' provides no "
+                f"network.ipv6=true but runtime '{self.container_runtime}' provides no "
                 f"IPv6 egress on the upstream network (it NATs IPv4 only); the proxy will "
                 f"have no IPv6 route out, so agent IPv6 connections will fail. Set "
-                f"IPV6_ENABLED=false unless you are on a runtime/host with working IPv6 egress."
+                f"network.ipv6=false in .pi-container/config.yaml unless you are on a "
+                f"runtime/host with working IPv6 egress."
             )
             return
 
@@ -324,7 +385,7 @@ class ContainerNetworkManager:
         has_v6 = self.runtime.upstream_network_has_ipv6()
         if has_v6 is False:
             logger.warning(
-                f"IPV6_ENABLED=true but the upstream network '{self.runtime.upstream_network}' "
+                f"network.ipv6=true but the upstream network '{self.runtime.upstream_network}' "
                 f"is not configured for IPv6; the proxy will likely have no IPv6 route out and "
                 f"agent IPv6 connections may fail."
             )
@@ -365,10 +426,10 @@ class ContainerNetworkManager:
         has_default = bool(route.strip())
         if not (has_global and has_default):
             logger.warning(
-                f"IPV6_ENABLED=true but the proxy has no working IPv6 egress on {upstream_iface} "
+                f"network.ipv6=true but the proxy has no working IPv6 egress on {upstream_iface} "
                 f"(global address: {has_global}, default route: {has_default}); this runtime/host "
                 f"does not route IPv6 to the internet, so agent IPv6 connections will fail. "
-                f"Set IPV6_ENABLED=false to silence this."
+                f"Set network.ipv6=false in .pi-container/config.yaml to silence this."
             )
         else:
             logger.info(f"Proxy has IPv6 egress on {upstream_iface} (global address + default route present).")
@@ -499,12 +560,14 @@ class ContainerNetworkManager:
             *self.runtime.proxy_extra_run_args(),
             "--cap-add",
             "NET_ADMIN",
+            # Upstream resolver for the proxy (config.yaml network.dns).
             "--dns",
-            "1.1.1.1",
+            read_network_config(self.config_dir)["dns"],
             # Resource limits for this project's proxy (config.yaml resources.proxy).
             *resource_limit_args(read_resource_limits(self.config_dir, "proxy")),
-            "-p",
-            f"{self.mitmweb_port}:8081",
+            # Publish the mitmweb UI on the auto-assigned port; bind scope from
+            # config.yaml proxy.expose_ui (localhost by default, or lan → 0.0.0.0).
+            *self._mitmweb_publish_args(),
             # IPv6 policy: --sysctl toggle (VM runtimes) + env flag the proxy
             # entrypoint reads to mirror (or tear down) v6 firewall rules.
             *self.runtime.ipv6_run_args(self.ipv6, forwarding=True),
@@ -589,6 +652,16 @@ class ContainerNetworkManager:
             f"Proxy container did not become healthy within {timeout}s. "
             f"Check proxy logs: {self.container_runtime} logs {self.proxy_name}"
         )
+
+    def _mitmweb_publish_args(self) -> list[str]:
+        """``-p`` flag publishing the mitmweb UI, scoped per config.yaml proxy.expose_ui.
+
+        ``localhost`` (default) binds 127.0.0.1 only; ``lan`` binds all interfaces.
+        Either way the port is reachable on host loopback, so the health probe and
+        :meth:`mitmweb_url` keep working.
+        """
+        host = "127.0.0.1:" if read_proxy_ui_expose(self.config_dir) == "localhost" else ""
+        return ["-p", f"{host}{self.mitmweb_port}:8081"]
 
     def mitmweb_url(self) -> str | None:
         """Return the ``http://127.0.0.1:<port>`` URL of this project's mitmweb UI.

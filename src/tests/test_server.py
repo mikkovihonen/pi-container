@@ -502,3 +502,34 @@ class TestConfigFingerprint:
         s = self._server(tmp_path, ServerConfig(hf_models={"main": mc}, flags=[]))
         flags = s._get_server_flags()
         assert flags[flags.index("--alias") + 1] == "local-gemma"
+
+
+class TestServerStartupTuning:
+    def test_startup_params_stored(self, tmp_path):
+        sc = ServerConfig.from_dict({"hfModels": {}, "flags": []})
+        s = Server(
+            config=sc,
+            models_dir=tmp_path / "models",
+            llama_bin="/usr/bin/llama-server",
+            bridge_interface="bridge100",
+            lock_dir=tmp_path / "locks",
+            repo_root=tmp_path,
+            server_id="test",
+            startup_timeout=42,
+            startup_attempts=7,
+        )
+        assert s.startup_timeout == 42
+        assert s.startup_attempts == 7
+
+    def test_startup_defaults(self, tmp_path):
+        sc = ServerConfig.from_dict({"hfModels": {}, "flags": []})
+        s = Server(
+            config=sc,
+            models_dir=tmp_path / "models",
+            llama_bin="/usr/bin/llama-server",
+            bridge_interface="bridge100",
+            lock_dir=tmp_path / "locks",
+            repo_root=tmp_path,
+            server_id="test",
+        )
+        assert (s.startup_timeout, s.startup_attempts) == (180, 2)

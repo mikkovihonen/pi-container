@@ -40,7 +40,6 @@ logging.basicConfig(level=log_level, format="%(levelname)s: %(message)s")
 
 IMAGE_TAG: str = os.environ.get("IMAGE_TAG", "pi-coding-agent:local")
 LLAMA_BIN: str | None = os.environ.get("LLAMA_BIN") or shutil.which("llama-server")
-MAX_STARTUP_ATTEMPTS: int = int(os.environ.get("MAX_STARTUP_ATTEMPTS", 2))
 MODELS_DIR: Path = REPO_ROOT / "llama-server" / "models"
 LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / "llama-server" / ".locks"
 ADMIN_PASSWORD: str = os.environ.get("ADMIN_PASSWORD", "")
@@ -56,23 +55,8 @@ CONFIG_DIR: Path = REPO_ROOT / ".pi-container"
 BRIDGE_INTERFACE_ENV: str | None = os.environ.get("BRIDGE_INTERFACE") or None
 PROXY_UPSTREAM_NETWORK_ENV: str | None = os.environ.get("PROXY_UPSTREAM_NETWORK") or None
 
-
-def env_truthy(name: str, default: bool = False) -> bool:
-    """Interpret an env var as a boolean (true/1/yes/on, case-insensitive)."""
-    val = os.environ.get(name)
-    if val is None:
-        return default
-    return val.strip().lower() in ("1", "true", "yes", "on")
-
-
-# Whether the proxy/agent network stack supports IPv6. Default: disabled, in
-# which case IPv6 is explicitly turned off across both containers so the agent
-# cannot egress uninspected over v6 (bypassing mitmproxy + the allowlist). When
-# enabled, the isolated network gets an IPv6 subnet and the proxy mirrors its
-# v4 REDIRECT/NAT rules in ip6tables. See .env.example for the caveats.
-IPV6_ENABLED: bool = env_truthy("IPV6_ENABLED", default=False)
-
-# NOTE: mitmweb flow export, the proxy egress policy, tmpfs paths, and container
-# resource limits are per-project settings read from
+# NOTE: per-project settings — IPv6, proxy DNS, mitmweb UI exposure, mitmweb flow
+# export, proxy egress policy, tmpfs paths, llama-server startup tuning, container
+# resource limits, and extra agent env/mounts — are read from
 # ``{PROJECT_DIR}/.pi-container/config.yaml`` (see ``network.load_project_config``
 # and its accessors), not environment variables.

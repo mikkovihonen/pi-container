@@ -26,11 +26,11 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 | `PROXY_UPSTREAM_NETWORK` | The upstream network the proxy connects to for internet access | Per-runtime: `default` / `podman` / `bridge` |
 | `LOG_LEVEL` | Log level | `INFO` |
 | `ADMIN_PASSWORD` | Password for mitmproxy Web UI | `CHANGEME` |
-| `MAX_STARTUP_ATTEMPTS` | Number of llama-server startup attempts per model | `2` |
 | `CONTAINER_RUNTIME` | Container CLI to use (`container`, `docker`, or `podman`) | Auto-detected (prefers `container` > `docker` > `podman`) |
-| `IPV6_ENABLED` | Whether the network stack supports IPv6. When `false`, IPv6 is explicitly disabled across both containers; when `true`, the isolated network gets an IPv6 subnet and the proxy mirrors its rules in `ip6tables` (requires runtime + host v6 egress) | `false` |
 
 `BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` are derived from `CONTAINER_RUNTIME` and rarely need setting; provide them only to override the per-runtime default for your host.
+
+> Per-project settings (IPv6, proxy DNS, mitmweb UI exposure, llama-server startup tuning, resource limits, tmpfs, flow export, egress, extra agent env/mounts) are **not** environment variables — they live in `.pi-container/config.yaml`, documented below.
 
 ## Per-workspace Configuration
 
@@ -42,13 +42,24 @@ Orchestration settings live in a single **`config.yaml`**; the proxy addon confi
 
 ### The `config.yaml` file
 
-`.pi-container/config.yaml` is the single source of truth for this workspace's orchestration knobs — container **resource limits**, **tmpfs** paths, the **flow-export** toggle, and the **egress** policy:
+`.pi-container/config.yaml` is the single source of truth for this workspace's orchestration knobs:
 
 ```yaml
 # .pi-container/config.yaml
 resources:
   agent: { memory: 16g, cpus: 8 }
   proxy: { memory: 4g, cpus: 4 }
+llama:
+  startup_timeout: 180        # seconds to wait for /health per attempt
+  startup_attempts: 2         # relaunches before giving up
+network:
+  ipv6: false                 # plumb IPv6 through the isolated net + proxy
+  dns: "1.1.1.1"              # upstream resolver the proxy uses
+proxy:
+  expose_ui: localhost        # mitmweb UI bind: localhost | lan
+agent:
+  env: {}                     # extra --env vars for the agent container
+  mounts: []                  # extra bind mounts (absolute host paths)
 tmpfs:
   paths: []
 flow_export:
@@ -57,23 +68,38 @@ egress:
   allow: { ssh: false, smtp: false, git: false, ntp: false, tcp_ports: [], udp_ports: [] }
 ```
 
-Any missing section falls back to a safe default (defaults above; egress → deny-all; flow_export → off). Each subsection is documented below.
+Any missing section falls back to a safe default (values above; egress → deny-all; flow_export → off). Each subsection is documented below.
 
 ### Resource limits
 
-`resources.agent` and `resources.proxy` set CPU/memory caps on the two containers this workspace launches:
+`resources.agent` and `resources.proxy` set CPU/memory caps on the two containers this workspace launches (`--memory` / `--cpus`). A `null` (or omitted) value drops the corresponding flag → **no limit** for that dimension. Defaults are `agent: 16g/8`, `proxy: 4g/4`.
+
+### llama-server startup tuning
+
+`llama.startup_timeout` (seconds) is how long to wait for each model's `/health` before treating the launch as failed; `llama.startup_attempts` is how many times to relaunch before giving up. Raise both for large models that are slow to load. Defaults: `180` / `2`.
+
+### Network
+
+`network.ipv6` toggles IPv6 for this project's isolated network + proxy (only works if the runtime **and** host route IPv6 — leave `false` on macOS/Apple `container`; see [Network topology](architecture.md#network-topology)). `network.dns` is the upstream resolver the proxy uses for the agent's DNS lookups (default `1.1.1.1`) — set it to a corporate/internal resolver when needed.
+
+### Proxy UI exposure
+
+`proxy.expose_ui` controls where the proxy's mitmweb UI (on its auto-assigned port) is published:
+
+- `localhost` (default) — bound to `127.0.0.1` only; not reachable from other machines.
+- `lan` — bound to `0.0.0.0`; reachable across the network (still password-gated by `ADMIN_PASSWORD`).
+
+### Extra agent env / mounts
+
+`agent.env` (a map) adds environment variables to the agent container, and `agent.mounts` (a list of `host:container[:ro]` specs, absolute host paths) adds bind mounts — for one-off tools, caches, or credentials a project needs:
 
 ```yaml
-resources:
-  agent:
-    memory: 16g   # passed as --memory
-    cpus: 8       # passed as --cpus
-  proxy:
-    memory: 4g
-    cpus: 4
+agent:
+  env:
+    MY_API_BASE: https://internal.example.com
+  mounts:
+    - /Users/me/.cache/pip:/home/pi/.cache/pip:ro
 ```
-
-A `null` (or omitted) value drops the corresponding flag → **no limit** for that dimension. Defaults are `agent: 16g/8`, `proxy: 4g/4`.
 
 ### APT dependencies
 

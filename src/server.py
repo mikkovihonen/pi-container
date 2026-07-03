@@ -16,7 +16,6 @@ import time
 import urllib.request
 from typing import TYPE_CHECKING, Any
 
-from config import MAX_STARTUP_ATTEMPTS
 from models import Model, ServerConfig
 from util import get_free_port, stop_process_group
 
@@ -67,6 +66,8 @@ class Server:
         server_id: str,
         container_port: int | None = None,
         use_host_socat: bool = True,
+        startup_timeout: int = 180,
+        startup_attempts: int = 2,
     ) -> None:
         self.config: ServerConfig = config
         self.server_id: str = server_id
@@ -79,6 +80,11 @@ class Server:
         self.use_host_socat: bool = use_host_socat
         self.lock_dir: Path = lock_dir
         self.repo_root: Path = repo_root
+        # llama-server startup tuning (config.yaml llama.*). Large models load
+        # slowly; ``startup_timeout`` is the /health wait per attempt and
+        # ``startup_attempts`` the number of (re)launches before giving up.
+        self.startup_timeout: int = startup_timeout
+        self.startup_attempts: int = startup_attempts
         self.port: int | None = None
         self.container_port: int | None = container_port
         self.server_pid: int | None = None
@@ -189,7 +195,8 @@ class Server:
                 except OSError:
                     pass
 
-    def wait_for_server(self, timeout: int = 180) -> bool:
+    def wait_for_server(self, timeout: int | None = None) -> bool:
+        timeout = self.startup_timeout if timeout is None else timeout
         logger.info(f"[Server: {self.server_id}] Waiting for llama-server on port {self.port}")
         elapsed: int = 0
         while elapsed < timeout:
@@ -305,7 +312,7 @@ class Server:
 
     def _start_new_server_process(self) -> None:
         last_exception = None
-        for attempt in range(MAX_STARTUP_ATTEMPTS):
+        for attempt in range(self.startup_attempts):
             port = get_free_port()
             self.port = port
 
@@ -357,11 +364,11 @@ class Server:
 
             except Exception as e:
                 last_exception = e
-                logger.warning(f"[Server: {self.server_id}] Attempt {attempt + 1}/{MAX_STARTUP_ATTEMPTS} failed: {e}")
+                logger.warning(f"[Server: {self.server_id}] Attempt {attempt + 1}/{self.startup_attempts} failed: {e}")
                 self._cleanup(full_cleanup=False)
 
         raise Exception(
-            f"Failed to start server {self.server_id} after {MAX_STARTUP_ATTEMPTS} attempts. Last error: {last_exception}"
+            f"Failed to start server {self.server_id} after {self.startup_attempts} attempts. Last error: {last_exception}"
         )
 
     def stop(self) -> None:
