@@ -172,16 +172,6 @@ def _parse_server_address(address) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _get_client_ip(flow) -> str | None:
-    """Extract client IP from a flow.
-
-    Returns the client IP string or None if unavailable.
-    """
-    if flow and flow.client_conn and flow.client_conn.peername:
-        return flow.client_conn.peername[0]
-    return None
-
-
 def _get_server_ip(flow) -> str | None:
     """Extract server IP from a flow.
 
