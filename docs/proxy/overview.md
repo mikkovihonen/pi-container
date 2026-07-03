@@ -1,5 +1,7 @@
 # Transparent proxy container
 
+[← Documentation index](../../README.md) · [Allowlist](allowlist.md) · [Token replacer](token-replacer.md) · [Flow export](flow-export.md) · [Addon development](addon-development.md)
+
 - Debian based router container that transparently intercepts the agent's HTTP/HTTPS/DNS traffic via mitmproxy
 - mitmproxy generates a self-signed certificate with its certificate authority the first time it's run
 - mitmweb provides a web UI (port 8081) for monitoring traffic
@@ -23,7 +25,7 @@ RUN timeout 3s mitmweb || [ $? -eq 124 ]
 To use the transparent proxy, the container must be run with additional capabilities to allow it to manage network interfaces and routing tables:
 - `CAP_NET_ADMIN`
 
-The [entrypoint](entrypoint.sh) uses `iptables` on the isolated-net interface
+The [entrypoint](../../pi-coding-agent-proxy/entrypoint.sh) uses `iptables` on the isolated-net interface
 (`eth1`) to transparently intercept the agent's traffic. HTTP, HTTPS and DNS are
 redirected into mitmproxy (running transparent + DNS modes); the local
 `llama-server` API is DNAT'd out to the host; everything else is denied by
@@ -48,7 +50,7 @@ protocol the agent emits would otherwise be forwarded straight to the internet
 (DNAT'd to the host) is explicitly permitted, and operators can opt specific
 extra protocols in via `PROXY_ALLOW_*` env vars (`PROXY_ALLOW_SSH`,
 `PROXY_ALLOW_SMTP`, `PROXY_ALLOW_GIT`, `PROXY_ALLOW_NTP`, `PROXY_ALLOW_TCP_PORTS`,
-`PROXY_ALLOW_UDP_PORTS` — see the project [README](../README.md)). **Traffic
+`PROXY_ALLOW_UDP_PORTS` — see [Proxy egress policy](../architecture.md#proxy-egress-policy)). **Traffic
 allowed this way is plain NAT and is NOT seen by mitmproxy or the allowlist.**
 
 ## Addons
@@ -58,13 +60,13 @@ entrypoint) that operate on the intercepted HTTP/HTTPS traffic:
 
 | Addon | Purpose | Config (host → container) |
 |-------|---------|---------------------------|
-| [`allowlist`](addons/allowlist/) | Blocks requests to non-allowlisted hosts/IPs (default action `block`). | `.pi-container/allowlist.yaml` → `/home/mitmproxy/config/allowlist.yaml` |
-| [`token_replacer`](addons/token_replacer/) | Redacts secrets (API keys, Bearer tokens, cookies, JWTs) from requests/responses. | `.pi-container/token_replacer.yaml` → `/home/mitmproxy/config/token_replacer.yaml` |
+| [`allowlist`](allowlist.md) | Blocks requests to non-allowlisted hosts/IPs (default action `block`). | `.pi-container/allowlist.yaml` → `/home/mitmproxy/config/allowlist.yaml` |
+| [`token_replacer`](token-replacer.md) | Redacts secrets (API keys, Bearer tokens, cookies, JWTs) from requests/responses. | `.pi-container/token_replacer.yaml` → `/home/mitmproxy/config/token_replacer.yaml` |
 
 The image bakes fail-closed default configs; `run.py` mounts the host configs
 from `.pi-container/` over them at runtime (and injects any `${ENV:VAR}` secrets
 the token_replacer config references). Edit the host files to change policy. See
-[addons/README.md](addons/README.md) for how mitmproxy addons work.
+[addon development guide](addon-development.md) for how mitmproxy addons work.
 
 ## Installing the mitmproxy CA certificate to Pi Coding Agent
 

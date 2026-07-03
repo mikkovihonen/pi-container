@@ -155,8 +155,6 @@ class TestServerGetServerFlags:
 class TestServerRefCount:
     def _make_server(self, tmp_path):
         sc = ServerConfig.from_dict({"hfModels": {}, "flags": []})
-        lock_dir = tmp_path / "locks" / "test-server"
-        lock_dir.mkdir(parents=True, exist_ok=True)
         s = Server(
             config=sc,
             models_dir=tmp_path / "models",
@@ -166,6 +164,7 @@ class TestServerRefCount:
             repo_root=tmp_path,
             server_id="test-server",
         )
+        s.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
         return s
 
     def test_ref_count_zero_when_no_file(self, tmp_path):
@@ -191,8 +190,6 @@ class TestServerRefCount:
 class TestServerIsExistingServerHealthy:
     def _make_server(self, tmp_path):
         sc = ServerConfig.from_dict({"hfModels": {}, "flags": []})
-        lock_dir = tmp_path / "locks" / "test"
-        lock_dir.mkdir(parents=True, exist_ok=True)
         s = Server(
             config=sc,
             models_dir=tmp_path / "models",
@@ -202,6 +199,7 @@ class TestServerIsExistingServerHealthy:
             repo_root=tmp_path,
             server_id="test",
         )
+        s.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
         return s
 
     def test_no_pid_file(self, tmp_path):
@@ -341,8 +339,6 @@ class TestServerStartNewProcess:
 class TestServerStop:
     def _make_server(self, tmp_path):
         sc = ServerConfig.from_dict({"hfModels": {}, "flags": []})
-        lock_dir = tmp_path / "locks" / "test"
-        lock_dir.mkdir(parents=True, exist_ok=True)
         s = Server(
             config=sc,
             models_dir=tmp_path / "models",
@@ -352,6 +348,7 @@ class TestServerStop:
             repo_root=tmp_path,
             server_id="test",
         )
+        s.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
         return s
 
     def test_full_cleanup_on_refcount_zero(self, tmp_path):
@@ -389,9 +386,7 @@ class TestServerStop:
 class TestServerSocatCleanup:
     def _make_server(self, tmp_path):
         sc = ServerConfig.from_dict({"hfModels": {}, "flags": []})
-        lock_dir = tmp_path / "locks" / "test"
-        lock_dir.mkdir(parents=True, exist_ok=True)
-        return Server(
+        s = Server(
             config=sc,
             models_dir=tmp_path / "models",
             llama_bin="/usr/bin/llama-server",
@@ -400,6 +395,8 @@ class TestServerSocatCleanup:
             repo_root=tmp_path,
             server_id="test",
         )
+        s.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
+        return s
 
     def test_read_socat_pid_three_line_file(self, tmp_path):
         s = self._make_server(tmp_path)
@@ -440,3 +437,68 @@ class TestServerSocatCleanup:
 
         # only llama (if any) — never a socat pid 222-style reap for a blank line
         assert all(call.args[0] != "" for call in mock_stop.call_args_list)
+
+
+# ---------------------------------------------------------------------------
+# ConfigFingerprint (same-name / different-serverCustomParameters isolation)
+# ---------------------------------------------------------------------------
+
+
+class TestConfigFingerprint:
+    def _server(self, tmp_path, sc, server_id="local-gemma"):
+        return Server(
+            config=sc,
+            models_dir=tmp_path / "models",
+            llama_bin="/usr/bin/llama-server",
+            bridge_interface="bridge100",
+            lock_dir=tmp_path / "locks",
+            repo_root=tmp_path,
+            server_id=server_id,
+        )
+
+    def test_same_name_same_config_shares_identity(self, tmp_path):
+        a = self._server(tmp_path, ServerConfig.from_dict({"hfModels": {}, "flags": ["--ctx-size", "4096"]}))
+        b = self._server(tmp_path, ServerConfig.from_dict({"hfModels": {}, "flags": ["--ctx-size", "4096"]}))
+        assert a.instance_key == b.instance_key
+        assert a.paths["lock_dir"] == b.paths["lock_dir"]
+
+    def test_same_name_different_config_separates(self, tmp_path):
+        a = self._server(tmp_path, ServerConfig.from_dict({"hfModels": {}, "flags": ["--ctx-size", "4096"]}))
+        b = self._server(tmp_path, ServerConfig.from_dict({"hfModels": {}, "flags": ["--ctx-size", "8192"]}))
+        assert a.instance_key != b.instance_key
+        assert a.paths["lock_dir"] != b.paths["lock_dir"]
+        assert a.paths["log_file"] != b.paths["log_file"]
+
+    def test_flag_order_is_significant(self, tmp_path):
+        a = self._server(tmp_path, ServerConfig.from_dict({"hfModels": {}, "flags": ["--a", "--b"]}))
+        b = self._server(tmp_path, ServerConfig.from_dict({"hfModels": {}, "flags": ["--b", "--a"]}))
+        assert a.instance_key != b.instance_key
+
+    def test_model_file_change_separates(self, tmp_path):
+        base = {"fileFlag": "--model", "repo": "o/r", "dir": "d", "additionalServerFlags": [], "sha256": None}
+        a = self._server(
+            tmp_path, ServerConfig(hf_models={"main": ModelConfig.from_dict({**base, "file": "a.gguf"})}, flags=[])
+        )
+        b = self._server(
+            tmp_path, ServerConfig(hf_models={"main": ModelConfig.from_dict({**base, "file": "b.gguf"})}, flags=[])
+        )
+        assert a.instance_key != b.instance_key
+
+    def test_instance_key_starts_with_server_id(self, tmp_path):
+        a = self._server(tmp_path, ServerConfig.from_dict({"hfModels": {}, "flags": []}))
+        assert a.instance_key.startswith("local-gemma-")
+
+    def test_alias_uses_plain_server_id_not_instance_key(self, tmp_path):
+        mc = ModelConfig.from_dict(
+            {
+                "fileFlag": "--model",
+                "repo": "o/r",
+                "file": "m.gguf",
+                "dir": "d",
+                "additionalServerFlags": [],
+                "sha256": None,
+            }
+        )
+        s = self._server(tmp_path, ServerConfig(hf_models={"main": mc}, flags=[]))
+        flags = s._get_server_flags()
+        assert flags[flags.index("--alias") + 1] == "local-gemma"

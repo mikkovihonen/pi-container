@@ -7,7 +7,7 @@ import sys
 from coverage import Coverage
 from coverage.exceptions import NoDataError
 
-OUTPUT_DIR = "badges"
+OUTPUT_DIR = os.path.join("docs", "assets")
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "coverage.svg")
 
 # Shields.io-style badge dimensions (3/5 label, 2/5 value)

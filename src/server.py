@@ -6,6 +6,7 @@ sys.dont_write_bytecode = True
 
 import contextlib
 import fcntl
+import hashlib
 import json
 import logging
 import os
@@ -23,6 +24,35 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _config_fingerprint(config: ServerConfig) -> str:
+    """Stable short hash of a server's ``serverCustomParameters``.
+
+    A llama-server is a host resource shared across projects, keyed by provider
+    name. But two projects can define the *same* provider name with *different*
+    ``serverCustomParameters`` (model files, flags). Folding this fingerprint into
+    the sharing identity means identical configs share one process (RAM-efficient)
+    while divergent ones get their own — so a project never silently attaches to a
+    server running a different model. ``flags`` order is preserved (it is
+    significant to llama-server); model labels are sorted for determinism.
+    """
+    payload = {
+        "flags": [str(f) for f in config.flags],
+        "models": {
+            label: {
+                "file_flag": m.file_flag,
+                "repo": m.repo,
+                "file": m.file,
+                "directory": str(m.directory),
+                "additional_server_flags": [str(f) for f in m.additional_server_flags],
+                "sha256": m.sha256,
+            }
+            for label, m in sorted(config.hf_models.items())
+        },
+    }
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode()).hexdigest()[:10]
 
 
 class Server:
@@ -55,13 +85,20 @@ class Server:
         self.socat_process: subprocess.Popen | None = None
         self.models: dict[str, Model] = {}
 
-        server_lock_dir: Path = self.lock_dir / self.server_id
+        # Sharing identity: provider name + a fingerprint of its config. Same
+        # name + same config across projects → one shared llama-server; same name
+        # + different config → separate servers (no silent wrong-model sharing).
+        # The ``--alias`` the agent talks to stays ``server_id`` (see
+        # ``_get_server_flags``) so model ids in requests are unaffected.
+        self.instance_key: str = f"{self.server_id}-{_config_fingerprint(config)}"
+
+        server_lock_dir: Path = self.lock_dir / self.instance_key
         self.paths: dict[str, Path] = {
             "lock_dir": server_lock_dir,
             "ref_count_lock": server_lock_dir / ".llama_server_refcount.lock",
             "ref_count_file": server_lock_dir / ".llama_server_refcount",
             "pid_file": server_lock_dir / ".llama_server.pid",
-            "log_file": self.repo_root / "llama-server" / "logs" / self.server_id / "llama-server.log",
+            "log_file": self.repo_root / "llama-server" / "logs" / self.instance_key / "llama-server.log",
         }
 
         for label, model_config in self.config.hf_models.items():

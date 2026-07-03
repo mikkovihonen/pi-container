@@ -44,6 +44,5 @@ pi-coding-agent-proxy/.locks/**
 .pi-container/exports/
 .pi-container/agent/sessions/
 
-# Generated badges (committed by CI)
-badges/
-badges/**
+# Generated coverage badge (committed by CI)
+docs/assets/coverage.svg
