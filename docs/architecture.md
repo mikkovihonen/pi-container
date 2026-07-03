@@ -61,7 +61,7 @@ flowchart TB
     llama_net --> host
 ```
 
-The proxy's iptables rules enforce a **default-deny** forward policy — HTTP, HTTPS, and DNS from the agent are intercepted by mitmproxy (via `REDIRECT` to ports 8080/5353, bypassing the `FORWARD` chain entirely). Every other protocol is **denied by default**; opt-in forwarding (`PROXY_ALLOW_SSH`, `PROXY_ALLOW_SMTP`, `PROXY_ALLOW_GIT`, `PROXY_ALLOW_NTP`, custom TCP/UDP ports) uses plain NAT and is **not inspected** by mitmproxy. The `isolated-net` is created with `--internal` (no external gateway), so the agent has no route to the internet except the default route and DNS pointed at the proxy.
+The proxy's iptables rules enforce a **default-deny** forward policy — HTTP, HTTPS, and DNS from the agent are intercepted by mitmproxy (via `REDIRECT` to ports 8080/5353, bypassing the `FORWARD` chain entirely). Every other protocol is **denied by default**; opt-in forwarding (per-project `.pi-container/egress.yaml` — ssh/smtp/git/ntp + custom TCP/UDP ports) uses plain NAT and is **not inspected** by mitmproxy. The `isolated-net` is created with `--internal` (no external gateway), so the agent has no route to the internet except the default route and DNS pointed at the proxy.
 
 By default the whole stack is **IPv4-only**: the isolated network has no IPv6 subnet and both containers disable IPv6 (via sysctl) so no agent traffic can escape the transparent-proxy REDIRECT over v6. Set `IPV6_ENABLED=true` in `.env` to create the network with an IPv6 subnet (`--ipv6` for podman/docker, `--subnet-v6` for Apple `container`), mirror the proxy's REDIRECT/NAT/FORWARD rules in `ip6tables`, and give the agent an IPv6 default route through the proxy. This requires the container runtime **and** host to actually have IPv6 egress. Apple `container`'s `vmnet` networking NATs IPv4 only — a container gets no global IPv6 address or v6 route (verified) — so enabling it there logs a warning and v6 connections still fail. It is intended for **Linux hosts running podman/docker with working host IPv6**; leave it `false` on macOS.
 
@@ -71,20 +71,26 @@ By default the whole stack is **IPv4-only**: the isolated network has no IPv6 su
 Only **HTTP, HTTPS and DNS** are intercepted by mitmproxy (and subject to the
 allowlist / token redaction). Every other protocol is **denied by default** —
 the proxy's `iptables` `FORWARD` chain policy is `DROP`. The `llama-server` API
-is permitted explicitly. To let the agent use another protocol (uninspected,
-plain NAT), enable it in `.env`:
+is permitted explicitly. The egress policy is **per-project**: to let the agent
+use another protocol (uninspected, plain NAT), opt it in via this workspace's
+`.pi-container/egress.yaml` (seeded from a deny-all template on first run):
 
-| Variable | Opens |
-|----------|-------|
-| `PROXY_ALLOW_SSH` | TCP 22 (e.g. git over SSH) |
-| `PROXY_ALLOW_SMTP` | TCP 25, 465, 587 |
-| `PROXY_ALLOW_GIT` | TCP 9418 (`git://`) |
-| `PROXY_ALLOW_NTP` | UDP 123 |
-| `PROXY_ALLOW_TCP_PORTS` | arbitrary TCP ports (comma-separated) |
-| `PROXY_ALLOW_UDP_PORTS` | arbitrary UDP ports (comma-separated) |
+```yaml
+# .pi-container/egress.yaml
+allow:
+  ssh: false            # TCP 22 (e.g. git over SSH)
+  smtp: false           # TCP 25, 465, 587
+  git: false            # TCP 9418 (git://)
+  ntp: false            # UDP 123
+  tcp_ports: []         # arbitrary extra TCP ports, e.g. [2222, 8443]
+  udp_ports: []         # arbitrary extra UDP ports, e.g. [51820]
+```
 
-> **Note:** protocols enabled via `PROXY_ALLOW_*` are forwarded **uninspected** —
-> mitmproxy and the allowlist do not see them.
+`run.py` reads this file and passes the corresponding `PROXY_ALLOW_*` values into
+that project's proxy container, whose entrypoint opens the matching FORWARD rules.
+
+> **Note:** protocols opted in here are forwarded **uninspected** — mitmproxy and
+> the allowlist do not see them.
 
 ## Project Structure
 
@@ -127,7 +133,9 @@ plain NAT), enable it in `.env`:
 │       │   └── .pi_ignore
 │       ├── allowlist.yaml            # Generic hostname allowlist (pypi/npm/github/apt)
 │       ├── token_replacer.yaml       # Generic token-redaction config
-│       └── tmpfs.yaml                # Empty tmpfs template (paths: [])
+│       ├── tmpfs.yaml                # Empty tmpfs template (paths: [])
+│       ├── flow_export.yaml          # Flow-export toggle template (enabled: false)
+│       └── egress.yaml               # Proxy egress policy template (deny-all)
 │
 ├── pi-coding-agent-proxy/            # Transparent proxy container
 │   ├── Containerfile                 # mitmproxy + addon scripts/configs + pyyaml
@@ -153,5 +161,7 @@ plain NAT), enable it in `.env`:
     ├── token_replacer.yaml           # Token redaction rules (mounted into this project's proxy)
     ├── allowlist.yaml                # Hostname allowlist (mounted into this project's proxy)
     ├── tmpfs.yaml                    # Transient tmpfs mount paths (volatile RAM disks)
+    ├── flow_export.yaml              # Per-project mitmweb flow-export toggle (enabled: true|false)
+    ├── egress.yaml                   # Per-project proxy egress policy (opt-in non-HTTP protocols)
     └── exports/                      # Captured flow history for this project (gitignored)
 ```

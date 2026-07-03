@@ -23,14 +23,18 @@ from config import (
     IPV6_ENABLED,
     LLAMA_BIN,
     LLAMA_SERVER_LOCK_DIR,
-    MITMWEB_FLOW_EXPORT_ENABLED,
     MODELS_DIR,
     PROJECT_DIR,
     PROXY_UPSTREAM_NETWORK_ENV,
     REPO_ROOT,
 )
 from models import Model, ModelConfig, ServerConfig  # noqa: F401  (re-exported for callers/tests)
-from network import ContainerNetworkManager, scan_config_env_refs, scan_tmpfs_paths  # noqa: F401
+from network import (  # noqa: F401
+    ContainerNetworkManager,
+    read_flow_export_enabled,
+    scan_config_env_refs,
+    scan_tmpfs_paths,
+)
 from runtimes import ContainerRuntime
 from server import Server
 from util import (
@@ -405,7 +409,7 @@ def _init_runtime() -> None:
 # list. The tmpfs template ships empty on purpose — seeding the repo's own list
 # (which references pi-container-internal paths) would create those dirs in every
 # foreign workspace.
-_PROJECT_CONFIG_FILES = ("allowlist.yaml", "token_replacer.yaml", "tmpfs.yaml")
+_PROJECT_CONFIG_FILES = ("allowlist.yaml", "token_replacer.yaml", "tmpfs.yaml", "flow_export.yaml", "egress.yaml")
 
 
 def _project_scope(project_dir: Path) -> tuple[str, str]:
@@ -460,6 +464,9 @@ def main() -> None:
     if not config_path.exists():
         logger.error(f"Config file not found: {config_path}")
         sys.exit(1)
+
+    # Per-project mitmweb flow-export toggle (.pi-container/flow_export.yaml).
+    flow_export_enabled = read_flow_export_enabled(PROJECT_DIR / ".pi-container")
 
     with config_path.open("r") as file:
         data = json.load(file)
@@ -631,7 +638,7 @@ def main() -> None:
                 ip_holder: dict[str, list[str]] = {}
                 ip_stop = threading.Event()
                 ip_thread: threading.Thread | None = None
-                if MITMWEB_FLOW_EXPORT_ENABLED:
+                if flow_export_enabled:
 
                     def _discover_agent_ips() -> None:
                         ips = _poll_agent_container_ips(CONTAINER_RUNTIME, agent_container_name, ip_stop)
@@ -647,7 +654,7 @@ def main() -> None:
                 # addon appends per-client-IP files as flows complete; run.py reads
                 # this agent's file(s) here (after it exits, before the
                 # ContainerNetworkManager context exits and stops the proxy).
-                if MITMWEB_FLOW_EXPORT_ENABLED:
+                if flow_export_enabled:
                     ip_stop.set()
                     if ip_thread is not None:
                         ip_thread.join(timeout=2)

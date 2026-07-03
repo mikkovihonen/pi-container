@@ -29,7 +29,6 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 | `MAX_STARTUP_ATTEMPTS` | Number of llama-server startup attempts per model | `2` |
 | `CONTAINER_RUNTIME` | Container CLI to use (`container`, `docker`, or `podman`) | Auto-detected (prefers `container` > `docker` > `podman`) |
 | `IPV6_ENABLED` | Whether the network stack supports IPv6. When `false`, IPv6 is explicitly disabled across both containers; when `true`, the isolated network gets an IPv6 subnet and the proxy mirrors its rules in `ip6tables` (requires runtime + host v6 egress) | `false` |
-| `PROXY_ALLOW_SSH`, `PROXY_ALLOW_SMTP`, `PROXY_ALLOW_GIT`, `PROXY_ALLOW_NTP`, `PROXY_ALLOW_TCP_PORTS`, `PROXY_ALLOW_UDP_PORTS` | Opt-in egress for uninspected non-HTTP protocols (see [Proxy egress policy](architecture.md#proxy-egress-policy)) | unset (denied) |
 
 `BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` are derived from `CONTAINER_RUNTIME` and rarely need setting; provide them only to override the per-runtime default for your host.
 
@@ -37,7 +36,7 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 
 ### Introduction
 
-When launched, pi-container looks for workspace-specific overrides in `./.pi-container` and package dependencies in the directory it's launched in. Each workspace gets its own agent config, proxy, isolated network, allowlist, token-replacer config, tmpfs list, and flow-export directory — all under that workspace's `.pi-container/` (seeded from the `pi-coding-agent/default/` template on first run).
+When launched, pi-container looks for workspace-specific overrides in `./.pi-container` and package dependencies in the directory it's launched in. Each workspace gets its own agent config, proxy, isolated network, allowlist, token-replacer config, tmpfs list, flow-export toggle, egress policy, and flow-export directory — all under that workspace's `.pi-container/` (seeded from the `pi-coding-agent/default/` template on first run).
 
 ### APT dependencies
 
@@ -87,11 +86,39 @@ Each path is mounted at the same absolute location inside the container. On podm
 
 Paths are validated on startup — invalid paths are silently skipped. The list is deduplicated and sorted for deterministic output.
 
+### Flow export
+
+The `flow_export.yaml` config in `.pi-container/` toggles whether the proxy's captured HTTP/HTTPS flow history for this workspace is exported after the agent shuts down. It is **per-project** (seeded from a template on first run, defaulting to disabled):
+
+```yaml
+# .pi-container/flow_export.yaml
+enabled: true
+```
+
+When `enabled: true`, `run.py` reads the flows the proxy staged for this session and writes a merged snapshot bucketed by UTC date under `.pi-container/exports/flows/<YYYY-MM-DD>/<HH-MM-SS-mmm>_<session-id>.json`. When the file is absent or malformed, export is **off** (fail-safe). The export contains full request/response bodies and headers — see [Version control](#version-control-gitignore) for why `.pi-container/exports/` must never be committed.
+
+### Egress policy
+
+The `egress.yaml` config in `.pi-container/` is the **per-project** proxy egress policy. Only HTTP/HTTPS/DNS are intercepted by mitmproxy; every other protocol is denied by default. Opt a protocol in here to let the agent use it — but note these are forwarded **uninspected** (plain NAT); mitmproxy and the allowlist do not see them.
+
+```yaml
+# .pi-container/egress.yaml
+allow:
+  ssh: false            # TCP 22 (e.g. git over SSH)
+  smtp: false           # TCP 25, 465, 587
+  git: false            # TCP 9418 (git://)
+  ntp: false            # UDP 123
+  tcp_ports: []         # arbitrary extra TCP ports, e.g. [2222, 8443]
+  udp_ports: []         # arbitrary extra UDP ports, e.g. [51820]
+```
+
+`run.py` translates truthy flags and non-empty port lists into the proxy container's `PROXY_ALLOW_*` env vars, which its entrypoint uses to open the matching `iptables` FORWARD rules. An absent or malformed file means **deny-all** (fail-safe). See [Proxy egress policy](architecture.md#proxy-egress-policy) for the full protocol/port reference.
+
 ### Version control (.gitignore)
 
 A ready-to-copy [`.gitignore.example`](../.gitignore.example) lists every entry a workspace needs. Copy the relevant lines into your project's `.gitignore`.
 
-Most of `.pi-container/` is project configuration you **should commit** so the environment is reproducible: `allowlist.yaml`, `token_replacer.yaml`, `tmpfs.yaml`, and `dependencies/apt/packages.txt`. (`token_replacer.yaml` holds only `${ENV:VAR}` references, never resolved secrets — see [Token Replacer Secrets](#token-replacer-secrets).)
+Most of `.pi-container/` is project configuration you **should commit** so the environment is reproducible: `allowlist.yaml`, `token_replacer.yaml`, `tmpfs.yaml`, `flow_export.yaml`, `egress.yaml`, and `dependencies/apt/packages.txt`. (`token_replacer.yaml` holds only `${ENV:VAR}` references, never resolved secrets — see [Token Replacer Secrets](#token-replacer-secrets).)
 
 The one directory you **must ignore** is the flow-export output:
 

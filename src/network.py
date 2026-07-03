@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from config import ADMIN_PASSWORD, CONFIG_DIR, PROXY_FORWARD_ENV, REPO_ROOT
+from config import ADMIN_PASSWORD, CONFIG_DIR, REPO_ROOT
 from runtimes import ContainerRuntime
 from util import run_quiet
 
@@ -55,6 +55,100 @@ def scan_tmpfs_paths(config_dir: Path | None = None) -> list[str]:
     paths = config.get("paths", []) or []
     # Deduplicate and sort for deterministic output
     return sorted({str(p) for p in paths})
+
+
+def read_flow_export_enabled(config_dir: Path | None = None, default: bool = False) -> bool:
+    """Read the per-project mitmweb flow-export toggle.
+
+    Reads the ``enabled`` flag from ``.pi-container/flow_export.yaml``. When
+    enabled, the proxy's captured HTTP/HTTPS flow history is exported (bucketed by
+    UTC date) under ``.pi-container/exports/`` after the agent shuts down. This is
+    per-project so each workspace decides whether to keep an audit trail.
+
+    Returns ``default`` when the file is absent or malformed (fail-safe: no
+    capture unless a workspace opts in).
+    """
+    import yaml as _yaml
+
+    config_path = (config_dir or CONFIG_DIR) / "flow_export.yaml"
+    if not config_path.exists():
+        logger.debug(f"Flow-export config not found at {config_path}; defaulting to enabled={default}.")
+        return default
+
+    try:
+        with config_path.open("r") as f:
+            config = _yaml.safe_load(f) or {}
+    except (OSError, _yaml.YAMLError) as e:
+        logger.warning(f"Could not read flow-export config {config_path}: {e}; defaulting to enabled={default}.")
+        return default
+
+    return bool(config.get("enabled", default))
+
+
+# Proxy egress policy: YAML key under ``allow:`` → the ``PROXY_ALLOW_*`` env var
+# the proxy entrypoint reads to open that protocol's (uninspected) FORWARD rule.
+_PROXY_FORWARD_FLAGS = {
+    "ssh": "PROXY_ALLOW_SSH",
+    "smtp": "PROXY_ALLOW_SMTP",
+    "git": "PROXY_ALLOW_GIT",
+    "ntp": "PROXY_ALLOW_NTP",
+}
+_PROXY_FORWARD_PORTS = {
+    "tcp_ports": "PROXY_ALLOW_TCP_PORTS",
+    "udp_ports": "PROXY_ALLOW_UDP_PORTS",
+}
+
+
+def _egress_truthy(value: object) -> bool:
+    """Match the proxy entrypoint's truthiness (true/1/yes/on), YAML bools included."""
+    return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+
+def read_proxy_forward_env(config_dir: Path | None = None) -> dict[str, str]:
+    """Read the per-project proxy egress policy into ``PROXY_ALLOW_*`` env vars.
+
+    Reads ``.pi-container/egress.yaml`` and returns the env dict passed to the
+    proxy container, whose entrypoint opens the corresponding (UNINSPECTED)
+    FORWARD rules. Only HTTP/HTTPS/DNS are intercepted by mitmproxy; every other
+    protocol is denied by default, so an absent/empty file yields ``{}`` (deny).
+
+    Expected shape::
+
+        allow:
+          ssh: true            # → PROXY_ALLOW_SSH=true
+          smtp: false
+          git: false
+          ntp: false
+          tcp_ports: [2222]    # → PROXY_ALLOW_TCP_PORTS=2222
+          udp_ports: []
+
+    Ports accept a list or a comma-separated string. Only truthy flags and
+    non-empty port lists are emitted.
+    """
+    import yaml as _yaml
+
+    config_path = (config_dir or CONFIG_DIR) / "egress.yaml"
+    if not config_path.exists():
+        return {}
+
+    try:
+        with config_path.open("r") as f:
+            config = _yaml.safe_load(f) or {}
+    except (OSError, _yaml.YAMLError) as e:
+        logger.warning(f"Could not read egress config {config_path}: {e}; defaulting to deny-all.")
+        return {}
+
+    allow = config.get("allow") or {}
+    env: dict[str, str] = {}
+    for key, var in _PROXY_FORWARD_FLAGS.items():
+        if _egress_truthy(allow.get(key)):
+            env[var] = "true"
+    for key, var in _PROXY_FORWARD_PORTS.items():
+        ports = allow.get(key) or []
+        joined = ports.strip() if isinstance(ports, str) else ",".join(str(p).strip() for p in ports if str(p).strip())
+        if joined:
+            env[var] = joined
+    return env
 
 
 # ─── Token Replacer Config Scanner (duplicated from pi-coding-agent-proxy/addons/token_replacer)
@@ -369,8 +463,9 @@ class ContainerNetworkManager:
             f"ADMIN_PASSWORD={ADMIN_PASSWORD}",
             *(["--env", f"LLAMA_PORTS={self.llama_ports}"] if self.llama_ports else []),
             *(["--env", f"LLAMA_HOST_ADDR={llama_host_addr}"] if llama_host_addr else []),
-            # Per-protocol forwarding opt-ins (uninspected protocols).
-            *[flag for k, v in PROXY_FORWARD_ENV.items() for flag in ("--env", f"{k}={v}")],
+            # Per-protocol forwarding opt-ins (uninspected protocols), read from
+            # this project's .pi-container/egress.yaml.
+            *[flag for k, v in read_proxy_forward_env(self.config_dir).items() for flag in ("--env", f"{k}={v}")],
             *config_mounts,
             *exports_mounts,
             *self._env_flags(secrets),

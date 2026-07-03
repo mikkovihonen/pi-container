@@ -1,0 +1,13 @@
+# Proxy egress policy (per-project).
+#
+# Only HTTP/HTTPS/DNS are intercepted by mitmproxy (and subject to the
+# allowlist / token redaction). Every OTHER protocol is denied by default.
+# Opt a protocol in below to let the agent use it — but note these are
+# forwarded UNINSPECTED (plain NAT); mitmproxy and the allowlist do not see them.
+allow:
+  ssh: false            # TCP 22 (e.g. git over SSH)
+  smtp: false           # TCP 25, 465, 587
+  git: false            # TCP 9418 (git:// protocol)
+  ntp: false            # UDP 123 (time sync)
+  tcp_ports: []         # arbitrary extra TCP ports, e.g. [2222, 8443]
+  udp_ports: []         # arbitrary extra UDP ports, e.g. [51820]
