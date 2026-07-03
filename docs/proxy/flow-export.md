@@ -1,10 +1,12 @@
 # Flow Export Proxy Addon
 
+[← Documentation index](../../README.md) · [Proxy overview](overview.md) · [Allowlist](allowlist.md) · [Token replacer](token-replacer.md) · [Addon development](addon-development.md)
+
 ## Design Document
 
 ### Overview
 
-This mitmproxy addon records every HTTP/HTTPS flow that passes through the transparent proxy during a pi coding agent session, **appending each flow to a [JSON Lines](https://jsonlines.org/) file as it completes** (one flow per line), **partitioned by client IP** into `flows-<client-ip>.jsonl`. This provides an **audit trail** of all network traffic the agent generated — including traffic the [allowlist](../allowlist/) blocked — attributable to the agent container it came from.
+This mitmproxy addon records every HTTP/HTTPS flow that passes through the transparent proxy during a pi coding agent session, **appending each flow to a [JSON Lines](https://jsonlines.org/) file as it completes** (one flow per line), **partitioned by client IP** into `flows-<client-ip>.jsonl`. This provides an **audit trail** of all network traffic the agent generated — including traffic the [allowlist](allowlist.md) blocked — attributable to the agent container it came from.
 
 The files are written to a shared volume mount so `run.py` can read them on the host after the session ends.
 
@@ -94,7 +96,7 @@ Notes on serialization:
 - **`content`** is decoded as UTF-8 with `errors="replace"`; non-decodable bytes become the Unicode replacement character rather than failing the write. There is no size cap — large bodies are written in full.
 - Appending is **best-effort**: any failure in `_append` is caught and logged as a warning so a serialization or I/O problem never disrupts the proxied request.
 
-> **Security note:** the export contains full request/response bodies and headers, including any `Authorization` / cookie values that the [token_replacer](../token_replacer/) did **not** redact. Treat `flows-<ip>.jsonl` as sensitive.
+> **Security note:** the export contains full request/response bodies and headers, including any `Authorization` / cookie values that the [token_replacer](token-replacer.md) did **not** redact. Treat `flows-<ip>.jsonl` as sensitive.
 
 ### How It Works
 
@@ -107,9 +109,9 @@ Notes on serialization:
 ### Integration with the Proxy Container
 
 > **In this project the flow_export addon is already wired in and active.** The
-> [Containerfile](../../Containerfile) bakes the script and creates a
+> [Containerfile](../../pi-coding-agent-proxy/Containerfile) bakes the script and creates a
 > `mitmproxy`-owned `/home/mitmproxy/exports` directory, and the
-> [entrypoint](../../entrypoint.sh) loads it with `-s`. `run.py` mounts the host
+> [entrypoint](../../pi-coding-agent-proxy/entrypoint.sh) loads it with `-s`. `run.py` mounts the host
 > export directory over `/home/mitmproxy/exports`. It names each run's agent
 > container `pi-coding-agent-<run-id>`, looks up that container's isolated-net
 > IPs (IPv4 **and** IPv6), and after the agent exits reads and merges the
@@ -163,4 +165,4 @@ FLOW_EXPORT_DIR=/home/mitmproxy/exports mitmweb ...
 - **`run.py` exports an empty snapshot** — it couldn't determine the agent container's IP (and either zero or >1 flow files were present, so it couldn't guess). Confirm the agent container came up with an isolated-net address.
 - **Permission denied** — the `mitmproxy` user must own (or be able to write to) `FLOW_EXPORT_DIR`.
 - **A truncated last line** — expected if the proxy was killed mid-write. Consumers should skip unparseable lines (`run.py`'s reader does).
-- **No hooks fire / no `addons` list** — the script must define `addons = [addon]` at module level; without it the module imports but its hooks are never registered. See the [addon guide](../README.md#required-module-level-addons-list).
+- **No hooks fire / no `addons` list** — the script must define `addons = [addon]` at module level; without it the module imports but its hooks are never registered. See the [addon guide](addon-development.md#required-module-level-addons-list).

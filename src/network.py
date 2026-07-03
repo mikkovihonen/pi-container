@@ -8,6 +8,7 @@ import fcntl
 import logging
 import os
 import re
+import socket
 import subprocess
 import time
 import urllib.error
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from config import ADMIN_PASSWORD, CONFIG_DIR, PROXY_FORWARD_ENV, REPO_ROOT
+from config import ADMIN_PASSWORD, CONFIG_DIR, REPO_ROOT
 from runtimes import ContainerRuntime
 from util import run_quiet
 
@@ -56,6 +57,100 @@ def scan_tmpfs_paths(config_dir: Path | None = None) -> list[str]:
     return sorted({str(p) for p in paths})
 
 
+def read_flow_export_enabled(config_dir: Path | None = None, default: bool = False) -> bool:
+    """Read the per-project mitmweb flow-export toggle.
+
+    Reads the ``enabled`` flag from ``.pi-container/flow_export.yaml``. When
+    enabled, the proxy's captured HTTP/HTTPS flow history is exported (bucketed by
+    UTC date) under ``.pi-container/exports/`` after the agent shuts down. This is
+    per-project so each workspace decides whether to keep an audit trail.
+
+    Returns ``default`` when the file is absent or malformed (fail-safe: no
+    capture unless a workspace opts in).
+    """
+    import yaml as _yaml
+
+    config_path = (config_dir or CONFIG_DIR) / "flow_export.yaml"
+    if not config_path.exists():
+        logger.debug(f"Flow-export config not found at {config_path}; defaulting to enabled={default}.")
+        return default
+
+    try:
+        with config_path.open("r") as f:
+            config = _yaml.safe_load(f) or {}
+    except (OSError, _yaml.YAMLError) as e:
+        logger.warning(f"Could not read flow-export config {config_path}: {e}; defaulting to enabled={default}.")
+        return default
+
+    return bool(config.get("enabled", default))
+
+
+# Proxy egress policy: YAML key under ``allow:`` → the ``PROXY_ALLOW_*`` env var
+# the proxy entrypoint reads to open that protocol's (uninspected) FORWARD rule.
+_PROXY_FORWARD_FLAGS = {
+    "ssh": "PROXY_ALLOW_SSH",
+    "smtp": "PROXY_ALLOW_SMTP",
+    "git": "PROXY_ALLOW_GIT",
+    "ntp": "PROXY_ALLOW_NTP",
+}
+_PROXY_FORWARD_PORTS = {
+    "tcp_ports": "PROXY_ALLOW_TCP_PORTS",
+    "udp_ports": "PROXY_ALLOW_UDP_PORTS",
+}
+
+
+def _egress_truthy(value: object) -> bool:
+    """Match the proxy entrypoint's truthiness (true/1/yes/on), YAML bools included."""
+    return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+
+def read_proxy_forward_env(config_dir: Path | None = None) -> dict[str, str]:
+    """Read the per-project proxy egress policy into ``PROXY_ALLOW_*`` env vars.
+
+    Reads ``.pi-container/egress.yaml`` and returns the env dict passed to the
+    proxy container, whose entrypoint opens the corresponding (UNINSPECTED)
+    FORWARD rules. Only HTTP/HTTPS/DNS are intercepted by mitmproxy; every other
+    protocol is denied by default, so an absent/empty file yields ``{}`` (deny).
+
+    Expected shape::
+
+        allow:
+          ssh: true            # → PROXY_ALLOW_SSH=true
+          smtp: false
+          git: false
+          ntp: false
+          tcp_ports: [2222]    # → PROXY_ALLOW_TCP_PORTS=2222
+          udp_ports: []
+
+    Ports accept a list or a comma-separated string. Only truthy flags and
+    non-empty port lists are emitted.
+    """
+    import yaml as _yaml
+
+    config_path = (config_dir or CONFIG_DIR) / "egress.yaml"
+    if not config_path.exists():
+        return {}
+
+    try:
+        with config_path.open("r") as f:
+            config = _yaml.safe_load(f) or {}
+    except (OSError, _yaml.YAMLError) as e:
+        logger.warning(f"Could not read egress config {config_path}: {e}; defaulting to deny-all.")
+        return {}
+
+    allow = config.get("allow") or {}
+    env: dict[str, str] = {}
+    for key, var in _PROXY_FORWARD_FLAGS.items():
+        if _egress_truthy(allow.get(key)):
+            env[var] = "true"
+    for key, var in _PROXY_FORWARD_PORTS.items():
+        ports = allow.get(key) or []
+        joined = ports.strip() if isinstance(ports, str) else ",".join(str(p).strip() for p in ports if str(p).strip())
+        if joined:
+            env[var] = joined
+    return env
+
+
 # ─── Token Replacer Config Scanner (duplicated from pi-coding-agent-proxy/addons/token_replacer)
 #
 # run.py lives outside pi-coding-agent-proxy and must not import from it.
@@ -92,6 +187,19 @@ def scan_config_env_refs(config: dict) -> list[str]:
     return sorted(refs)
 
 
+def _find_free_port() -> int:
+    """Ask the OS for a currently-free TCP port on the loopback interface.
+
+    Used to publish each per-project proxy's mitmweb UI on its own host port so
+    multiple projects' proxies can run at once (the old fixed 8081 is a singleton).
+    There is a small TOCTOU window between closing the socket and the runtime
+    binding the port; acceptable for a local dev UI.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 # ─── Container Network Manager ───────────────────────────────────────────
 
 
@@ -119,13 +227,20 @@ class ContainerNetworkManager:
         self.config_dir: Path = config_dir or CONFIG_DIR
         self.llama_ports: str | None = llama_ports
         self.ipv6: bool = ipv6
+        # Host port the proxy's mitmweb UI is published on. Auto-assigned when
+        # this process starts the proxy; resolved from the running container when
+        # attaching to an already-running one. See ``mitmweb_url``.
+        self.mitmweb_port: int | None = None
 
-        # Shared directory for synchronization across different run.py processes
+        # Directory for cross-process synchronization. Kept under the repo (not a
+        # user workspace) so lock files never pollute projects. The proxy is
+        # per-project, so refcount files are keyed by proxy_name — each workspace
+        # refcounts (and tears down) its own proxy independently.
         self.lock_dir: Path = REPO_ROOT / "pi-coding-agent-proxy" / ".locks"
         self.paths: dict[str, Path] = {
             "lock_dir": self.lock_dir,
-            "ref_count_lock": self.lock_dir / ".network_manager.lock",
-            "ref_count_file": self.lock_dir / ".network_manager.refcount",
+            "ref_count_lock": self.lock_dir / f".{self.proxy_name}.lock",
+            "ref_count_file": self.lock_dir / f".{self.proxy_name}.refcount",
         }
 
     def _pull_secrets_from_config(self) -> dict[str, str]:
@@ -291,6 +406,10 @@ class ContainerNetworkManager:
         logger.info(f"Starting proxy container {self.proxy_name} from {self.proxy_image}...")
         llama_host_addr = self.runtime.resolve_llama_host_addr(self.proxy_image)
 
+        # Publish the mitmweb UI on an auto-assigned host port so multiple
+        # per-project proxies can coexist (the old fixed 8081 could bind once).
+        self.mitmweb_port = _find_free_port()
+
         # Mount the host addon configs over the image's baked defaults. Each is
         # only mounted if present so a missing host config falls back to the
         # (fail-closed) default baked into the image.
@@ -312,7 +431,7 @@ class ContainerNetworkManager:
         # must exist first: podman refuses to auto-create a bind-mount source and
         # the container would fail to start (surfacing as a 30s health-probe
         # hang, since the run error → DEVNULL).
-        exports_host_dir = REPO_ROOT / ".pi-container" / "exports"
+        exports_host_dir = self.config_dir / "exports"
         exports_host_dir.mkdir(parents=True, exist_ok=True)
         exports_container_path = "/home/mitmproxy/exports"
         exports_mounts: list[str] = [
@@ -334,7 +453,7 @@ class ContainerNetworkManager:
             "--dns",
             "1.1.1.1",
             "-p",
-            "8081:8081",
+            f"{self.mitmweb_port}:8081",
             # IPv6 policy: --sysctl toggle (VM runtimes) + env flag the proxy
             # entrypoint reads to mirror (or tear down) v6 firewall rules.
             *self.runtime.ipv6_run_args(self.ipv6, forwarding=True),
@@ -344,8 +463,9 @@ class ContainerNetworkManager:
             f"ADMIN_PASSWORD={ADMIN_PASSWORD}",
             *(["--env", f"LLAMA_PORTS={self.llama_ports}"] if self.llama_ports else []),
             *(["--env", f"LLAMA_HOST_ADDR={llama_host_addr}"] if llama_host_addr else []),
-            # Per-protocol forwarding opt-ins (uninspected protocols).
-            *[flag for k, v in PROXY_FORWARD_ENV.items() for flag in ("--env", f"{k}={v}")],
+            # Per-protocol forwarding opt-ins (uninspected protocols), read from
+            # this project's .pi-container/egress.yaml.
+            *[flag for k, v in read_proxy_forward_env(self.config_dir).items() for flag in ("--env", f"{k}={v}")],
             *config_mounts,
             *exports_mounts,
             *self._env_flags(secrets),
@@ -397,7 +517,7 @@ class ContainerNetworkManager:
         Raises:
             RuntimeError: If the proxy does not become healthy within timeout.
         """
-        url = "http://127.0.0.1:8081"
+        url = f"http://127.0.0.1:{self.mitmweb_port}"
         elapsed = 0
         while elapsed < timeout:
             try:
@@ -418,3 +538,36 @@ class ContainerNetworkManager:
             f"Proxy container did not become healthy within {timeout}s. "
             f"Check proxy logs: {self.container_runtime} logs {self.proxy_name}"
         )
+
+    def mitmweb_url(self) -> str | None:
+        """Return the ``http://127.0.0.1:<port>`` URL of this project's mitmweb UI.
+
+        When this process started the proxy, the port is already known. When it
+        merely attached to an already-running proxy (refcount > 0), the port is
+        discovered from the running container. Best-effort: returns None if the
+        port can't be determined.
+        """
+        if self.mitmweb_port is None:
+            self.mitmweb_port = self._query_published_port()
+        return f"http://127.0.0.1:{self.mitmweb_port}" if self.mitmweb_port else None
+
+    def _query_published_port(self) -> int | None:
+        """Resolve the host port the running proxy publishes container port 8081 on.
+
+        Parses ``<runtime> port <proxy_name> 8081/tcp`` (e.g. ``127.0.0.1:49732``
+        or ``0.0.0.0:49732``). Best-effort — returns None on any error or if the
+        runtime does not support the ``port`` subcommand.
+        """
+        try:
+            out = subprocess.run(
+                [self.container_runtime, "port", self.proxy_name, "8081/tcp"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except Exception:
+            return None
+        if out.returncode != 0 or not out.stdout.strip():
+            return None
+        match = re.search(r":(\d+)\s*$", out.stdout.strip().splitlines()[0])
+        return int(match.group(1)) if match else None

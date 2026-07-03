@@ -298,3 +298,147 @@ class TestScanTmpfsPaths:
     def test_nonexistent_dir(self):
         result = scan_tmpfs_paths(Path("/nonexistent"))
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Per-project proxy identity + mitmweb port
+# ---------------------------------------------------------------------------
+
+
+class TestPerProjectProxy:
+    def _make_manager(self, proxy_name):
+        return ContainerNetworkManager(
+            container_runtime="docker",
+            network_name="pi-isolated-net-abc",
+            proxy_image="proxy:latest",
+            proxy_name=proxy_name,
+        )
+
+    def test_refcount_files_keyed_by_proxy_name(self):
+        """Two projects' managers must not share refcount files."""
+        a = self._make_manager("pi-proxy-aaaaaaaaaa")
+        b = self._make_manager("pi-proxy-bbbbbbbbbb")
+        assert a.paths["ref_count_file"] != b.paths["ref_count_file"]
+        assert a.paths["ref_count_lock"] != b.paths["ref_count_lock"]
+        assert "pi-proxy-aaaaaaaaaa" in a.paths["ref_count_file"].name
+        # Lock dir itself is shared (kept out of user workspaces).
+        assert a.paths["lock_dir"] == b.paths["lock_dir"]
+
+    def test_find_free_port_returns_valid_port(self):
+        from network import _find_free_port
+
+        port = _find_free_port()
+        assert isinstance(port, int)
+        assert 1024 <= port <= 65535
+
+    def test_mitmweb_url_uses_known_port(self):
+        mgr = self._make_manager("pi-proxy-aaaaaaaaaa")
+        mgr.mitmweb_port = 49732
+        assert mgr.mitmweb_url() == "http://127.0.0.1:49732"
+
+    def test_mitmweb_url_queries_when_port_unknown(self):
+        mgr = self._make_manager("pi-proxy-aaaaaaaaaa")
+        completed = MagicMock(returncode=0, stdout="127.0.0.1:55001\n")
+        with patch("subprocess.run", return_value=completed):
+            assert mgr.mitmweb_url() == "http://127.0.0.1:55001"
+        assert mgr.mitmweb_port == 55001
+
+    def test_mitmweb_url_none_when_unresolvable(self):
+        mgr = self._make_manager("pi-proxy-aaaaaaaaaa")
+        completed = MagicMock(returncode=1, stdout="")
+        with patch("subprocess.run", return_value=completed):
+            assert mgr.mitmweb_url() is None
+
+
+# ---------------------------------------------------------------------------
+# ReadFlowExportEnabled (per-project flow_export.yaml)
+# ---------------------------------------------------------------------------
+
+
+class TestReadFlowExportEnabled:
+    def _write(self, tmp_path, text):
+        (tmp_path / "flow_export.yaml").write_text(text)
+
+    def test_missing_file_returns_default(self, tmp_path):
+        from network import read_flow_export_enabled
+
+        assert read_flow_export_enabled(tmp_path) is False
+        assert read_flow_export_enabled(tmp_path, default=True) is True
+
+    def test_enabled_true(self, tmp_path):
+        from network import read_flow_export_enabled
+
+        self._write(tmp_path, "enabled: true\n")
+        assert read_flow_export_enabled(tmp_path) is True
+
+    def test_enabled_false(self, tmp_path):
+        from network import read_flow_export_enabled
+
+        self._write(tmp_path, "enabled: false\n")
+        assert read_flow_export_enabled(tmp_path, default=True) is False
+
+    def test_key_absent_uses_default(self, tmp_path):
+        from network import read_flow_export_enabled
+
+        self._write(tmp_path, "something_else: 1\n")
+        assert read_flow_export_enabled(tmp_path, default=True) is True
+
+    def test_malformed_yaml_returns_default(self, tmp_path):
+        from network import read_flow_export_enabled
+
+        self._write(tmp_path, "enabled: [unclosed\n")
+        assert read_flow_export_enabled(tmp_path, default=False) is False
+
+
+# ---------------------------------------------------------------------------
+# ReadProxyForwardEnv (per-project egress.yaml)
+# ---------------------------------------------------------------------------
+
+
+class TestReadProxyForwardEnv:
+    def _write(self, tmp_path, text):
+        (tmp_path / "egress.yaml").write_text(text)
+
+    def test_missing_file_denies_all(self, tmp_path):
+        from network import read_proxy_forward_env
+
+        assert read_proxy_forward_env(tmp_path) == {}
+
+    def test_flags_only_truthy_emitted(self, tmp_path):
+        from network import read_proxy_forward_env
+
+        self._write(tmp_path, "allow:\n  ssh: true\n  smtp: false\n  git: true\n")
+        env = read_proxy_forward_env(tmp_path)
+        assert env == {"PROXY_ALLOW_SSH": "true", "PROXY_ALLOW_GIT": "true"}
+
+    def test_ports_list_joined(self, tmp_path):
+        from network import read_proxy_forward_env
+
+        self._write(tmp_path, "allow:\n  tcp_ports: [2222, 8443]\n  udp_ports: [51820]\n")
+        env = read_proxy_forward_env(tmp_path)
+        assert env == {"PROXY_ALLOW_TCP_PORTS": "2222,8443", "PROXY_ALLOW_UDP_PORTS": "51820"}
+
+    def test_ports_accept_comma_string(self, tmp_path):
+        from network import read_proxy_forward_env
+
+        self._write(tmp_path, "allow:\n  tcp_ports: '2222,8443'\n")
+        assert read_proxy_forward_env(tmp_path) == {"PROXY_ALLOW_TCP_PORTS": "2222,8443"}
+
+    def test_empty_ports_omitted(self, tmp_path):
+        from network import read_proxy_forward_env
+
+        self._write(tmp_path, "allow:\n  ssh: true\n  tcp_ports: []\n")
+        assert read_proxy_forward_env(tmp_path) == {"PROXY_ALLOW_SSH": "true"}
+
+    def test_truthy_variants(self, tmp_path):
+        from network import read_proxy_forward_env
+
+        self._write(tmp_path, "allow:\n  ssh: 'yes'\n  smtp: 'on'\n  git: 1\n  ntp: 'nope'\n")
+        env = read_proxy_forward_env(tmp_path)
+        assert env == {"PROXY_ALLOW_SSH": "true", "PROXY_ALLOW_SMTP": "true", "PROXY_ALLOW_GIT": "true"}
+
+    def test_malformed_yaml_denies_all(self, tmp_path):
+        from network import read_proxy_forward_env
+
+        self._write(tmp_path, "allow: [unclosed\n")
+        assert read_proxy_forward_env(tmp_path) == {}

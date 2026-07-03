@@ -2,6 +2,7 @@ import sys
 
 sys.dont_write_bytecode = True
 
+import hashlib
 import json
 import logging
 import re
@@ -18,19 +19,22 @@ from urllib.parse import urlparse
 from config import (
     ADMIN_PASSWORD,
     BRIDGE_INTERFACE_ENV,
-    CONFIG_DIR,
     IMAGE_TAG,
     IPV6_ENABLED,
     LLAMA_BIN,
     LLAMA_SERVER_LOCK_DIR,
-    MITMWEB_FLOW_EXPORT_ENABLED,
     MODELS_DIR,
     PROJECT_DIR,
     PROXY_UPSTREAM_NETWORK_ENV,
     REPO_ROOT,
 )
 from models import Model, ModelConfig, ServerConfig  # noqa: F401  (re-exported for callers/tests)
-from network import ContainerNetworkManager, scan_config_env_refs, scan_tmpfs_paths  # noqa: F401
+from network import (  # noqa: F401
+    ContainerNetworkManager,
+    read_flow_export_enabled,
+    scan_config_env_refs,
+    scan_tmpfs_paths,
+)
 from runtimes import ContainerRuntime
 from server import Server
 from util import (
@@ -159,7 +163,7 @@ def _load_flows_from_mount(
 
     The flow_export addon appends one flow per line (JSON Lines) to
     ``/home/mitmproxy/exports/{flows_filename}`` inside the proxy container,
-    which is bind-mounted to ``{REPO_ROOT}/.pi-container/exports/`` on the host.
+    which is bind-mounted to ``{PROJECT_DIR}/.pi-container/exports/`` on the host.
     ``flows_filename`` is unique per agent container (see ``export_mitmweb_flows``).
     This function reads that file and returns the parsed flow list.
 
@@ -171,7 +175,7 @@ def _load_flows_from_mount(
         read.
     """
     if exports_dir is None:
-        exports_dir = REPO_ROOT / ".pi-container" / "exports"
+        exports_dir = PROJECT_DIR / ".pi-container" / "exports"
 
     flows_file = exports_dir / flows_filename
     if not flows_file.exists():
@@ -237,8 +241,11 @@ def export_mitmweb_flows(
     Args:
         sessions_dir: Where the pi session ``.jsonl`` files live — read only to
             determine the current session id.
-        exports_dir: Base directory for the flow export (also where the raw
-            ``flows-<ip>.jsonl`` files live). Defaults to ``.pi-container/exports``.
+        exports_dir: The per-project exports directory — both where the proxy
+            stages raw ``flows-<ip>.jsonl`` files (its bind mount) and where the
+            session snapshot is written. Now that each workspace has its own
+            proxy, this is per-project. Defaults to
+            ``{PROJECT_DIR}/.pi-container/exports``.
         client_ips: The agent container's isolated-net IPs (IPv4 and/or IPv6),
             used to select its ``flows-<ip>.jsonl`` files. See
             ``_resolve_flows_filenames`` for the unknown-IP fallback.
@@ -251,7 +258,7 @@ def export_mitmweb_flows(
     if sessions_dir is None:
         sessions_dir = PROJECT_DIR / ".pi-container" / "agent" / "sessions"
     if exports_dir is None:
-        exports_dir = REPO_ROOT / ".pi-container" / "exports"
+        exports_dir = PROJECT_DIR / ".pi-container" / "exports"
 
     # 1. Determine the session ID from the most recent session file.
     latest = _get_latest_session_file(sessions_dir)
@@ -322,7 +329,7 @@ def export_mitmweb_flows(
 # ─── Startup validation ───────────────────────────────────────────────────
 
 
-def _warn_if_proxy_lacks_ipv6_egress(runtime_bin: str, upstream_iface: str = "eth0") -> None:
+def _warn_if_proxy_lacks_ipv6_egress(runtime_bin: str, proxy_name: str, upstream_iface: str = "eth0") -> None:
     """Confirm the *running* proxy actually has IPv6 egress on its upstream NIC.
 
     This is the definitive, observed check (option 5): static capability and
@@ -333,13 +340,13 @@ def _warn_if_proxy_lacks_ipv6_egress(runtime_bin: str, upstream_iface: str = "et
     """
     try:
         addr = subprocess.run(
-            [runtime_bin, "exec", "proxy", "ip", "-6", "addr", "show", upstream_iface],
+            [runtime_bin, "exec", proxy_name, "ip", "-6", "addr", "show", upstream_iface],
             capture_output=True,
             text=True,
             timeout=5,
         ).stdout
         route = subprocess.run(
-            [runtime_bin, "exec", "proxy", "ip", "-6", "route", "show", "default"],
+            [runtime_bin, "exec", proxy_name, "ip", "-6", "route", "show", "default"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -393,25 +400,58 @@ def _init_runtime() -> None:
     PROXY_UPSTREAM_NETWORK = RUNTIME.upstream_network
 
 
-# ─── Agent launch configuration ──────────────────────────────────────────────
+# ─── Per-project configuration ───────────────────────────────────────────────
 
 
-def _ensure_agent_config() -> Path:
-    """Return the per-project agent launch-configuration directory, seeding it if absent.
+# Project-level config files seeded into ``{PROJECT_DIR}/.pi-container`` alongside
+# the ``agent/`` subtree. Each is per-project: the proxy for this workspace mounts
+# its own allowlist/token_replacer, and the agent container reads its own tmpfs
+# list. The tmpfs template ships empty on purpose — seeding the repo's own list
+# (which references pi-container-internal paths) would create those dirs in every
+# foreign workspace.
+_PROJECT_CONFIG_FILES = ("allowlist.yaml", "token_replacer.yaml", "tmpfs.yaml", "flow_export.yaml", "egress.yaml")
 
-    The agent container is launched with its config (models.json, settings.json,
-    extensions, sessions, …) bind-mounted from ``{PROJECT_DIR}/.pi-container/agent``.
-    On the first run in a project that directory does not exist yet, so it is
-    seeded by copying the repo's template at ``{REPO_ROOT}/pi-coding-agent/default``.
-    Subsequent runs reuse (and let the agent mutate) the existing directory.
+
+def _project_scope(project_dir: Path) -> tuple[str, str]:
+    """Return ``(proxy_name, network_name)`` unique to this workspace.
+
+    Keyed by a hash of the absolute project path so each workspace gets its own
+    isolated network + proxy container, while repeated (or concurrent) runs from
+    the same workspace resolve to the same pair and share it via refcount.
     """
-    agent_config_dir = PROJECT_DIR / ".pi-container" / "agent"
+    key = hashlib.sha256(str(project_dir.resolve()).encode()).hexdigest()[:10]
+    return f"pi-proxy-{key}", f"pi-isolated-net-{key}"
+
+
+def _ensure_project_config() -> Path:
+    """Seed the per-project ``.pi-container`` config from the repo template if absent.
+
+    Seeds ``{PROJECT_DIR}/.pi-container`` from ``{REPO_ROOT}/pi-coding-agent/default``:
+    the whole ``agent/`` subtree (models.json, settings.json, sessions, …) plus the
+    project-level ``allowlist.yaml``/``token_replacer.yaml``/``tmpfs.yaml``. Each
+    item is only seeded when missing, so existing (user-edited) files are never
+    overwritten and a partially-populated ``.pi-container`` is completed.
+
+    Returns the agent launch-config dir (``{PROJECT_DIR}/.pi-container/agent``).
+    """
+    template_root = REPO_ROOT / "pi-coding-agent" / "default"
+    if not template_root.is_dir():
+        raise FileNotFoundError(f"Project config template not found: {template_root}")
+
+    project_root = PROJECT_DIR / ".pi-container"
+    agent_config_dir = project_root / "agent"
+
     if not agent_config_dir.exists():
-        default_config_dir = REPO_ROOT / "pi-coding-agent" / "default"
-        if not default_config_dir.is_dir():
-            raise FileNotFoundError(f"Default agent configuration not found: {default_config_dir}")
-        logger.info(f"No agent config at {agent_config_dir}; seeding from {default_config_dir}.")
-        shutil.copytree(default_config_dir, agent_config_dir)
+        logger.info(f"No agent config at {agent_config_dir}; seeding from {template_root / 'agent'}.")
+        shutil.copytree(template_root / "agent", agent_config_dir)
+
+    for name in _PROJECT_CONFIG_FILES:
+        src, dst = template_root / name, project_root / name
+        if src.exists() and not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Seeding {dst} from {src}.")
+            shutil.copy2(src, dst)
+
     return agent_config_dir
 
 
@@ -419,11 +459,14 @@ def _ensure_agent_config() -> Path:
 
 
 def main() -> None:
-    agent_config_dir = _ensure_agent_config()
+    agent_config_dir = _ensure_project_config()
     config_path: Path = agent_config_dir / "models.json"
     if not config_path.exists():
         logger.error(f"Config file not found: {config_path}")
         sys.exit(1)
+
+    # Per-project mitmweb flow-export toggle (.pi-container/flow_export.yaml).
+    flow_export_enabled = read_flow_export_enabled(PROJECT_DIR / ".pi-container")
 
     with config_path.open("r") as file:
         data = json.load(file)
@@ -466,19 +509,29 @@ def main() -> None:
             run_id = uuid.uuid4().hex[:12]
             agent_container_name = f"pi-coding-agent-{run_id}"
 
+            # Per-project isolation: each workspace gets its own isolated network
+            # and proxy container (auto-assigned mitmweb port, project-sourced
+            # allowlist/token_replacer). Concurrent runs in the same workspace
+            # resolve to the same names and share the proxy via refcount.
+            proxy_name, network_name = _project_scope(PROJECT_DIR)
+
             with ContainerNetworkManager(
                 RUNTIME,
-                "isolated-net",
+                network_name,
                 "pi-coding-agent-proxy:local",
-                config_dir=CONFIG_DIR,
+                proxy_name=proxy_name,
+                config_dir=PROJECT_DIR / ".pi-container",
                 llama_ports=portconfig,
                 ipv6=IPV6_ENABLED,
-            ) as _:
+            ) as netmgr:
+                mitmweb_url = netmgr.mitmweb_url()
+                if mitmweb_url:
+                    logger.info(f"mitmweb UI for this project: {mitmweb_url}")
                 proxy_isolated_ip: str | None = None
                 proxy_isolated_ip6: str | None = None
                 try:
                     result_ip = subprocess.run(
-                        [CONTAINER_RUNTIME, "exec", "proxy", "ip", "addr", "show", RUNTIME.proxy_isolated_interface],
+                        [CONTAINER_RUNTIME, "exec", proxy_name, "ip", "addr", "show", RUNTIME.proxy_isolated_interface],
                         capture_output=True,
                         text=True,
                         check=True,
@@ -511,10 +564,20 @@ def main() -> None:
                     )
 
                 if IPV6_ENABLED:
-                    _warn_if_proxy_lacks_ipv6_egress(CONTAINER_RUNTIME)
+                    _warn_if_proxy_lacks_ipv6_egress(CONTAINER_RUNTIME, proxy_name)
 
-                # Scan tmpfs config for transient paths to mount as tmpfs.
-                tmpfs_paths = scan_tmpfs_paths(CONFIG_DIR)
+                # Scan tmpfs config for transient paths to mount as tmpfs. These
+                # paths are all under /workspace (the mounted PROJECT_DIR), so the
+                # config that declares them is per-project — read it from the
+                # project's own .pi-container, not the repo's. Reading the repo's
+                # list here would mkdir this repo's transient mountpoints (e.g.
+                # pi-coding-agent-proxy/*) inside every foreign workspace.
+                tmpfs_paths = scan_tmpfs_paths(PROJECT_DIR / ".pi-container")
+
+                # The project's apt dependency manifest, bind-mounted read-only
+                # back over the tmpfs that hides the rest of .pi-container (see the
+                # mounts below).
+                deps_dir = PROJECT_DIR / ".pi-container" / "dependencies"
 
                 pi_container_cmd = [
                     CONTAINER_RUNTIME,
@@ -524,7 +587,7 @@ def main() -> None:
                     agent_container_name,
                     "--interactive",
                     "--tty",
-                    *RUNTIME.agent_network_args("isolated-net", proxy_isolated_ip),
+                    *RUNTIME.agent_network_args(network_name, proxy_isolated_ip),
                     # IPv6 policy for the agent: --sysctl toggle (VM runtimes) +
                     # env flag its entrypoint reads. When enabled, DEFAULT_ROUTE6
                     # points the v6 default route at the proxy's eth1 v6 address.
@@ -538,7 +601,19 @@ def main() -> None:
                     "--volume",
                     f"{PROJECT_DIR}:/workspace",
                     *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
+                    # Hide the whole .pi-container from the agent — its YAML configs
+                    # (allowlist/token_replacer/tmpfs), flow-export captures and
+                    # agent secrets — by shadowing it with an empty tmpfs.
                     *RUNTIME.tmpfs_args("/workspace/.pi-container"),
+                    # ...then bind the dependency manifest back on top (read-only)
+                    # so the entrypoint can still install the project's apt packages.
+                    # Only mounted when present: podman refuses to auto-create a
+                    # missing bind source and the container would fail to start.
+                    *(
+                        ["--volume", f"{deps_dir}:/workspace/.pi-container/dependencies:ro"]
+                        if deps_dir.exists()
+                        else []
+                    ),
                     "--workdir",
                     "/workspace",
                     # Transient tmpfs mounts for build artifacts, caches, etc.
@@ -563,7 +638,7 @@ def main() -> None:
                 ip_holder: dict[str, list[str]] = {}
                 ip_stop = threading.Event()
                 ip_thread: threading.Thread | None = None
-                if MITMWEB_FLOW_EXPORT_ENABLED:
+                if flow_export_enabled:
 
                     def _discover_agent_ips() -> None:
                         ips = _poll_agent_container_ips(CONTAINER_RUNTIME, agent_container_name, ip_stop)
@@ -579,13 +654,14 @@ def main() -> None:
                 # addon appends per-client-IP files as flows complete; run.py reads
                 # this agent's file(s) here (after it exits, before the
                 # ContainerNetworkManager context exits and stops the proxy).
-                if MITMWEB_FLOW_EXPORT_ENABLED:
+                if flow_export_enabled:
                     ip_stop.set()
                     if ip_thread is not None:
                         ip_thread.join(timeout=2)
                     export_mitmweb_flows(
                         sessions_dir=agent_config_dir / "sessions",
                         client_ips=ip_holder.get("ips"),
+                        exports_dir=PROJECT_DIR / ".pi-container" / "exports",
                     )
 
             if result.returncode != 0:
