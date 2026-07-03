@@ -8,6 +8,7 @@ import fcntl
 import logging
 import os
 import re
+import socket
 import subprocess
 import time
 import urllib.error
@@ -92,6 +93,19 @@ def scan_config_env_refs(config: dict) -> list[str]:
     return sorted(refs)
 
 
+def _find_free_port() -> int:
+    """Ask the OS for a currently-free TCP port on the loopback interface.
+
+    Used to publish each per-project proxy's mitmweb UI on its own host port so
+    multiple projects' proxies can run at once (the old fixed 8081 is a singleton).
+    There is a small TOCTOU window between closing the socket and the runtime
+    binding the port; acceptable for a local dev UI.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 # ─── Container Network Manager ───────────────────────────────────────────
 
 
@@ -119,13 +133,20 @@ class ContainerNetworkManager:
         self.config_dir: Path = config_dir or CONFIG_DIR
         self.llama_ports: str | None = llama_ports
         self.ipv6: bool = ipv6
+        # Host port the proxy's mitmweb UI is published on. Auto-assigned when
+        # this process starts the proxy; resolved from the running container when
+        # attaching to an already-running one. See ``mitmweb_url``.
+        self.mitmweb_port: int | None = None
 
-        # Shared directory for synchronization across different run.py processes
+        # Directory for cross-process synchronization. Kept under the repo (not a
+        # user workspace) so lock files never pollute projects. The proxy is
+        # per-project, so refcount files are keyed by proxy_name — each workspace
+        # refcounts (and tears down) its own proxy independently.
         self.lock_dir: Path = REPO_ROOT / "pi-coding-agent-proxy" / ".locks"
         self.paths: dict[str, Path] = {
             "lock_dir": self.lock_dir,
-            "ref_count_lock": self.lock_dir / ".network_manager.lock",
-            "ref_count_file": self.lock_dir / ".network_manager.refcount",
+            "ref_count_lock": self.lock_dir / f".{self.proxy_name}.lock",
+            "ref_count_file": self.lock_dir / f".{self.proxy_name}.refcount",
         }
 
     def _pull_secrets_from_config(self) -> dict[str, str]:
@@ -291,6 +312,10 @@ class ContainerNetworkManager:
         logger.info(f"Starting proxy container {self.proxy_name} from {self.proxy_image}...")
         llama_host_addr = self.runtime.resolve_llama_host_addr(self.proxy_image)
 
+        # Publish the mitmweb UI on an auto-assigned host port so multiple
+        # per-project proxies can coexist (the old fixed 8081 could bind once).
+        self.mitmweb_port = _find_free_port()
+
         # Mount the host addon configs over the image's baked defaults. Each is
         # only mounted if present so a missing host config falls back to the
         # (fail-closed) default baked into the image.
@@ -312,7 +337,7 @@ class ContainerNetworkManager:
         # must exist first: podman refuses to auto-create a bind-mount source and
         # the container would fail to start (surfacing as a 30s health-probe
         # hang, since the run error → DEVNULL).
-        exports_host_dir = REPO_ROOT / ".pi-container" / "exports"
+        exports_host_dir = self.config_dir / "exports"
         exports_host_dir.mkdir(parents=True, exist_ok=True)
         exports_container_path = "/home/mitmproxy/exports"
         exports_mounts: list[str] = [
@@ -334,7 +359,7 @@ class ContainerNetworkManager:
             "--dns",
             "1.1.1.1",
             "-p",
-            "8081:8081",
+            f"{self.mitmweb_port}:8081",
             # IPv6 policy: --sysctl toggle (VM runtimes) + env flag the proxy
             # entrypoint reads to mirror (or tear down) v6 firewall rules.
             *self.runtime.ipv6_run_args(self.ipv6, forwarding=True),
@@ -397,7 +422,7 @@ class ContainerNetworkManager:
         Raises:
             RuntimeError: If the proxy does not become healthy within timeout.
         """
-        url = "http://127.0.0.1:8081"
+        url = f"http://127.0.0.1:{self.mitmweb_port}"
         elapsed = 0
         while elapsed < timeout:
             try:
@@ -418,3 +443,36 @@ class ContainerNetworkManager:
             f"Proxy container did not become healthy within {timeout}s. "
             f"Check proxy logs: {self.container_runtime} logs {self.proxy_name}"
         )
+
+    def mitmweb_url(self) -> str | None:
+        """Return the ``http://127.0.0.1:<port>`` URL of this project's mitmweb UI.
+
+        When this process started the proxy, the port is already known. When it
+        merely attached to an already-running proxy (refcount > 0), the port is
+        discovered from the running container. Best-effort: returns None if the
+        port can't be determined.
+        """
+        if self.mitmweb_port is None:
+            self.mitmweb_port = self._query_published_port()
+        return f"http://127.0.0.1:{self.mitmweb_port}" if self.mitmweb_port else None
+
+    def _query_published_port(self) -> int | None:
+        """Resolve the host port the running proxy publishes container port 8081 on.
+
+        Parses ``<runtime> port <proxy_name> 8081/tcp`` (e.g. ``127.0.0.1:49732``
+        or ``0.0.0.0:49732``). Best-effort — returns None on any error or if the
+        runtime does not support the ``port`` subcommand.
+        """
+        try:
+            out = subprocess.run(
+                [self.container_runtime, "port", self.proxy_name, "8081/tcp"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except Exception:
+            return None
+        if out.returncode != 0 or not out.stdout.strip():
+            return None
+        match = re.search(r":(\d+)\s*$", out.stdout.strip().splitlines()[0])
+        return int(match.group(1)) if match else None

@@ -71,6 +71,35 @@ class TestExportMitmwebFlows:
 
         assert json.loads(out.read_text())["flows"] == [{"id": "mine"}]
 
+    def test_snapshot_and_raw_share_the_project_exports_dir(self, tmp_path):
+        """Raw staging and the session snapshot both live in the one per-project
+        exports dir; the consumed raw file is removed after the snapshot."""
+        sessions = tmp_path / "sessions"
+        exports = tmp_path / "exports"  # PROJECT_DIR/.pi-container/exports in prod
+        exports.mkdir()
+        _make_session(sessions, "sid")
+        raw_file = exports / "flows-10.0.0.5.jsonl"
+        raw_file.write_text('{"id": "f1"}\n')
+
+        result = run.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
+
+        # Snapshot lands under the same exports dir the raw file was read from.
+        assert result.parent.parent == exports / "flows"
+        assert json.loads(result.read_text())["flows"] == [{"id": "f1"}]
+        # The consumed raw file is removed once the snapshot is written.
+        assert not raw_file.exists()
+
+    def test_default_exports_dir_is_per_project(self, tmp_path, monkeypatch):
+        """With no exports_dir given, it defaults to PROJECT_DIR/.pi-container/exports."""
+        sessions = tmp_path / "sessions"
+        _make_session(sessions, "sid")
+        monkeypatch.setattr(run, "PROJECT_DIR", tmp_path)
+
+        with patch.object(run, "_load_flows_from_mount", return_value=None):
+            out = run.export_mitmweb_flows(sessions_dir=sessions, client_ips=["10.0.0.5"])
+
+        assert out.parent.parent == tmp_path / ".pi-container" / "exports" / "flows"
+
     def test_ipv6_client_ip_sanitized_to_filename(self, tmp_path):
         sessions = tmp_path / "sessions"
         exports = tmp_path / "exports"
@@ -240,3 +269,68 @@ class TestLoadFlowsFromMount:
     def test_empty_file_returns_empty_list(self, tmp_path):
         (tmp_path / "flows.jsonl").write_text("")
         assert run._load_flows_from_mount(exports_dir=tmp_path) == []
+
+
+class TestProjectScope:
+    def test_stable_for_same_dir(self, tmp_path):
+        assert run._project_scope(tmp_path) == run._project_scope(tmp_path)
+
+    def test_differs_across_dirs(self, tmp_path):
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        a.mkdir()
+        b.mkdir()
+        assert run._project_scope(a) != run._project_scope(b)
+
+    def test_name_format(self, tmp_path):
+        proxy_name, network_name = run._project_scope(tmp_path)
+        assert proxy_name.startswith("pi-proxy-")
+        assert network_name.startswith("pi-isolated-net-")
+        # Shared 10-hex-char project key across both names.
+        assert proxy_name.split("pi-proxy-")[1] == network_name.split("pi-isolated-net-")[1]
+        assert re.fullmatch(r"[0-9a-f]{10}", proxy_name.split("pi-proxy-")[1])
+
+
+class TestEnsureProjectConfig:
+    def _make_template(self, root):
+        """Build a minimal pi-coding-agent/default template under root."""
+        template = root / "pi-coding-agent" / "default"
+        (template / "agent").mkdir(parents=True)
+        (template / "agent" / "models.json").write_text("{}")
+        (template / "allowlist.yaml").write_text("global: {}\n")
+        (template / "token_replacer.yaml").write_text("global: {}\n")
+        (template / "tmpfs.yaml").write_text("paths: []\n")
+        return template
+
+    def test_seeds_agent_and_yaml_when_absent(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        project = tmp_path / "project"
+        project.mkdir()
+        self._make_template(repo)
+        monkeypatch.setattr(run, "REPO_ROOT", repo)
+        monkeypatch.setattr(run, "PROJECT_DIR", project)
+
+        agent_dir = run._ensure_project_config()
+
+        assert agent_dir == project / ".pi-container" / "agent"
+        assert (agent_dir / "models.json").exists()
+        for name in ("allowlist.yaml", "token_replacer.yaml", "tmpfs.yaml"):
+            assert (project / ".pi-container" / name).exists()
+
+    def test_does_not_overwrite_existing(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        project = tmp_path / "project"
+        self._make_template(repo)
+        # Pre-existing, user-edited allowlist must be preserved.
+        existing = project / ".pi-container" / "allowlist.yaml"
+        existing.parent.mkdir(parents=True)
+        existing.write_text("global: {custom: true}\n")
+        monkeypatch.setattr(run, "REPO_ROOT", repo)
+        monkeypatch.setattr(run, "PROJECT_DIR", project)
+
+        run._ensure_project_config()
+
+        assert existing.read_text() == "global: {custom: true}\n"
+        # Missing ones are still seeded.
+        assert (project / ".pi-container" / "token_replacer.yaml").exists()
+        assert (project / ".pi-container" / "agent" / "models.json").exists()

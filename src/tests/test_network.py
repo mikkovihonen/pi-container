@@ -298,3 +298,53 @@ class TestScanTmpfsPaths:
     def test_nonexistent_dir(self):
         result = scan_tmpfs_paths(Path("/nonexistent"))
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Per-project proxy identity + mitmweb port
+# ---------------------------------------------------------------------------
+
+
+class TestPerProjectProxy:
+    def _make_manager(self, proxy_name):
+        return ContainerNetworkManager(
+            container_runtime="docker",
+            network_name="pi-isolated-net-abc",
+            proxy_image="proxy:latest",
+            proxy_name=proxy_name,
+        )
+
+    def test_refcount_files_keyed_by_proxy_name(self):
+        """Two projects' managers must not share refcount files."""
+        a = self._make_manager("pi-proxy-aaaaaaaaaa")
+        b = self._make_manager("pi-proxy-bbbbbbbbbb")
+        assert a.paths["ref_count_file"] != b.paths["ref_count_file"]
+        assert a.paths["ref_count_lock"] != b.paths["ref_count_lock"]
+        assert "pi-proxy-aaaaaaaaaa" in a.paths["ref_count_file"].name
+        # Lock dir itself is shared (kept out of user workspaces).
+        assert a.paths["lock_dir"] == b.paths["lock_dir"]
+
+    def test_find_free_port_returns_valid_port(self):
+        from network import _find_free_port
+
+        port = _find_free_port()
+        assert isinstance(port, int)
+        assert 1024 <= port <= 65535
+
+    def test_mitmweb_url_uses_known_port(self):
+        mgr = self._make_manager("pi-proxy-aaaaaaaaaa")
+        mgr.mitmweb_port = 49732
+        assert mgr.mitmweb_url() == "http://127.0.0.1:49732"
+
+    def test_mitmweb_url_queries_when_port_unknown(self):
+        mgr = self._make_manager("pi-proxy-aaaaaaaaaa")
+        completed = MagicMock(returncode=0, stdout="127.0.0.1:55001\n")
+        with patch("subprocess.run", return_value=completed):
+            assert mgr.mitmweb_url() == "http://127.0.0.1:55001"
+        assert mgr.mitmweb_port == 55001
+
+    def test_mitmweb_url_none_when_unresolvable(self):
+        mgr = self._make_manager("pi-proxy-aaaaaaaaaa")
+        completed = MagicMock(returncode=1, stdout="")
+        with patch("subprocess.run", return_value=completed):
+            assert mgr.mitmweb_url() is None

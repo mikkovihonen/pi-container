@@ -1,0 +1,4 @@
+# No token replacements needed for pi-container in this project
+global:
+  log_replacements: true
+  dry_run: false

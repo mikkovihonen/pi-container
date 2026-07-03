@@ -56,7 +56,7 @@ The system consists of three components running as containers or processes:
 
 1. **`llama-server`** (host process): Runs `llama.cpp`'s `llama-server` natively on the host. Provides OpenAI-compatible API endpoints for one or more local LLM models. Each model is configured via `<project>/.pi-container/agent/models.json` (seeded per-project from the `pi-coding-agent/default/` template on first run).
 
-2. **`pi-coding-agent-proxy`** (container): A transparent proxy container based on Debian with [mitmproxy](https://mitmproxy.org/). It intercepts the pi container's HTTP/HTTPS/DNS traffic; a self-signed CA certificate is installed into the pi container image so HTTPS can be decrypted. The mitmweb web UI is available at port 8081. Two [addons](pi-coding-agent-proxy/addons/) run on the intercepted traffic: an **allowlist** (blocks non-allowlisted hosts) and a **token_replacer** (redacts API keys, bearer tokens, cookies, JWTs). Non-HTTP protocols are **denied by default** — the agent cannot reach the internet except through the proxy, and only over protocols that are either inspected (HTTP/HTTPS/DNS) or explicitly opted in (see [Proxy egress policy](#proxy-egress-policy)).
+2. **`pi-coding-agent-proxy`** (container): A transparent proxy container based on Debian with [mitmproxy](https://mitmproxy.org/). It intercepts the pi container's HTTP/HTTPS/DNS traffic; a self-signed CA certificate is installed into the pi container image so HTTPS can be decrypted. Each workspace gets its **own** proxy (and its own isolated network), named by a hash of the project path; its mitmweb web UI is published on an **auto-assigned host port, logged at startup**. Two [addons](pi-coding-agent-proxy/addons/) run on the intercepted traffic: an **allowlist** (blocks non-allowlisted hosts) and a **token_replacer** (redacts API keys, bearer tokens, cookies, JWTs). Non-HTTP protocols are **denied by default** — the agent cannot reach the internet except through the proxy, and only over protocols that are either inspected (HTTP/HTTPS/DNS) or explicitly opted in (see [Proxy egress policy](#proxy-egress-policy)).
 
 3. **`pi-coding-agent`** (container): The main agent container. It runs on a multi-stage build from `node:26.3.1-trixie-slim`, with Python 3.14.6 compiled from source and `uv` for dependency management. The agent connects **only** to an internal `isolated-net` network, with its default route and DNS pointed at the proxy so all traffic is forced through it. How it reaches the host `llama-server` depends on the runtime: with Apple `container` (which shares an L2 bridge with the host) a host-side `socat` re-exposes llama-server on the bridge; with `podman`/`docker` (which run in a VM on macOS) the proxy reaches the host loopback via `host.containers.internal` — no socat needed.
 
@@ -184,12 +184,16 @@ plain NAT), enable it in `.env`:
 ├── pi-coding-agent/                  # Main agent container
 │   ├── Containerfile                 # Multi-stage build (builder + runner)
 │   ├── entrypoint.sh                 # Container entrypoint (default route via proxy, git config, uv venv)
-│   └── default/                      # Agent config template (seeded into <project>/.pi-container/agent on first run)
-│       ├── models.json               # LLM provider/server configuration
-│       ├── AGENTS.md                 # Agent instructions
-│       ├── config.json
-│       ├── settings.json
-│       └── .pi_ignore
+│   └── default/                      # Template for <project>/.pi-container (seeded on first run)
+│       ├── agent/                     # → .pi-container/agent
+│       │   ├── models.json           # LLM provider/server configuration
+│       │   ├── AGENTS.md             # Agent instructions
+│       │   ├── config.json
+│       │   ├── settings.json
+│       │   └── .pi_ignore
+│       ├── allowlist.yaml            # Generic hostname allowlist (pypi/npm/github/apt)
+│       ├── token_replacer.yaml       # Generic token-redaction config
+│       └── tmpfs.yaml                # Empty tmpfs template (paths: [])
 │
 ├── pi-coding-agent-proxy/            # Transparent proxy container
 │   ├── Containerfile                 # mitmproxy + addon scripts/configs + pyyaml
@@ -210,10 +214,12 @@ plain NAT), enable it in `.env`:
 ├── pi-coding-agent/setups/           # Model-specific setup directories
 │   └── gemma-4-26b-a4b-it-qat-GGUF/  # Notes and config for specific model setups
 │
-└── .pi-container/                    # Host-side config mounted into proxy
-    ├── token_replacer.yaml           # Token redaction rules
-    ├── allowlist.yaml                # Hostname allowlist
-    └── tmpfs.yaml                    # Transient tmpfs mount paths (volatile RAM disks)
+└── .pi-container/                    # Per-project config (this repo's own; each workspace gets its own)
+    ├── agent/                        # Agent launch config (models.json, sessions, …)
+    ├── token_replacer.yaml           # Token redaction rules (mounted into this project's proxy)
+    ├── allowlist.yaml                # Hostname allowlist (mounted into this project's proxy)
+    ├── tmpfs.yaml                    # Transient tmpfs mount paths (volatile RAM disks)
+    └── exports/                      # Captured flow history for this project (gitignored)
 ```
 
 ## Getting Started
@@ -250,7 +256,7 @@ alias pi="~/workspace/pi-container/run.sh"
 pi --session 1234abcd-ef56-78ab-cd90-1234abcd56ef
 ```
 
-The script reads `<project>/.pi-container/agent/models.json` (seeded from the `pi-coding-agent/default/` template on first run) to determine which LLM providers to start. Each entry defines a model (main, optional draft, and optional vision/mmproj files), download source, server flags, and OpenAI-compatible API configuration. The proxy container is managed with a refcount so it persists across multiple concurrent `pi` invocations.
+The script reads `<project>/.pi-container/agent/models.json` (seeded from the `pi-coding-agent/default/` template on first run) to determine which LLM providers to start. Each entry defines a model (main, optional draft, and optional vision/mmproj files), download source, server flags, and OpenAI-compatible API configuration. Each workspace gets its own proxy container and isolated network (named by a hash of the project path); concurrent `pi` invocations **from the same workspace** share that workspace's proxy via a refcount.
 
 ### 4. Using the Agent
 
@@ -260,7 +266,7 @@ The agent's entrypoint automatically installs apt packages listed in `.pi-contai
 
 ### 5. Using the Proxy
 
-The transparent proxy web UI (mitmweb) is available at [http://127.0.0.1:8081](http://127.0.0.1:8081). See [pi-coding-agent-proxy/README.md](pi-coding-agent-proxy/README.md) for details on proxy operation, CA certificate installation, and addons.
+The transparent proxy web UI (mitmweb) is published on an auto-assigned host port — run.py logs the exact `http://127.0.0.1:<port>` URL at startup (each workspace's proxy gets its own port). See [pi-coding-agent-proxy/README.md](pi-coding-agent-proxy/README.md) for details on proxy operation, CA certificate installation, and addons.
 
 ## Environment Configuration
 
@@ -269,7 +275,7 @@ The application uses a `.env` file for managing environment-specific settings. S
 ### Security
 
 - **`ADMIN_PASSWORD`** MUST be changed from the default `CHANGEME` before running.
-  The proxy's mitmweb UI at port 8081 will refuse to start with a default or empty password.
+  The proxy's mitmweb UI will refuse to start with a default or empty password.
 - **Model integrity**: Set `sha256` in `models.json` to verify downloaded model files.
   Without a checksum, downloads proceed without integrity verification.
 
@@ -313,7 +319,7 @@ curl
 
 ### Allowlist
 
-The `allowlist.yaml` config in `.pi-container/` defines hostname rules for the [allowlist addon](pi-coding-agent-proxy/addons/allowlist/) running on the mitmproxy transparent proxy. Traffic from the agent container to non-allowlisted hosts is **blocked with HTTP 403**.
+The `allowlist.yaml` config in the project's `.pi-container/` defines hostname rules for the [allowlist addon](pi-coding-agent-proxy/addons/allowlist/) running on that project's mitmproxy transparent proxy. It is **per-project** — each workspace's proxy mounts its own allowlist (seeded from a generic pypi/npm/github/apt template on first run; edit it per project). Traffic from the agent container to non-allowlisted hosts is **blocked with HTTP 403**. If the file is missing entirely, the image's fail-closed default blocks all hosts.
 
 Each rule has a `name`, `mode` (`allow`), a list of `hostnames` (supporting `*` wildcards), and optional `ip_ranges`. Traffic matching any rule is permitted; all other traffic is denied. The default mode is `allow` with a `block` default action.
 
