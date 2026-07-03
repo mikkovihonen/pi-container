@@ -33,8 +33,8 @@ llama-server/logs/**
 # Pi
 pi-coding-agent/logs
 pi-coding-agent/logs/**
-pi-coding-agent/home/.pi/agent/bin
-pi-coding-agent/home/.pi/agent/sessions
+.pi-container/agent/bin
+.pi-container/agent/sessions
 
 # Proxy
 pi-coding-agent-proxy/.locks
@@ -42,6 +42,7 @@ pi-coding-agent-proxy/.locks/**
 
 # Flow-export audit trail (contains captured request/response bodies + headers)
 .pi-container/exports/
+.pi-container/agent/sessions/
 
 # Generated badges (committed by CI)
 badges/

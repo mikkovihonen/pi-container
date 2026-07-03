@@ -54,7 +54,7 @@ To run this environment comfortably, especially when utilizing the full 128k con
 
 The system consists of three components running as containers or processes:
 
-1. **`llama-server`** (host process): Runs `llama.cpp`'s `llama-server` natively on the host. Provides OpenAI-compatible API endpoints for one or more local LLM models. Each model is configured via `pi-coding-agent/home/.pi/agent/models.json`.
+1. **`llama-server`** (host process): Runs `llama.cpp`'s `llama-server` natively on the host. Provides OpenAI-compatible API endpoints for one or more local LLM models. Each model is configured via `<project>/.pi-container/agent/models.json` (seeded per-project from the `pi-coding-agent/default/` template on first run).
 
 2. **`pi-coding-agent-proxy`** (container): A transparent proxy container based on Debian with [mitmproxy](https://mitmproxy.org/). It intercepts the pi container's HTTP/HTTPS/DNS traffic; a self-signed CA certificate is installed into the pi container image so HTTPS can be decrypted. The mitmweb web UI is available at port 8081. Two [addons](pi-coding-agent-proxy/addons/) run on the intercepted traffic: an **allowlist** (blocks non-allowlisted hosts) and a **token_replacer** (redacts API keys, bearer tokens, cookies, JWTs). Non-HTTP protocols are **denied by default** — the agent cannot reach the internet except through the proxy, and only over protocols that are either inspected (HTTP/HTTPS/DNS) or explicitly opted in (see [Proxy egress policy](#proxy-egress-policy)).
 
@@ -184,11 +184,12 @@ plain NAT), enable it in `.env`:
 ├── pi-coding-agent/                  # Main agent container
 │   ├── Containerfile                 # Multi-stage build (builder + runner)
 │   ├── entrypoint.sh                 # Container entrypoint (default route via proxy, git config, uv venv)
-│   └── home/.pi/agent/
+│   └── default/                      # Agent config template (seeded into <project>/.pi-container/agent on first run)
 │       ├── models.json               # LLM provider/server configuration
 │       ├── AGENTS.md                 # Agent instructions
 │       ├── config.json
-│       └── extensions/               # Agent extensions (e.g. terminal-beautifier)
+│       ├── settings.json
+│       └── .pi_ignore
 │
 ├── pi-coding-agent-proxy/            # Transparent proxy container
 │   ├── Containerfile                 # mitmproxy + addon scripts/configs + pyyaml
@@ -249,7 +250,7 @@ alias pi="~/workspace/pi-container/run.sh"
 pi --session 1234abcd-ef56-78ab-cd90-1234abcd56ef
 ```
 
-The script reads `pi-coding-agent/home/.pi/agent/models.json` to determine which LLM providers to start. Each entry defines a model (main, optional draft, and optional vision/mmproj files), download source, server flags, and OpenAI-compatible API configuration. The proxy container is managed with a refcount so it persists across multiple concurrent `pi` invocations.
+The script reads `<project>/.pi-container/agent/models.json` (seeded from the `pi-coding-agent/default/` template on first run) to determine which LLM providers to start. Each entry defines a model (main, optional draft, and optional vision/mmproj files), download source, server flags, and OpenAI-compatible API configuration. The proxy container is managed with a refcount so it persists across multiple concurrent `pi` invocations.
 
 ### 4. Using the Agent
 

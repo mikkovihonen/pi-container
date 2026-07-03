@@ -5,6 +5,7 @@ sys.dont_write_bytecode = True
 import json
 import logging
 import re
+import shutil
 import signal
 import subprocess
 import threading
@@ -248,7 +249,7 @@ def export_mitmweb_flows(
     from datetime import datetime
 
     if sessions_dir is None:
-        sessions_dir = REPO_ROOT / "pi-coding-agent" / "home" / ".pi" / "agent" / "sessions"
+        sessions_dir = PROJECT_DIR / ".pi-container" / "agent" / "sessions"
     if exports_dir is None:
         exports_dir = REPO_ROOT / ".pi-container" / "exports"
 
@@ -392,11 +393,34 @@ def _init_runtime() -> None:
     PROXY_UPSTREAM_NETWORK = RUNTIME.upstream_network
 
 
+# ─── Agent launch configuration ──────────────────────────────────────────────
+
+
+def _ensure_agent_config() -> Path:
+    """Return the per-project agent launch-configuration directory, seeding it if absent.
+
+    The agent container is launched with its config (models.json, settings.json,
+    extensions, sessions, …) bind-mounted from ``{PROJECT_DIR}/.pi-container/agent``.
+    On the first run in a project that directory does not exist yet, so it is
+    seeded by copying the repo's template at ``{REPO_ROOT}/pi-coding-agent/default``.
+    Subsequent runs reuse (and let the agent mutate) the existing directory.
+    """
+    agent_config_dir = PROJECT_DIR / ".pi-container" / "agent"
+    if not agent_config_dir.exists():
+        default_config_dir = REPO_ROOT / "pi-coding-agent" / "default"
+        if not default_config_dir.is_dir():
+            raise FileNotFoundError(f"Default agent configuration not found: {default_config_dir}")
+        logger.info(f"No agent config at {agent_config_dir}; seeding from {default_config_dir}.")
+        shutil.copytree(default_config_dir, agent_config_dir)
+    return agent_config_dir
+
+
 # ─── Main ──────────────────────────────────────────────────────────────────
 
 
 def main() -> None:
-    config_path: Path = REPO_ROOT / "pi-coding-agent" / "home" / ".pi" / "agent" / "models.json"
+    agent_config_dir = _ensure_agent_config()
+    config_path: Path = agent_config_dir / "models.json"
     if not config_path.exists():
         logger.error(f"Config file not found: {config_path}")
         sys.exit(1)
@@ -510,11 +534,11 @@ def main() -> None:
                     *(["--env", f"DEFAULT_ROUTE6={proxy_isolated_ip6}"] if proxy_isolated_ip6 else []),
                     *RUNTIME.tmpfs_args("/home/pi/"),
                     "--volume",
-                    f"{REPO_ROOT}/pi-coding-agent/home/.pi:/home/pi/.pi",
+                    f"{agent_config_dir}:/home/pi/.pi/agent",
                     "--volume",
                     f"{PROJECT_DIR}:/workspace",
                     *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
-                    *RUNTIME.tmpfs_args("/workspace/.pi-container/exports"),
+                    *RUNTIME.tmpfs_args("/workspace/.pi-container"),
                     "--workdir",
                     "/workspace",
                     # Transient tmpfs mounts for build artifacts, caches, etc.
@@ -560,7 +584,7 @@ def main() -> None:
                     if ip_thread is not None:
                         ip_thread.join(timeout=2)
                     export_mitmweb_flows(
-                        sessions_dir=REPO_ROOT / "pi-coding-agent" / "home" / ".pi" / "agent" / "sessions",
+                        sessions_dir=agent_config_dir / "sessions",
                         client_ips=ip_holder.get("ips"),
                     )
 
