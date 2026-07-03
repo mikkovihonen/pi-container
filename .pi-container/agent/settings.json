@@ -3,5 +3,6 @@
   "theme": "dark",
   "enableAnalytics": false,
   "enableInstallTelemetry": false,
-  "defaultThinkingLevel": "high"
+  "defaultThinkingLevel": "high",
+  "defaultProjectTrust": "ask"
 }

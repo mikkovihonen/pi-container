@@ -54,7 +54,7 @@ tmpfs:
 
 # mitmweb flow export — capture this repo's own HTTP/HTTPS history for auditing.
 flow_export:
-  enabled: true
+  enabled: false
 
 # Proxy egress policy — deny-all except the inspected HTTP/HTTPS/DNS.
 egress:

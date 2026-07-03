@@ -17,9 +17,9 @@
             {
                 "id": "ornith-1.0-35b-Q6_K",
                 "name": "ornith-1.0-35b-Q6_K",
-                "contextWindow": 131072,
-                "compactionThreshold": 128000,
-                "maxTokens": 4096,
+                "contextWindow": 256144,
+                "compactionThreshold": 128072,
+                "maxTokens": 8192,
                 "streaming": true,
                 "toolCalling": true,
                 "vision": true,
@@ -45,7 +45,7 @@
                     "file": "ornith-1.0-35b-Q6_K.gguf",
                     "dir":"Ornith-1.0-35B-GGUF",
                     "additionalServerFlags": [],
-                    "sha256": ""  
+                    "sha256": ""
                 }
             },
             "flags":[
@@ -55,10 +55,10 @@
                 "--threads", 10,
                 "--threads-batch", 8,
                 "--parallel", 1,
-                "--batch-size", 4096,
+                "--batch-size", 8192,
                 "--ubatch-size", 512,
                 "--flash-attn", "on",
-                "--ctx-size", 131072,
+                "--ctx-size", 256144,
                 "--ctx-checkpoints", 32,
                 "--checkpoint-min-step", 256,
                 "--repeat-penalty", 1.0,
