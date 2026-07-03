@@ -91,7 +91,7 @@
                 "--prio", 2,
                 "--cache-ram", 8192,
                 "--jinja",
-                "--chat-template-file", "llama-server/chat-templates/gemma-4-26B-A4B-it/chat_template.jinja",
+                "--chat-template-file", ".pi-container/chat-templates/gemma-4-26B-A4B-it/chat_template.jinja",
                 "--chat-template-kwargs", "{\"enable_thinking\":true}",
                 "--n-gpu-layers", 999
             ]

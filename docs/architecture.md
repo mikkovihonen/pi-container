@@ -131,6 +131,7 @@ that project's proxy container, whose entrypoint opens the matching FORWARD rule
 │       │   ├── config.json
 │       │   ├── settings.json
 │       │   └── .pi_ignore
+│       ├── chat-templates/           # Jinja chat templates loaded by llama-server
 │       ├── allowlist.yaml            # Generic hostname allowlist (pypi/npm/github/apt)
 │       ├── token_replacer.yaml       # Generic token-redaction config
 │       ├── tmpfs.yaml                # Empty tmpfs template (paths: [])
@@ -158,6 +159,7 @@ that project's proxy container, whose entrypoint opens the matching FORWARD rule
 │
 └── .pi-container/                    # Per-project config (this repo's own; each workspace gets its own)
     ├── agent/                        # Agent launch config (models.json, sessions, …)
+    ├── chat-templates/               # Jinja chat templates loaded by llama-server (per model)
     ├── token_replacer.yaml           # Token redaction rules (mounted into this project's proxy)
     ├── allowlist.yaml                # Hostname allowlist (mounted into this project's proxy)
     ├── tmpfs.yaml                    # Transient tmpfs mount paths (volatile RAM disks)

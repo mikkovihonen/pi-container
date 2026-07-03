@@ -84,12 +84,14 @@ def _init_runtime() -> None:
 # ─── Per-project configuration ───────────────────────────────────────────────
 
 
-# Project-level config files seeded into ``{PROJECT_DIR}/.pi-container`` alongside
-# the ``agent/`` subtree. Each is per-project: the proxy for this workspace mounts
-# its own allowlist/token_replacer, and the agent container reads its own tmpfs
-# list. The tmpfs template ships empty on purpose — seeding the repo's own list
-# (which references pi-container-internal paths) would create those dirs in every
-# foreign workspace.
+# Project-level config seeded into ``{PROJECT_DIR}/.pi-container``. Each is
+# per-project: the proxy for this workspace mounts its own allowlist/token_replacer,
+# the agent container reads its own tmpfs list, and llama-server loads chat
+# templates from the workspace's own copy (its models.json flags reference
+# ``.pi-container/chat-templates/...`` relative to the launch dir). The tmpfs
+# template ships empty on purpose — seeding the repo's own list (which references
+# pi-container-internal paths) would create those dirs in every foreign workspace.
+_PROJECT_CONFIG_DIRS = ("agent", "chat-templates")
 _PROJECT_CONFIG_FILES = ("allowlist.yaml", "token_replacer.yaml", "tmpfs.yaml", "flow_export.yaml", "egress.yaml")
 
 
@@ -108,10 +110,10 @@ def _ensure_project_config() -> Path:
     """Seed the per-project ``.pi-container`` config from the repo template if absent.
 
     Seeds ``{PROJECT_DIR}/.pi-container`` from ``{REPO_ROOT}/pi-coding-agent/default``:
-    the whole ``agent/`` subtree (models.json, settings.json, sessions, …) plus the
-    project-level ``allowlist.yaml``/``token_replacer.yaml``/``tmpfs.yaml``. Each
-    item is only seeded when missing, so existing (user-edited) files are never
-    overwritten and a partially-populated ``.pi-container`` is completed.
+    the ``agent/`` and ``chat-templates/`` subtrees plus the project-level
+    ``allowlist.yaml``/``token_replacer.yaml``/``tmpfs.yaml``/``flow_export.yaml``/
+    ``egress.yaml``. Each item is only seeded when missing, so existing (user-edited)
+    files are never overwritten and a partially-populated ``.pi-container`` is completed.
 
     Returns the agent launch-config dir (``{PROJECT_DIR}/.pi-container/agent``).
     """
@@ -120,11 +122,12 @@ def _ensure_project_config() -> Path:
         raise FileNotFoundError(f"Project config template not found: {template_root}")
 
     project_root = PROJECT_DIR / ".pi-container"
-    agent_config_dir = project_root / "agent"
 
-    if not agent_config_dir.exists():
-        logger.info(f"No agent config at {agent_config_dir}; seeding from {template_root / 'agent'}.")
-        shutil.copytree(template_root / "agent", agent_config_dir)
+    for name in _PROJECT_CONFIG_DIRS:
+        src, dst = template_root / name, project_root / name
+        if src.is_dir() and not dst.exists():
+            logger.info(f"Seeding {dst} from {src}.")
+            shutil.copytree(src, dst)
 
     for name in _PROJECT_CONFIG_FILES:
         src, dst = template_root / name, project_root / name
@@ -133,7 +136,7 @@ def _ensure_project_config() -> Path:
             logger.info(f"Seeding {dst} from {src}.")
             shutil.copy2(src, dst)
 
-    return agent_config_dir
+    return project_root / "agent"
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────

@@ -2,8 +2,10 @@
 
 Testing with Gemma 4 revealed that Pi Coding Agent benefits from excplicit chat template definitions as models aren't guaranteed to having them built-in.
 
+Chat templates are per-project: place them under `.pi-container/chat-templates/<model>/` and reference them with a workspace-relative path (llama-server runs from the workspace):
+
 "--jinja",
-"--chat-template-file", "llama-server/chat-templates/gemma-4-26B-A4B-it/chat_template.jinja"
+"--chat-template-file", ".pi-container/chat-templates/gemma-4-26B-A4B-it/chat_template.jinja"
 
 # System RAM cache
 

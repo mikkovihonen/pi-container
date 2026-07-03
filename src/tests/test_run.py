@@ -40,6 +40,8 @@ class TestEnsureProjectConfig:
         template = root / "pi-coding-agent" / "default"
         (template / "agent").mkdir(parents=True)
         (template / "agent" / "models.json").write_text("{}")
+        (template / "chat-templates" / "Some-Model").mkdir(parents=True)
+        (template / "chat-templates" / "Some-Model" / "chat_template.jinja").write_text("{{ x }}")
         (template / "allowlist.yaml").write_text("global: {}\n")
         (template / "token_replacer.yaml").write_text("global: {}\n")
         (template / "tmpfs.yaml").write_text("paths: []\n")
@@ -57,6 +59,7 @@ class TestEnsureProjectConfig:
 
         assert agent_dir == project / ".pi-container" / "agent"
         assert (agent_dir / "models.json").exists()
+        assert (project / ".pi-container" / "chat-templates" / "Some-Model" / "chat_template.jinja").exists()
         for name in ("allowlist.yaml", "token_replacer.yaml", "tmpfs.yaml"):
             assert (project / ".pi-container" / name).exists()
 

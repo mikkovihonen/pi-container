@@ -36,7 +36,7 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 
 ### Introduction
 
-When launched, pi-container looks for workspace-specific overrides in `./.pi-container` and package dependencies in the directory it's launched in. Each workspace gets its own agent config, proxy, isolated network, allowlist, token-replacer config, tmpfs list, flow-export toggle, egress policy, and flow-export directory — all under that workspace's `.pi-container/` (seeded from the `pi-coding-agent/default/` template on first run).
+When launched, pi-container looks for workspace-specific overrides in `./.pi-container` and package dependencies in the directory it's launched in. Each workspace gets its own agent config, proxy, isolated network, allowlist, token-replacer config, tmpfs list, flow-export toggle, egress policy, chat templates, and flow-export directory — all under that workspace's `.pi-container/` (seeded from the `pi-coding-agent/default/` template on first run).
 
 ### APT dependencies
 
@@ -114,11 +114,21 @@ allow:
 
 `run.py` translates truthy flags and non-empty port lists into the proxy container's `PROXY_ALLOW_*` env vars, which its entrypoint uses to open the matching `iptables` FORWARD rules. An absent or malformed file means **deny-all** (fail-safe). See [Proxy egress policy](architecture.md#proxy-egress-policy) for the full protocol/port reference.
 
+### Chat templates
+
+Some models need an explicit Jinja chat template. Place them under `.pi-container/chat-templates/<model>/` and reference them from a model's `serverCustomParameters.flags` with a path **relative to the workspace**:
+
+```json
+"--chat-template-file", ".pi-container/chat-templates/Ornith-1.0-35B-FP8/chat_template.jinja"
+```
+
+`llama-server` runs on the host from the workspace directory, so the relative path resolves against `.pi-container/chat-templates/` in whichever project you launched `pi` from — the templates are seeded there on first run alongside the rest of the config. (Model *weights* are shared across projects under `llama-server/models/`; only the small chat-template files are per-project.)
+
 ### Version control (.gitignore)
 
 A ready-to-copy [`.gitignore.example`](../.gitignore.example) lists every entry a workspace needs. Copy the relevant lines into your project's `.gitignore`.
 
-Most of `.pi-container/` is project configuration you **should commit** so the environment is reproducible: `allowlist.yaml`, `token_replacer.yaml`, `tmpfs.yaml`, `flow_export.yaml`, `egress.yaml`, and `dependencies/apt/packages.txt`. (`token_replacer.yaml` holds only `${ENV:VAR}` references, never resolved secrets — see [Token Replacer Secrets](#token-replacer-secrets).)
+Most of `.pi-container/` is project configuration you **should commit** so the environment is reproducible: `allowlist.yaml`, `token_replacer.yaml`, `tmpfs.yaml`, `flow_export.yaml`, `egress.yaml`, `chat-templates/`, and `dependencies/apt/packages.txt`. (`token_replacer.yaml` holds only `${ENV:VAR}` references, never resolved secrets — see [Token Replacer Secrets](#token-replacer-secrets).)
 
 The one directory you **must ignore** is the flow-export output:
 
