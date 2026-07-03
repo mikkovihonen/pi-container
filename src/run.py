@@ -32,6 +32,8 @@ from models import Model, ServerConfig
 from network import (
     ContainerNetworkManager,
     read_flow_export_enabled,
+    read_resource_limits,
+    resource_limit_args,
     scan_tmpfs_paths,
 )
 from runtimes import ContainerRuntime
@@ -85,14 +87,14 @@ def _init_runtime() -> None:
 
 
 # Project-level config seeded into ``{PROJECT_DIR}/.pi-container``. Each is
-# per-project: the proxy for this workspace mounts its own allowlist/token_replacer,
-# the agent container reads its own tmpfs list, and llama-server loads chat
-# templates from the workspace's own copy (its models.json flags reference
-# ``.pi-container/chat-templates/...`` relative to the launch dir). The tmpfs
-# template ships empty on purpose — seeding the repo's own list (which references
-# pi-container-internal paths) would create those dirs in every foreign workspace.
+# per-project: ``config.yaml`` holds orchestration settings (resource limits,
+# tmpfs paths, flow-export toggle, egress policy); the proxy mounts its own
+# allowlist/token_replacer; and llama-server loads chat templates from the
+# workspace's own copy (models.json flags reference ``.pi-container/chat-templates/...``
+# relative to the launch dir). config.yaml's tmpfs list ships empty on purpose —
+# seeding the repo's own paths would create those dirs in every foreign workspace.
 _PROJECT_CONFIG_DIRS = ("agent", "chat-templates")
-_PROJECT_CONFIG_FILES = ("allowlist.yaml", "token_replacer.yaml", "tmpfs.yaml", "flow_export.yaml", "egress.yaml")
+_PROJECT_CONFIG_FILES = ("config.yaml", "allowlist.yaml", "token_replacer.yaml")
 
 
 def _project_scope(project_dir: Path) -> tuple[str, str]:
@@ -110,10 +112,10 @@ def _ensure_project_config() -> Path:
     """Seed the per-project ``.pi-container`` config from the repo template if absent.
 
     Seeds ``{PROJECT_DIR}/.pi-container`` from ``{REPO_ROOT}/pi-coding-agent/default``:
-    the ``agent/`` and ``chat-templates/`` subtrees plus the project-level
-    ``allowlist.yaml``/``token_replacer.yaml``/``tmpfs.yaml``/``flow_export.yaml``/
-    ``egress.yaml``. Each item is only seeded when missing, so existing (user-edited)
-    files are never overwritten and a partially-populated ``.pi-container`` is completed.
+    the ``agent/`` and ``chat-templates/`` subtrees plus ``config.yaml`` and the proxy
+    addon configs ``allowlist.yaml``/``token_replacer.yaml``. Each item is only seeded
+    when missing, so existing (user-edited) files are never overwritten and a
+    partially-populated ``.pi-container`` is completed.
 
     Returns the agent launch-config dir (``{PROJECT_DIR}/.pi-container/agent``).
     """
@@ -149,7 +151,7 @@ def main() -> None:
         logger.error(f"Config file not found: {config_path}")
         sys.exit(1)
 
-    # Per-project mitmweb flow-export toggle (.pi-container/flow_export.yaml).
+    # Per-project mitmweb flow-export toggle (config.yaml flow_export.enabled).
     flow_export_enabled = read_flow_export_enabled(PROJECT_DIR / ".pi-container")
 
     with config_path.open("r") as file:
@@ -306,10 +308,8 @@ def main() -> None:
                     f"LLAMA_PORTS={portconfig}",
                     "--env",
                     f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",
-                    "--memory",
-                    "16g",
-                    "--cpus",
-                    "8",
+                    # Resource limits for this project's agent (config.yaml resources.agent).
+                    *resource_limit_args(read_resource_limits(PROJECT_DIR / ".pi-container", "agent")),
                     IMAGE_TAG,
                     *sys.argv[1:],
                 ]

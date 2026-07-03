@@ -72,10 +72,7 @@ def env_truthy(name: str, default: bool = False) -> bool:
 # v4 REDIRECT/NAT rules in ip6tables. See .env.example for the caveats.
 IPV6_ENABLED: bool = env_truthy("IPV6_ENABLED", default=False)
 
-# NOTE: mitmweb flow export is now a per-project setting read from
-# ``{PROJECT_DIR}/.pi-container/flow_export.yaml`` (see
-# ``network.read_flow_export_enabled``), not an environment variable.
-
-# NOTE: the proxy egress policy (per-protocol forwarding opt-ins) is now a
-# per-project setting read from ``{PROJECT_DIR}/.pi-container/egress.yaml`` (see
-# ``network.read_proxy_forward_env``), not environment variables.
+# NOTE: mitmweb flow export, the proxy egress policy, tmpfs paths, and container
+# resource limits are per-project settings read from
+# ``{PROJECT_DIR}/.pi-container/config.yaml`` (see ``network.load_project_config``
+# and its accessors), not environment variables.

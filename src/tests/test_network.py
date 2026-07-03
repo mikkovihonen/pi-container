@@ -261,43 +261,34 @@ class TestContainerNetworkManagerRefCount:
 
 
 class TestScanTmpfsPaths:
+    def _write(self, tmp_path, body):
+        (tmp_path / "config.yaml").write_text(body)
+
     def test_empty_config(self, tmp_path):
-        config = tmp_path / "tmpfs.yaml"
-        config.write_text("paths: []\n")
-        result = scan_tmpfs_paths(tmp_path)
-        assert result == []
+        self._write(tmp_path, "tmpfs:\n  paths: []\n")
+        assert scan_tmpfs_paths(tmp_path) == []
 
     def test_single_path(self, tmp_path):
-        config = tmp_path / "tmpfs.yaml"
-        config.write_text("paths:\n  - /workspace/build\n")
-        result = scan_tmpfs_paths(tmp_path)
-        assert result == ["/workspace/build"]
+        self._write(tmp_path, "tmpfs:\n  paths:\n    - /workspace/build\n")
+        assert scan_tmpfs_paths(tmp_path) == ["/workspace/build"]
 
     def test_multiple_paths_sorted(self, tmp_path):
-        config = tmp_path / "tmpfs.yaml"
-        config.write_text("paths:\n  - /workspace/cache\n  - /workspace/build\n  - /workspace/tmp\n")
-        result = scan_tmpfs_paths(tmp_path)
-        assert result == ["/workspace/build", "/workspace/cache", "/workspace/tmp"]
+        self._write(tmp_path, "tmpfs:\n  paths:\n    - /workspace/cache\n    - /workspace/build\n    - /workspace/tmp\n")
+        assert scan_tmpfs_paths(tmp_path) == ["/workspace/build", "/workspace/cache", "/workspace/tmp"]
 
     def test_deduplicates_paths(self, tmp_path):
-        config = tmp_path / "tmpfs.yaml"
-        config.write_text("paths:\n  - /workspace/build\n  - /workspace/build\n")
-        result = scan_tmpfs_paths(tmp_path)
-        assert result == ["/workspace/build"]
+        self._write(tmp_path, "tmpfs:\n  paths:\n    - /workspace/build\n    - /workspace/build\n")
+        assert scan_tmpfs_paths(tmp_path) == ["/workspace/build"]
 
     def test_missing_config(self, tmp_path):
-        result = scan_tmpfs_paths(tmp_path)
-        assert result == []
+        assert scan_tmpfs_paths(tmp_path) == []
 
-    def test_empty_paths_key(self, tmp_path):
-        config = tmp_path / "tmpfs.yaml"
-        config.write_text("paths:\n")
-        result = scan_tmpfs_paths(tmp_path)
-        assert result == []
+    def test_empty_tmpfs_section(self, tmp_path):
+        self._write(tmp_path, "tmpfs:\n")
+        assert scan_tmpfs_paths(tmp_path) == []
 
     def test_nonexistent_dir(self):
-        result = scan_tmpfs_paths(Path("/nonexistent"))
-        assert result == []
+        assert scan_tmpfs_paths(Path("/nonexistent")) == []
 
 
 # ---------------------------------------------------------------------------
@@ -351,13 +342,13 @@ class TestPerProjectProxy:
 
 
 # ---------------------------------------------------------------------------
-# ReadFlowExportEnabled (per-project flow_export.yaml)
+# ReadFlowExportEnabled (config.yaml flow_export.enabled)
 # ---------------------------------------------------------------------------
 
 
 class TestReadFlowExportEnabled:
-    def _write(self, tmp_path, text):
-        (tmp_path / "flow_export.yaml").write_text(text)
+    def _write(self, tmp_path, body):
+        (tmp_path / "config.yaml").write_text(body)
 
     def test_missing_file_returns_default(self, tmp_path):
         from network import read_flow_export_enabled
@@ -368,16 +359,16 @@ class TestReadFlowExportEnabled:
     def test_enabled_true(self, tmp_path):
         from network import read_flow_export_enabled
 
-        self._write(tmp_path, "enabled: true\n")
+        self._write(tmp_path, "flow_export:\n  enabled: true\n")
         assert read_flow_export_enabled(tmp_path) is True
 
     def test_enabled_false(self, tmp_path):
         from network import read_flow_export_enabled
 
-        self._write(tmp_path, "enabled: false\n")
+        self._write(tmp_path, "flow_export:\n  enabled: false\n")
         assert read_flow_export_enabled(tmp_path, default=True) is False
 
-    def test_key_absent_uses_default(self, tmp_path):
+    def test_section_absent_uses_default(self, tmp_path):
         from network import read_flow_export_enabled
 
         self._write(tmp_path, "something_else: 1\n")
@@ -386,18 +377,18 @@ class TestReadFlowExportEnabled:
     def test_malformed_yaml_returns_default(self, tmp_path):
         from network import read_flow_export_enabled
 
-        self._write(tmp_path, "enabled: [unclosed\n")
+        self._write(tmp_path, "flow_export: [unclosed\n")
         assert read_flow_export_enabled(tmp_path, default=False) is False
 
 
 # ---------------------------------------------------------------------------
-# ReadProxyForwardEnv (per-project egress.yaml)
+# ReadProxyForwardEnv (config.yaml egress.allow)
 # ---------------------------------------------------------------------------
 
 
 class TestReadProxyForwardEnv:
-    def _write(self, tmp_path, text):
-        (tmp_path / "egress.yaml").write_text(text)
+    def _write(self, tmp_path, allow_body):
+        (tmp_path / "config.yaml").write_text("egress:\n" + allow_body)
 
     def test_missing_file_denies_all(self, tmp_path):
         from network import read_proxy_forward_env
@@ -407,38 +398,78 @@ class TestReadProxyForwardEnv:
     def test_flags_only_truthy_emitted(self, tmp_path):
         from network import read_proxy_forward_env
 
-        self._write(tmp_path, "allow:\n  ssh: true\n  smtp: false\n  git: true\n")
+        self._write(tmp_path, "  allow:\n    ssh: true\n    smtp: false\n    git: true\n")
         env = read_proxy_forward_env(tmp_path)
         assert env == {"PROXY_ALLOW_SSH": "true", "PROXY_ALLOW_GIT": "true"}
 
     def test_ports_list_joined(self, tmp_path):
         from network import read_proxy_forward_env
 
-        self._write(tmp_path, "allow:\n  tcp_ports: [2222, 8443]\n  udp_ports: [51820]\n")
+        self._write(tmp_path, "  allow:\n    tcp_ports: [2222, 8443]\n    udp_ports: [51820]\n")
         env = read_proxy_forward_env(tmp_path)
         assert env == {"PROXY_ALLOW_TCP_PORTS": "2222,8443", "PROXY_ALLOW_UDP_PORTS": "51820"}
 
     def test_ports_accept_comma_string(self, tmp_path):
         from network import read_proxy_forward_env
 
-        self._write(tmp_path, "allow:\n  tcp_ports: '2222,8443'\n")
+        self._write(tmp_path, "  allow:\n    tcp_ports: '2222,8443'\n")
         assert read_proxy_forward_env(tmp_path) == {"PROXY_ALLOW_TCP_PORTS": "2222,8443"}
 
     def test_empty_ports_omitted(self, tmp_path):
         from network import read_proxy_forward_env
 
-        self._write(tmp_path, "allow:\n  ssh: true\n  tcp_ports: []\n")
+        self._write(tmp_path, "  allow:\n    ssh: true\n    tcp_ports: []\n")
         assert read_proxy_forward_env(tmp_path) == {"PROXY_ALLOW_SSH": "true"}
 
     def test_truthy_variants(self, tmp_path):
         from network import read_proxy_forward_env
 
-        self._write(tmp_path, "allow:\n  ssh: 'yes'\n  smtp: 'on'\n  git: 1\n  ntp: 'nope'\n")
+        self._write(tmp_path, "  allow:\n    ssh: 'yes'\n    smtp: 'on'\n    git: 1\n    ntp: 'nope'\n")
         env = read_proxy_forward_env(tmp_path)
         assert env == {"PROXY_ALLOW_SSH": "true", "PROXY_ALLOW_SMTP": "true", "PROXY_ALLOW_GIT": "true"}
 
     def test_malformed_yaml_denies_all(self, tmp_path):
         from network import read_proxy_forward_env
 
-        self._write(tmp_path, "allow: [unclosed\n")
+        (tmp_path / "config.yaml").write_text("egress: [unclosed\n")
         assert read_proxy_forward_env(tmp_path) == {}
+
+
+# ---------------------------------------------------------------------------
+# ReadResourceLimits (config.yaml resources.<agent|proxy>)
+# ---------------------------------------------------------------------------
+
+
+class TestReadResourceLimits:
+    def _write(self, tmp_path, body):
+        (tmp_path / "config.yaml").write_text(body)
+
+    def test_missing_file_uses_defaults(self, tmp_path):
+        from network import read_resource_limits
+
+        assert read_resource_limits(tmp_path, "agent") == {"memory": "16g", "cpus": 8}
+        assert read_resource_limits(tmp_path, "proxy") == {"memory": "4g", "cpus": 4}
+
+    def test_reads_configured_values(self, tmp_path):
+        from network import read_resource_limits
+
+        self._write(tmp_path, "resources:\n  agent:\n    memory: 32g\n    cpus: 12\n")
+        assert read_resource_limits(tmp_path, "agent") == {"memory": "32g", "cpus": 12}
+
+    def test_partial_overrides_fill_from_defaults(self, tmp_path):
+        from network import read_resource_limits
+
+        self._write(tmp_path, "resources:\n  proxy:\n    memory: 8g\n")
+        assert read_resource_limits(tmp_path, "proxy") == {"memory": "8g", "cpus": 4}
+
+    def test_resource_limit_args(self):
+        from network import resource_limit_args
+
+        assert resource_limit_args({"memory": "16g", "cpus": 8}) == ["--memory", "16g", "--cpus", "8"]
+
+    def test_resource_limit_args_omits_null(self):
+        from network import resource_limit_args
+
+        assert resource_limit_args({"memory": None, "cpus": 8}) == ["--cpus", "8"]
+        assert resource_limit_args({"memory": "2g", "cpus": None}) == ["--memory", "2g"]
+        assert resource_limit_args({"memory": None, "cpus": None}) == []

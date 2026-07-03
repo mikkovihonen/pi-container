@@ -36,7 +36,44 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 
 ### Introduction
 
-When launched, pi-container looks for workspace-specific overrides in `./.pi-container` and package dependencies in the directory it's launched in. Each workspace gets its own agent config, proxy, isolated network, allowlist, token-replacer config, tmpfs list, flow-export toggle, egress policy, chat templates, and flow-export directory — all under that workspace's `.pi-container/` (seeded from the `pi-coding-agent/default/` template on first run).
+When launched, pi-container looks for workspace-specific overrides in `./.pi-container` and package dependencies in the directory it's launched in. Each workspace gets its own agent config, proxy, isolated network, and chat templates — all under that workspace's `.pi-container/` (seeded from the `pi-coding-agent/default/` template on first run).
+
+Orchestration settings live in a single **`config.yaml`**; the proxy addon configs (`allowlist.yaml`, `token_replacer.yaml`) stay in their own files because they're mounted into and parsed by the proxy container.
+
+### The `config.yaml` file
+
+`.pi-container/config.yaml` is the single source of truth for this workspace's orchestration knobs — container **resource limits**, **tmpfs** paths, the **flow-export** toggle, and the **egress** policy:
+
+```yaml
+# .pi-container/config.yaml
+resources:
+  agent: { memory: 16g, cpus: 8 }
+  proxy: { memory: 4g, cpus: 4 }
+tmpfs:
+  paths: []
+flow_export:
+  enabled: false
+egress:
+  allow: { ssh: false, smtp: false, git: false, ntp: false, tcp_ports: [], udp_ports: [] }
+```
+
+Any missing section falls back to a safe default (defaults above; egress → deny-all; flow_export → off). Each subsection is documented below.
+
+### Resource limits
+
+`resources.agent` and `resources.proxy` set CPU/memory caps on the two containers this workspace launches:
+
+```yaml
+resources:
+  agent:
+    memory: 16g   # passed as --memory
+    cpus: 8       # passed as --cpus
+  proxy:
+    memory: 4g
+    cpus: 4
+```
+
+A `null` (or omitted) value drops the corresponding flag → **no limit** for that dimension. Defaults are `agent: 16g/8`, `proxy: 4g/4`.
 
 ### APT dependencies
 
@@ -71,48 +108,48 @@ The `token_replacer.yaml` config in `.pi-container/` may reference `${ENV:VAR}` 
 
 ### Transient tmpfs Mounts
 
-The `tmpfs.yaml` config in `.pi-container/` defines paths that are mounted as **tmpfs** (volatile RAM disks) inside the pi container. Data written to these paths is **lost when the container stops** — useful for build artifacts, caches, and temp files that should not persist across runs.
+`config.yaml`'s `tmpfs.paths` defines paths mounted as **tmpfs** (volatile RAM disks) inside the pi container. Data written to these paths is **lost when the container stops** — useful for build artifacts, caches, and temp files that should not persist across runs.
 
 ```yaml
-# .pi-container/tmpfs.yaml
-paths:
-  - /workspace/.venv
-  - /workspace/.pytest_cache
-  - /workspace/.ruff_cache
-  - /workspace/src/__pycache__
+# .pi-container/config.yaml
+tmpfs:
+  paths:
+    - /workspace/.venv
+    - /workspace/.pytest_cache
+    - /workspace/node_modules/.cache
 ```
 
-Each path is mounted at the same absolute location inside the container. On podman/docker, mounts use the `notmpcopyup` flag so they start empty (matching Apple `container` behavior) rather than copying the host's bind-mounted content into the tmpfs.
-
-Paths are validated on startup — invalid paths are silently skipped. The list is deduplicated and sorted for deterministic output.
+Each path is mounted at the same absolute location inside the container. On podman/docker, mounts use the `notmpcopyup` flag so they start empty (matching Apple `container` behavior) rather than copying the host's bind-mounted content into the tmpfs. Paths are deduplicated and sorted for deterministic output.
 
 ### Flow export
 
-The `flow_export.yaml` config in `.pi-container/` toggles whether the proxy's captured HTTP/HTTPS flow history for this workspace is exported after the agent shuts down. It is **per-project** (seeded from a template on first run, defaulting to disabled):
+`config.yaml`'s `flow_export.enabled` toggles whether the proxy's captured HTTP/HTTPS flow history for this workspace is exported after the agent shuts down (defaults to disabled):
 
 ```yaml
-# .pi-container/flow_export.yaml
-enabled: true
+# .pi-container/config.yaml
+flow_export:
+  enabled: true
 ```
 
-When `enabled: true`, `run.py` reads the flows the proxy staged for this session and writes a merged snapshot bucketed by UTC date under `.pi-container/exports/flows/<YYYY-MM-DD>/<HH-MM-SS-mmm>_<session-id>.json`. When the file is absent or malformed, export is **off** (fail-safe). The export contains full request/response bodies and headers — see [Version control](#version-control-gitignore) for why `.pi-container/exports/` must never be committed.
+When enabled, `run.py` reads the flows the proxy staged for this session and writes a merged snapshot bucketed by UTC date under `.pi-container/exports/flows/<YYYY-MM-DD>/<HH-MM-SS-mmm>_<session-id>.json`. When the section is absent or malformed, export is **off** (fail-safe). The export contains full request/response bodies and headers — see [Version control](#version-control-gitignore) for why `.pi-container/exports/` must never be committed.
 
 ### Egress policy
 
-The `egress.yaml` config in `.pi-container/` is the **per-project** proxy egress policy. Only HTTP/HTTPS/DNS are intercepted by mitmproxy; every other protocol is denied by default. Opt a protocol in here to let the agent use it — but note these are forwarded **uninspected** (plain NAT); mitmproxy and the allowlist do not see them.
+`config.yaml`'s `egress.allow` is the **per-project** proxy egress policy. Only HTTP/HTTPS/DNS are intercepted by mitmproxy; every other protocol is denied by default. Opt a protocol in here to let the agent use it — but note these are forwarded **uninspected** (plain NAT); mitmproxy and the allowlist do not see them.
 
 ```yaml
-# .pi-container/egress.yaml
-allow:
-  ssh: false            # TCP 22 (e.g. git over SSH)
-  smtp: false           # TCP 25, 465, 587
-  git: false            # TCP 9418 (git://)
-  ntp: false            # UDP 123
-  tcp_ports: []         # arbitrary extra TCP ports, e.g. [2222, 8443]
-  udp_ports: []         # arbitrary extra UDP ports, e.g. [51820]
+# .pi-container/config.yaml
+egress:
+  allow:
+    ssh: false            # TCP 22 (e.g. git over SSH)
+    smtp: false           # TCP 25, 465, 587
+    git: false            # TCP 9418 (git://)
+    ntp: false            # UDP 123
+    tcp_ports: []         # arbitrary extra TCP ports, e.g. [2222, 8443]
+    udp_ports: []         # arbitrary extra UDP ports, e.g. [51820]
 ```
 
-`run.py` translates truthy flags and non-empty port lists into the proxy container's `PROXY_ALLOW_*` env vars, which its entrypoint uses to open the matching `iptables` FORWARD rules. An absent or malformed file means **deny-all** (fail-safe). See [Proxy egress policy](architecture.md#proxy-egress-policy) for the full protocol/port reference.
+`run.py` translates truthy flags and non-empty port lists into the proxy container's `PROXY_ALLOW_*` env vars, which its entrypoint uses to open the matching `iptables` FORWARD rules. An absent or malformed section means **deny-all** (fail-safe). See [Proxy egress policy](architecture.md#proxy-egress-policy) for the full protocol/port reference.
 
 ### Chat templates
 
@@ -128,7 +165,7 @@ Some models need an explicit Jinja chat template. Place them under `.pi-containe
 
 A ready-to-copy [`.gitignore.example`](../.gitignore.example) lists every entry a workspace needs. Copy the relevant lines into your project's `.gitignore`.
 
-Most of `.pi-container/` is project configuration you **should commit** so the environment is reproducible: `allowlist.yaml`, `token_replacer.yaml`, `tmpfs.yaml`, `flow_export.yaml`, `egress.yaml`, `chat-templates/`, and `dependencies/apt/packages.txt`. (`token_replacer.yaml` holds only `${ENV:VAR}` references, never resolved secrets — see [Token Replacer Secrets](#token-replacer-secrets).)
+Most of `.pi-container/` is project configuration you **should commit** so the environment is reproducible: `config.yaml`, `allowlist.yaml`, `token_replacer.yaml`, `chat-templates/`, and `dependencies/apt/packages.txt`. (`token_replacer.yaml` holds only `${ENV:VAR}` references, never resolved secrets — see [Token Replacer Secrets](#token-replacer-secrets).)
 
 The one directory you **must ignore** is the flow-export output:
 

@@ -27,66 +27,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ─── Tmpfs Config Scanner ─────────────────────────────────────────────────
+# ─── Project config (.pi-container/config.yaml) ───────────────────────────
+#
+# The per-project orchestration config: container resource limits, transient
+# tmpfs paths, flow-export toggle, and proxy egress policy — all in one file.
+# (The proxy addon configs allowlist.yaml / token_replacer.yaml stay separate:
+# they have their own schema and are bind-mounted into the proxy container.)
 
+# Container resource limits applied when values are present (a falsy/null value
+# omits the flag → unlimited). Defaults preserve the agent's historical 16g/8.
+_DEFAULT_RESOURCES = {
+    "agent": {"memory": "16g", "cpus": 8},
+    "proxy": {"memory": "4g", "cpus": 4},
+}
 
-def scan_tmpfs_paths(config_dir: Path | None = None) -> list[str]:
-    """Scan the tmpfs config for transient paths to mount as tmpfs.
-
-    Reads ``.pi-container/tmpfs.yaml`` and returns a deduplicated, sorted
-    list of absolute container paths that should be mounted as tmpfs.
-
-    Args:
-        config_dir: Override the default CONFIG_DIR. Defaults to CONFIG_DIR.
-
-    Returns:
-        A deduplicated, sorted list of tmpfs mount paths.
-    """
-    import yaml as _yaml
-
-    config_path = (config_dir or CONFIG_DIR) / "tmpfs.yaml"
-    if not config_path.exists():
-        logger.debug(f"Tmpfs config not found at {config_path}; no tmpfs mounts will be added.")
-        return []
-
-    with config_path.open("r") as f:
-        config = _yaml.safe_load(f) or {}
-
-    paths = config.get("paths", []) or []
-    # Deduplicate and sort for deterministic output
-    return sorted({str(p) for p in paths})
-
-
-def read_flow_export_enabled(config_dir: Path | None = None, default: bool = False) -> bool:
-    """Read the per-project mitmweb flow-export toggle.
-
-    Reads the ``enabled`` flag from ``.pi-container/flow_export.yaml``. When
-    enabled, the proxy's captured HTTP/HTTPS flow history is exported (bucketed by
-    UTC date) under ``.pi-container/exports/`` after the agent shuts down. This is
-    per-project so each workspace decides whether to keep an audit trail.
-
-    Returns ``default`` when the file is absent or malformed (fail-safe: no
-    capture unless a workspace opts in).
-    """
-    import yaml as _yaml
-
-    config_path = (config_dir or CONFIG_DIR) / "flow_export.yaml"
-    if not config_path.exists():
-        logger.debug(f"Flow-export config not found at {config_path}; defaulting to enabled={default}.")
-        return default
-
-    try:
-        with config_path.open("r") as f:
-            config = _yaml.safe_load(f) or {}
-    except (OSError, _yaml.YAMLError) as e:
-        logger.warning(f"Could not read flow-export config {config_path}: {e}; defaulting to enabled={default}.")
-        return default
-
-    return bool(config.get("enabled", default))
-
-
-# Proxy egress policy: YAML key under ``allow:`` → the ``PROXY_ALLOW_*`` env var
-# the proxy entrypoint reads to open that protocol's (uninspected) FORWARD rule.
+# Proxy egress policy: YAML key under ``egress.allow`` → the ``PROXY_ALLOW_*``
+# env var the proxy entrypoint reads to open that protocol's (uninspected) rule.
 _PROXY_FORWARD_FLAGS = {
     "ssh": "PROXY_ALLOW_SSH",
     "smtp": "PROXY_ALLOW_SMTP",
@@ -99,46 +55,76 @@ _PROXY_FORWARD_PORTS = {
 }
 
 
+def load_project_config(config_dir: Path | None = None) -> dict:
+    """Load ``.pi-container/config.yaml``. Returns ``{}`` if absent or malformed.
+
+    The single source of truth for per-project orchestration settings. Individual
+    accessors (``scan_tmpfs_paths``, ``read_flow_export_enabled``,
+    ``read_proxy_forward_env``, ``read_resource_limits``) read their section from
+    the returned mapping.
+    """
+    import yaml as _yaml
+
+    config_path = (config_dir or CONFIG_DIR) / "config.yaml"
+    if not config_path.exists():
+        logger.debug(f"Project config not found at {config_path}; using defaults.")
+        return {}
+
+    try:
+        with config_path.open("r") as f:
+            return _yaml.safe_load(f) or {}
+    except (OSError, _yaml.YAMLError) as e:
+        logger.warning(f"Could not read project config {config_path}: {e}; using defaults.")
+        return {}
+
+
+def scan_tmpfs_paths(config_dir: Path | None = None) -> list[str]:
+    """Transient tmpfs mount paths from config.yaml ``tmpfs.paths``.
+
+    Returns a deduplicated, sorted list of absolute container paths to mount as
+    tmpfs (volatile RAM disks). Empty when the section is absent.
+    """
+    tmpfs = load_project_config(config_dir).get("tmpfs") or {}
+    paths = tmpfs.get("paths", []) or []
+    return sorted({str(p) for p in paths})
+
+
+def read_flow_export_enabled(config_dir: Path | None = None, default: bool = False) -> bool:
+    """The mitmweb flow-export toggle from config.yaml ``flow_export.enabled``.
+
+    When enabled, the proxy's captured HTTP/HTTPS flow history is exported
+    (bucketed by UTC date) under ``.pi-container/exports/`` after the agent shuts
+    down. Returns ``default`` when the section is absent (fail-safe: no capture
+    unless a workspace opts in).
+    """
+    flow_export = load_project_config(config_dir).get("flow_export") or {}
+    return bool(flow_export.get("enabled", default))
+
+
 def _egress_truthy(value: object) -> bool:
     """Match the proxy entrypoint's truthiness (true/1/yes/on), YAML bools included."""
     return str(value).strip().lower() in ("true", "1", "yes", "on")
 
 
 def read_proxy_forward_env(config_dir: Path | None = None) -> dict[str, str]:
-    """Read the per-project proxy egress policy into ``PROXY_ALLOW_*`` env vars.
+    """The proxy egress policy from config.yaml ``egress.allow`` → ``PROXY_ALLOW_*``.
 
-    Reads ``.pi-container/egress.yaml`` and returns the env dict passed to the
-    proxy container, whose entrypoint opens the corresponding (UNINSPECTED)
-    FORWARD rules. Only HTTP/HTTPS/DNS are intercepted by mitmproxy; every other
-    protocol is denied by default, so an absent/empty file yields ``{}`` (deny).
+    Returns the env dict passed to the proxy container, whose entrypoint opens the
+    corresponding (UNINSPECTED) FORWARD rules. Only HTTP/HTTPS/DNS are intercepted
+    by mitmproxy; every other protocol is denied by default, so an absent section
+    yields ``{}`` (deny-all).
 
     Expected shape::
 
-        allow:
-          ssh: true            # → PROXY_ALLOW_SSH=true
-          smtp: false
-          git: false
-          ntp: false
-          tcp_ports: [2222]    # → PROXY_ALLOW_TCP_PORTS=2222
-          udp_ports: []
+        egress:
+          allow:
+            ssh: true            # → PROXY_ALLOW_SSH=true
+            tcp_ports: [2222]    # → PROXY_ALLOW_TCP_PORTS=2222
 
     Ports accept a list or a comma-separated string. Only truthy flags and
     non-empty port lists are emitted.
     """
-    import yaml as _yaml
-
-    config_path = (config_dir or CONFIG_DIR) / "egress.yaml"
-    if not config_path.exists():
-        return {}
-
-    try:
-        with config_path.open("r") as f:
-            config = _yaml.safe_load(f) or {}
-    except (OSError, _yaml.YAMLError) as e:
-        logger.warning(f"Could not read egress config {config_path}: {e}; defaulting to deny-all.")
-        return {}
-
-    allow = config.get("allow") or {}
+    allow = (load_project_config(config_dir).get("egress") or {}).get("allow") or {}
     env: dict[str, str] = {}
     for key, var in _PROXY_FORWARD_FLAGS.items():
         if _egress_truthy(allow.get(key)):
@@ -149,6 +135,31 @@ def read_proxy_forward_env(config_dir: Path | None = None) -> dict[str, str]:
         if joined:
             env[var] = joined
     return env
+
+
+def read_resource_limits(config_dir: Path | None = None, which: str = "agent") -> dict:
+    """Resource limits for ``which`` ('agent'|'proxy') from config.yaml ``resources``.
+
+    Returns ``{"memory": ..., "cpus": ...}``, filling any missing value from
+    :data:`_DEFAULT_RESOURCES`. A value set to null/empty in config.yaml is passed
+    through as falsy so :func:`resource_limit_args` omits the flag (unlimited).
+    """
+    section = (load_project_config(config_dir).get("resources") or {}).get(which) or {}
+    defaults = _DEFAULT_RESOURCES[which]
+    return {
+        "memory": section.get("memory", defaults["memory"]),
+        "cpus": section.get("cpus", defaults["cpus"]),
+    }
+
+
+def resource_limit_args(limits: dict) -> list[str]:
+    """Build ``--memory``/``--cpus`` run flags, omitting falsy (null) values."""
+    args: list[str] = []
+    if limits.get("memory"):
+        args += ["--memory", str(limits["memory"])]
+    if limits.get("cpus"):
+        args += ["--cpus", str(limits["cpus"])]
+    return args
 
 
 # ─── Token Replacer Config Scanner (duplicated from pi-coding-agent-proxy/addons/token_replacer)
@@ -490,6 +501,8 @@ class ContainerNetworkManager:
             "NET_ADMIN",
             "--dns",
             "1.1.1.1",
+            # Resource limits for this project's proxy (config.yaml resources.proxy).
+            *resource_limit_args(read_resource_limits(self.config_dir, "proxy")),
             "-p",
             f"{self.mitmweb_port}:8081",
             # IPv6 policy: --sysctl toggle (VM runtimes) + env flag the proxy
@@ -502,7 +515,7 @@ class ContainerNetworkManager:
             *(["--env", f"LLAMA_PORTS={self.llama_ports}"] if self.llama_ports else []),
             *(["--env", f"LLAMA_HOST_ADDR={llama_host_addr}"] if llama_host_addr else []),
             # Per-protocol forwarding opt-ins (uninspected protocols), read from
-            # this project's .pi-container/egress.yaml.
+            # this project's config.yaml (egress.allow).
             *[flag for k, v in read_proxy_forward_env(self.config_dir).items() for flag in ("--env", f"{k}={v}")],
             *config_mounts,
             *exports_mounts,

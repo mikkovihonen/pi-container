@@ -3,8 +3,8 @@
 #
 # Copy the lines below into your project's .gitignore. Everything else under
 # .pi-container/ is configuration you SHOULD commit so the environment stays
-# reproducible: allowlist.yaml, token_replacer.yaml, tmpfs.yaml, and
-# dependencies/apt/packages.txt. (token_replacer.yaml holds only ${ENV:VAR}
+# reproducible: config.yaml, allowlist.yaml, token_replacer.yaml, chat-templates/,
+# and dependencies/apt/packages.txt. (token_replacer.yaml holds only ${ENV:VAR}
 # references, never resolved secrets.)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -16,10 +16,10 @@
 # Never commit.
 .pi-container/exports/
 
-# OPTIONAL — scratch directories you mount as tmpfs via .pi-container/tmpfs.yaml.
+# OPTIONAL — scratch directories you mount as tmpfs via config.yaml (tmpfs.paths).
 # Their contents live in RAM and never persist across runs, but the (empty)
-# mount points can appear in your workspace. These mirror the default
-# tmpfs.yaml example; adjust to match your own and your project's toolchain.
+# mount points can appear in your workspace. Adjust to match the tmpfs.paths you
+# configure and your project's toolchain.
 .venv/
 .pytest_cache/
 .ruff_cache/

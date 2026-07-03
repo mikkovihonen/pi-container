@@ -1,0 +1,46 @@
+# Per-project pi-container configuration (seeded on first run; edit per workspace).
+#
+# This is the single source of truth for orchestration settings. The proxy addon
+# configs (allowlist.yaml, token_replacer.yaml) and chat templates live in their
+# own files/dirs alongside this one.
+
+# Container resource limits. A null/omitted value means "no limit" (the flag is
+# not passed). Applies to the containers this workspace launches.
+resources:
+  agent:
+    memory: 16g
+    cpus: 8
+  proxy:
+    memory: 4g
+    cpus: 4
+
+# Transient tmpfs mounts inside the agent container. Each path (under /workspace)
+# is a volatile RAM disk — data is lost when the container stops. Use it for build
+# artifacts / caches you don't want written back to the host workspace.
+#   Example:
+#     tmpfs:
+#       paths:
+#         - /workspace/node_modules/.cache
+#         - /workspace/target
+tmpfs:
+  paths: []
+
+# mitmweb flow export. When enabled, the proxy's captured HTTP/HTTPS flow history
+# is exported (bucketed by UTC date) under .pi-container/exports/ after the agent
+# shuts down. The export contains full request/response bodies — treat exports/ as
+# sensitive and keep it out of version control. Default: disabled.
+flow_export:
+  enabled: false
+
+# Proxy egress policy. Only HTTP/HTTPS/DNS are intercepted by mitmproxy; every
+# other protocol is denied by default. Opt a protocol in to let the agent use it —
+# but note these are forwarded UNINSPECTED (plain NAT); mitmproxy and the allowlist
+# do not see them.
+egress:
+  allow:
+    ssh: false            # TCP 22 (e.g. git over SSH)
+    smtp: false           # TCP 25, 465, 587
+    git: false            # TCP 9418 (git:// protocol)
+    ntp: false            # UDP 123 (time sync)
+    tcp_ports: []         # arbitrary extra TCP ports, e.g. [2222, 8443]
+    udp_ports: []         # arbitrary extra UDP ports, e.g. [51820]

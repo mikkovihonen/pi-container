@@ -42,9 +42,9 @@ class TestEnsureProjectConfig:
         (template / "agent" / "models.json").write_text("{}")
         (template / "chat-templates" / "Some-Model").mkdir(parents=True)
         (template / "chat-templates" / "Some-Model" / "chat_template.jinja").write_text("{{ x }}")
+        (template / "config.yaml").write_text("tmpfs:\n  paths: []\n")
         (template / "allowlist.yaml").write_text("global: {}\n")
         (template / "token_replacer.yaml").write_text("global: {}\n")
-        (template / "tmpfs.yaml").write_text("paths: []\n")
         return template
 
     def test_seeds_agent_and_yaml_when_absent(self, tmp_path, monkeypatch):
@@ -60,7 +60,7 @@ class TestEnsureProjectConfig:
         assert agent_dir == project / ".pi-container" / "agent"
         assert (agent_dir / "models.json").exists()
         assert (project / ".pi-container" / "chat-templates" / "Some-Model" / "chat_template.jinja").exists()
-        for name in ("allowlist.yaml", "token_replacer.yaml", "tmpfs.yaml"):
+        for name in ("config.yaml", "allowlist.yaml", "token_replacer.yaml"):
             assert (project / ".pi-container" / name).exists()
 
     def test_does_not_overwrite_existing(self, tmp_path, monkeypatch):

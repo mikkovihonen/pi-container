@@ -1,0 +1,48 @@
+# Per-project pi-container configuration (this repo's own; edit as needed).
+#
+# Single source of truth for orchestration settings. The proxy addon configs
+# (allowlist.yaml, token_replacer.yaml) and chat templates live in their own
+# files/dirs alongside this one.
+
+# Container resource limits. A null/omitted value means "no limit".
+resources:
+  agent:
+    memory: 4g
+    cpus: 2
+  proxy:
+    memory: 4g
+    cpus: 2
+
+# Transient tmpfs mounts inside the agent container (volatile; lost on stop).
+# These shadow this repo's own build/runtime artifacts so the agent works against
+# clean, empty dirs rather than the host's caches/locks/models.
+tmpfs:
+  paths:
+    - /workspace/.venv
+    - /workspace/.pytest_cache
+    - /workspace/.ruff_cache
+    - /workspace/src/__pycache__
+    - /workspace/llama-server/.locks
+    - /workspace/llama-server/logs
+    - /workspace/llama-server/models
+    - /workspace/pi-coding-agent-proxy/.locks
+    - /workspace/pi-coding-agent-proxy/.pytest_cache
+    - /workspace/pi-coding-agent-proxy/__pycache__
+    - /workspace/pi-coding-agent-proxy/addons/allowlist/.pytest_cache
+    - /workspace/pi-coding-agent-proxy/addons/allowlist/__pycache__
+    - /workspace/pi-coding-agent-proxy/addons/token_replacer/.pytest_cache
+    - /workspace/pi-coding-agent-proxy/addons/token_replacer/__pycache__
+
+# mitmweb flow export — capture this repo's own HTTP/HTTPS history for auditing.
+flow_export:
+  enabled: true
+
+# Proxy egress policy — deny-all except the inspected HTTP/HTTPS/DNS.
+egress:
+  allow:
+    ssh: false
+    smtp: false
+    git: false
+    ntp: false
+    tcp_ports: []
+    udp_ports: []
