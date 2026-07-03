@@ -324,6 +324,44 @@ class ContainerNetworkManager:
                 f"running proxy)."
             )
 
+    def warn_if_proxy_lacks_ipv6_egress(self, upstream_iface: str = "eth0") -> None:
+        """Confirm the *running* proxy actually has IPv6 egress on its upstream NIC.
+
+        This is the definitive, observed check: static capability and
+        upstream-network config are checked preflight in :meth:`_preflight_ipv6_egress`,
+        but only the live proxy tells us whether ``eth0`` got a global v6 address AND a
+        v6 default route. Warns (does not fail) when either is missing, since IPv4
+        still works and the agent's own IPv6 is disabled unless a route was found.
+        """
+        try:
+            addr = subprocess.run(
+                [self.container_runtime, "exec", self.proxy_name, "ip", "-6", "addr", "show", upstream_iface],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout
+            route = subprocess.run(
+                [self.container_runtime, "exec", self.proxy_name, "ip", "-6", "route", "show", "default"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout
+        except Exception as e:
+            logger.warning(f"Could not verify proxy IPv6 egress: {e}")
+            return
+
+        has_global = bool(re.search(r"inet6\s+[0-9a-fA-F:]+/\d+\s+scope global", addr))
+        has_default = bool(route.strip())
+        if not (has_global and has_default):
+            logger.warning(
+                f"IPV6_ENABLED=true but the proxy has no working IPv6 egress on {upstream_iface} "
+                f"(global address: {has_global}, default route: {has_default}); this runtime/host "
+                f"does not route IPv6 to the internet, so agent IPv6 connections will fail. "
+                f"Set IPV6_ENABLED=false to silence this."
+            )
+        else:
+            logger.info(f"Proxy has IPv6 egress on {upstream_iface} (global address + default route present).")
+
     def __enter__(self) -> ContainerNetworkManager:
         self.start()
         return self
