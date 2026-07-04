@@ -303,11 +303,6 @@ def main() -> None:
                 # pi-coding-agent-proxy/*) inside that workspace.
                 tmpfs_paths = scan_tmpfs_paths(pi_container_dir)
 
-                # The project's apt dependency manifest, bind-mounted read-only
-                # back over the tmpfs that hides the rest of .pi-container (see the
-                # mounts below).
-                deps_dir = pi_container_dir / "dependencies"
-
                 pi_container_cmd = [
                     CONTAINER_RUNTIME,
                     "run",
@@ -330,19 +325,7 @@ def main() -> None:
                     "--volume",
                     f"{PROJECT_DIR}:/workspace",
                     *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
-                    # Hide the whole .pi-container from the agent — its config.yaml,
-                    # allowlist/token_replacer, flow-export captures and agent
-                    # secrets — by shadowing it with an empty tmpfs.
-                    *RUNTIME.tmpfs_args("/workspace/.pi-container"),
-                    # ...then bind the dependency manifest back on top (read-only)
-                    # so the entrypoint can still install the project's apt packages.
-                    # Only mounted when present: podman refuses to auto-create a
-                    # missing bind source and the container would fail to start.
-                    *(
-                        ["--volume", f"{deps_dir}:/workspace/.pi-container/dependencies:ro"]
-                        if deps_dir.exists()
-                        else []
-                    ),
+                    *RUNTIME.tmpfs_args("/workspace/.pi-container/exports"),
                     "--workdir",
                     "/workspace",
                     # Transient tmpfs mounts for build artifacts, caches, etc.
