@@ -26,7 +26,7 @@ from config import (
     PROXY_UPSTREAM_NETWORK_ENV,
     REPO_ROOT,
 )
-from config_schema import validate_config
+from config_schema import validate_config, validate_models
 from flow_export import export_mitmweb_flows, poll_agent_container_ips
 from models import Model, ServerConfig
 from network import (
@@ -180,6 +180,16 @@ def main() -> None:
             "or update schema_version in .pi-container/config.yaml to match the "
             "current pi-container version (see latest git tag)."
         )
+        sys.exit(1)
+
+    # Validate models.json schema.
+    models_path = pi_container_dir / "agent" / "models.json"
+    models_valid, models_errors = validate_models(models_path)
+    if not models_valid:
+        logger.error("Models configuration invalid:")
+        for error in models_errors:
+            logger.error(error)
+        logger.error("\nFix: update .pi-container/agent/models.json to match the expected schema.")
         sys.exit(1)
     flow_export_enabled = read_flow_export_enabled(pi_container_dir)
     ipv6_enabled = read_network_config(pi_container_dir)["ipv6"]

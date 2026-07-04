@@ -223,3 +223,286 @@ class TestValidateConfig:
         is_valid, errors, _ = validate_config(config_path)
         assert is_valid is False
         assert any("YAML" in e for e in errors)
+
+
+class TestValidateModels:
+    """Tests for validate_models() in config_schema.py."""
+
+    def _write_models(
+        self,
+        tmp_path: Path,
+        providers: dict,
+    ) -> Path:
+        """Write a models.json file and return its path."""
+        import json
+
+        models_path = tmp_path / "models.json"
+        models_path.write_text(json.dumps({"providers": providers}, indent=2))
+        return models_path
+
+    def test_valid_models_passes(self, tmp_path: Path):
+        """When models.json has valid structure, validation passes."""
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path,
+            {
+                "local-test": {
+                    "baseUrl": "http://llama:9999/v1",
+                    "serverCustomParameters": {
+                        "flags": [
+                            "--ctx-size",
+                            4096,
+                            "--n-gpu-layers",
+                            999,
+                        ],
+                        "hfModels": {
+                            "main": {
+                                "fileFlag": "--model",
+                                "repo": "test/repo",
+                                "file": "model.gguf",
+                                "dir": "model-dir",
+                                "additionalServerFlags": [],
+                                "sha256": "",
+                            },
+                        },
+                    },
+                },
+            },
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is True
+        assert errors == []
+
+    def test_missing_models_file(self, tmp_path: Path):
+        """When models.json does not exist, validation fails."""
+        from config_schema import validate_models
+
+        models_path = tmp_path / "missing.json"
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("not found" in e.lower() for e in errors)
+
+    def test_invalid_json(self, tmp_path: Path):
+        """When models.json is not valid JSON, validation fails."""
+        from config_schema import validate_models
+
+        models_path = tmp_path / "models.json"
+        models_path.write_text("{invalid json")
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("JSON" in e for e in errors)
+
+    def test_invalid_flag_type(self, tmp_path: Path):
+        """When flags contain non-string/non-number items, validation fails."""
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path,
+            {
+                "local-test": {
+                    "serverCustomParameters": {
+                        "flags": [
+                            "--ctx-size",
+                            4096,
+                            None,  # Invalid: None is not str/int/float
+                        ],
+                    },
+                },
+            },
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("NoneType" in e for e in errors)
+
+    def test_missing_chat_template_path(self, tmp_path: Path):
+        """When --chat-template-file points to a non-existent file, validation fails."""
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path,
+            {
+                "local-test": {
+                    "serverCustomParameters": {
+                        "flags": [
+                            "--ctx-size",
+                            4096,
+                            "--chat-template-file",
+                            ".pi-container/chat-templates/missing/chat_template.jinja",
+                        ],
+                    },
+                },
+            },
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("does not exist" in e for e in errors)
+
+    def test_chat_template_file_missing_path_value(self, tmp_path: Path):
+        """When --chat-template-file has no following path, validation fails."""
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path,
+            {
+                "local-test": {
+                    "serverCustomParameters": {
+                        "flags": [
+                            "--ctx-size",
+                            4096,
+                            "--chat-template-file",  # No following path
+                        ],
+                    },
+                },
+            },
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("no following path" in e for e in errors)
+
+    def test_chat_template_path_with_existing_file(self, tmp_path: Path):
+        """When --chat-template-file points to an existing file, validation passes."""
+        import json
+
+        from config_schema import validate_models
+
+        # Create the directory structure matching the real project:
+        # .pi-container/agent/models.json
+        # .pi-container/chat-templates/test-model/chat_template.jinja
+        pi_container = tmp_path / ".pi-container"
+        agent_dir = pi_container / "agent"
+        agent_dir.mkdir(parents=True)
+
+        template_dir = pi_container / "chat-templates" / "test-model"
+        template_dir.mkdir(parents=True)
+        template_file = template_dir / "chat_template.jinja"
+        template_file.write_text("# template")
+
+        # Create models.json
+        models_path = agent_dir / "models.json"
+        models_path.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "local-test": {
+                            "serverCustomParameters": {
+                                "flags": [
+                                    "--ctx-size",
+                                    4096,
+                                    "--chat-template-file",
+                                    ".pi-container/chat-templates/test-model/chat_template.jinja",
+                                ],
+                                "hfModels": {
+                                    "main": {
+                                        "fileFlag": "--model",
+                                        "repo": "test/repo",
+                                        "file": "model.gguf",
+                                        "dir": "model-dir",
+                                        "additionalServerFlags": [],
+                                        "sha256": "",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                indent=2,
+            )
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is True
+        assert errors == []
+
+    def test_hf_models_null(self, tmp_path: Path):
+        """When hfModels is null, validation fails."""
+
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path,
+            {
+                "local-test": {
+                    "serverCustomParameters": {
+                        "hfModels": None,
+                        "flags": [],
+                    },
+                },
+            },
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("must not be null" in e and "hfModels" in e for e in errors)
+
+    def test_hf_models_empty(self, tmp_path: Path):
+        """When hfModels is empty, validation fails."""
+
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path,
+            {
+                "local-test": {
+                    "serverCustomParameters": {
+                        "hfModels": {},
+                        "flags": [],
+                    },
+                },
+            },
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("must not be empty" in e for e in errors)
+
+    def test_hf_models_missing_required_fields(self, tmp_path: Path):
+        """When hfModels entry is missing required fields, validation fails."""
+
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path,
+            {
+                "local-test": {
+                    "serverCustomParameters": {
+                        "hfModels": {
+                            "main": {
+                                "fileFlag": "--model",
+                                "repo": "test/repo",
+                                # Missing: file, dir
+                            },
+                        },
+                        "flags": [],
+                    },
+                },
+            },
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("file" in e and "must not be null" in e for e in errors)
+        assert any("dir" in e and "must not be null" in e for e in errors)
+
+    def test_hf_models_null_required_field(self, tmp_path: Path):
+        """When hfModels entry has null required field, validation fails."""
+
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path,
+            {
+                "local-test": {
+                    "serverCustomParameters": {
+                        "hfModels": {
+                            "main": {
+                                "fileFlag": None,
+                                "repo": "test/repo",
+                                "file": "model.gguf",
+                                "dir": "model-dir",
+                            },
+                        },
+                        "flags": [],
+                    },
+                },
+            },
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("fileFlag" in e and "must not be null" in e for e in errors)
