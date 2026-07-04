@@ -118,10 +118,11 @@ stay in sync:
 | Config schema version | `pi-coding-agent/default/config.yaml` → `schema_version` |
 | Runtime config version | `.pi-container/config.yaml` → `schema_version` |
 
-The `validate_versions.py` script in CI enforces that the first three match. The
-runtime config (`.pi-container/config.yaml`) is checked at launch time by
-`src/config_schema.py` — if it does not match the latest git tag, the container
-refuses to start.
+The `validate_versions.py` script runs in CI (not pre-commit) because git has
+no `pre-tag` hook — the version cross-check can only pass once the tag exists,
+which happens after the commit. The runtime config
+(`.pi-container/config.yaml`) is checked at launch time by `src/config_schema.py`
+— if it does not match the latest git tag, the container refuses to start.
 
 ### Steps
 

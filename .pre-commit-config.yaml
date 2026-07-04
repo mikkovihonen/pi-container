@@ -24,10 +24,4 @@ repos:
         types: [python]
         pass_filenames: false
 
-      - id: validate-versions
-        name: validate-versions
-        entry: uv run --project . python .github/workflows/scripts/validate_versions.py
-        language: system
-        types: [python]
-        pass_filenames: false
-        always_run: false
+
