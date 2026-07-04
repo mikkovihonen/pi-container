@@ -1,0 +1,28 @@
+# Changelog
+
+All notable changes to this project will be documented in this file. The format is
+based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- Seed `pi-coding-agent/default/entrypoint.sh` into `.pi-container/agent/` when
+  missing, so users have a customizable entrypoint that runs before `pi` launches
+  inside the container.
+
+## [0.1.0] - 2026-07-04
+
+Initial release.
+
+### Added
+- Containerized agent with transparent mitmproxy proxy for HTTP/HTTPS/DNS auditing.
+- Per-workspace isolation: each workspace gets its own proxy, isolated network,
+  mitmweb port, and seeded config.
+- Configurable resource limits, tmpfs paths, flow export, and network settings
+  via `.pi-container/config.yaml`.
+- Agent environment variables and bind mounts via config.
+- IPv6 support (off by default, opt-in per workspace).
+- Runtime-agnostic: works with Apple `container`, `podman`, and `docker`.
+- Allowlist and token-replacer proxy addons.
+- Flow export: per-project capture of intercepted traffic for audit.

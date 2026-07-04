@@ -52,9 +52,6 @@ if [ -n "$HOST_GIT_CONFIG" ]; then
 fi
 
 exec gosu pi bash -c '
-    {
-        uv venv --python /usr/local/bin/python3 --no-managed-python --with pip "$UV_PROJECT_ENVIRONMENT"
-        source /home/pi/.venv/bin/activate
-    } >/dev/null 2>&1
+    /home/pi/.pi/agent/entrypoint.sh
     exec pi "$@"
 ' -- "$@"

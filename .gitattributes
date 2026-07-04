@@ -1,0 +1,28 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Python files: LF line endings (standard on Linux/macOS)
+*.py text eol=lf
+
+# Shell scripts: LF line endings
+*.sh text eol=lf
+
+# YAML files: LF line endings
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Markdown: LF line endings
+*.md text eol=lf
+
+# Config files: LF line endings
+*.toml text eol=lf
+*.json text eol=lf
+*.cfg text eol=lf
+*.ini text eol=lf
+
+# Containerfiles: LF line endings
+Containerfile text eol=lf
+
+# Binary files: treat as binary (no normalization)
+*.svg binary
+*.lock binary

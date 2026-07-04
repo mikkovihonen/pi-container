@@ -26,6 +26,7 @@ from config import (
     PROXY_UPSTREAM_NETWORK_ENV,
     REPO_ROOT,
 )
+from config_schema import validate_config
 from flow_export import export_mitmweb_flows, poll_agent_container_ips
 from models import Model, ServerConfig
 from network import (
@@ -115,7 +116,9 @@ def _ensure_project_config() -> Path:
 
     Seeds ``{PROJECT_DIR}/.pi-container`` from ``{REPO_ROOT}/pi-coding-agent/default``:
     the ``agent/`` and ``chat-templates/`` subtrees plus ``config.yaml`` and the proxy
-    addon configs ``allowlist.yaml``/``token_replacer.yaml``. Each item is only seeded
+    addon configs ``allowlist.yaml``/``token_replacer.yaml``. It also seeds
+    ``entrypoint.sh`` into ``.pi-container/agent/`` so the container's entrypoint can
+    invoke a user-customizable script before ``pi`` starts. Each item is only seeded
     when missing, so existing (user-edited) files are never overwritten and a
     partially-populated ``.pi-container`` is completed.
 
@@ -140,6 +143,17 @@ def _ensure_project_config() -> Path:
             logger.info(f"Seeding {dst} from {src}.")
             shutil.copy2(src, dst)
 
+    # Seed entrypoint.sh into {PROJECT_DIR}/.pi-container/agent/ so it gets
+    # bind-mounted to /home/pi/.pi/agent/ inside the container. The container's
+    # own entrypoint.sh (built into the image) calls /home/pi/.pi/agent/entrypoint.sh
+    # before launching pi; seeding the template gives users a working copy to
+    # customize without editing the repo or losing changes across rebuilds.
+    ep_src = template_root / "entrypoint.sh"
+    ep_dst = project_root / "agent" / "entrypoint.sh"
+    if ep_src.exists() and not ep_dst.exists():
+        logger.info(f"Seeding {ep_dst} from {ep_src}.")
+        shutil.copy2(ep_src, ep_dst)
+
     return project_root / "agent"
 
 
@@ -153,8 +167,20 @@ def main() -> None:
         logger.error(f"Config file not found: {config_path}")
         sys.exit(1)
 
-    # Per-project settings from .pi-container/config.yaml.
+    # Validate per-project config schema and version compatibility.
     pi_container_dir = PROJECT_DIR / ".pi-container"
+    config_yaml_path = pi_container_dir / "config.yaml"
+    is_valid, errors, _ = validate_config(config_yaml_path)
+    if not is_valid:
+        logger.error("Configuration incompatible with this version of pi-container:")
+        for error in errors:
+            logger.error(error)
+        logger.error(
+            "\nFix: delete .pi-container in this workspace and re-run to re-seed, "
+            "or update schema_version in .pi-container/config.yaml to match the "
+            "current pi-container version (see latest git tag)."
+        )
+        sys.exit(1)
     flow_export_enabled = read_flow_export_enabled(pi_container_dir)
     ipv6_enabled = read_network_config(pi_container_dir)["ipv6"]
     llama_cfg = read_llama_config(pi_container_dir)

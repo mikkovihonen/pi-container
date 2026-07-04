@@ -1,5 +1,8 @@
 FROM python:3.14.6-slim-trixie
 
+# Version-pinned, hash-verified pip requirements (generated with pip hash)
+COPY pi-coding-agent-proxy/requirements-pinned.txt /requirements-pinned.txt
+
 RUN apt-get update && apt-get install -y \
     iptables \
     iproute2 \
@@ -8,7 +11,7 @@ RUN apt-get update && apt-get install -y \
     expect \
     procps \
     jq \
-    && pip install mitmproxy pyyaml \
+    && pip install --require-hashes -r /requirements-pinned.txt \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m mitmproxy

@@ -64,8 +64,8 @@ COPY --from=builder /usr/local/lib /usr/local/lib
 COPY --from=builder /usr/local/include /usr/local/include
 COPY --from=builder /usr/local/share /usr/local/share
 
-# Copy from official uv image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+# Copy from official uv image (pinned to v0.11.26, verified via content-addressable digest)
+COPY --from=ghcr.io/astral-sh/uv@sha256:3d868e555f8f1dbc324afa005066cd11e1053fc4743b9808ca8025283e65efa5  /uv /uvx /usr/local/bin/
 
 # Copy entrypoint.sh
 COPY pi-coding-agent/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -81,18 +81,16 @@ RUN userdel --remove node 2>/dev/null || true \
  && groupadd --gid ${PI_GID} pi \
  && useradd --uid ${PI_UID} --gid ${PI_GID} --create-home --shell /bin/bash pi
 
-ENV VIRTUAL_ENV=/home/pi/.venv
-
 ENV UV_SYSTEM_CERTS=1
-ENV UV_PROJECT_ENVIRONMENT=/home/pi/.venv
+ENV NODE_USE_SYSTEM_CA=1
 
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-
 RUN mkdir -p /usr/local/share/ca-certificates/extra
 COPY --from=pi-coding-agent-proxy:local /home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.pem
 RUN openssl x509 -in /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.pem -inform PEM -out /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.crt && update-ca-certificates
+RUN npm set cafile /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.pem
 
 WORKDIR /workspace
 

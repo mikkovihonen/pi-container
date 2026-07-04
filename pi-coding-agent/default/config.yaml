@@ -3,6 +3,11 @@
 # This is the single source of truth for orchestration settings. The proxy addon
 # configs (allowlist.yaml, token_replacer.yaml) and chat templates live in their
 # own files/dirs alongside this one.
+#
+# schema_version: Bumped whenever the template changes (new fields, changed types,
+# removed fields, new files in default/). The launch fails if this does not match
+# the pi-container version (the latest git tag). Delete .pi-container to re-seed.
+schema_version: "0.1.0"
 
 # Container resource limits. A null/omitted value means "no limit" (the flag is
 # not passed). Applies to the containers this workspace launches.

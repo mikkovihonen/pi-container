@@ -35,7 +35,7 @@ class TestProjectScope:
 
 
 class TestEnsureProjectConfig:
-    def _make_template(self, root):
+    def _make_template(self, root, with_entrypoint=True):
         """Build a minimal pi-coding-agent/default template under root."""
         template = root / "pi-coding-agent" / "default"
         (template / "agent").mkdir(parents=True)
@@ -45,6 +45,8 @@ class TestEnsureProjectConfig:
         (template / "config.yaml").write_text("tmpfs:\n  paths: []\n")
         (template / "allowlist.yaml").write_text("global: {}\n")
         (template / "token_replacer.yaml").write_text("global: {}\n")
+        if with_entrypoint:
+            (template / "entrypoint.sh").write_text("#!/bin/bash\n")
         return template
 
     def test_seeds_agent_and_yaml_when_absent(self, tmp_path, monkeypatch):
@@ -80,3 +82,49 @@ class TestEnsureProjectConfig:
         # Missing ones are still seeded.
         assert (project / ".pi-container" / "token_replacer.yaml").exists()
         assert (project / ".pi-container" / "agent" / "models.json").exists()
+
+    def test_seeds_entrypoint_sh_when_absent(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        project = tmp_path / "project"
+        project.mkdir()
+        self._make_template(repo)
+        monkeypatch.setattr(run, "REPO_ROOT", repo)
+        monkeypatch.setattr(run, "PROJECT_DIR", project)
+
+        agent_dir = run._ensure_project_config()
+
+        ep_dst = agent_dir / "entrypoint.sh"
+        assert ep_dst.exists()
+        assert ep_dst.read_text() == "#!/bin/bash\n"
+
+    def test_does_not_overwrite_existing_entrypoint_sh(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        project = tmp_path / "project"
+        self._make_template(repo)
+        # Pre-existing, user-edited entrypoint must be preserved.
+        custom_ep = project / ".pi-container" / "agent" / "entrypoint.sh"
+        custom_ep.parent.mkdir(parents=True)
+        custom_ep.write_text("#!/bin/bash\necho 'custom setup'\n")
+        monkeypatch.setattr(run, "REPO_ROOT", repo)
+        monkeypatch.setattr(run, "PROJECT_DIR", project)
+
+        run._ensure_project_config()
+
+        assert custom_ep.read_text() == "#!/bin/bash\necho 'custom setup'\n"
+
+    def test_skips_entrypoint_sh_when_template_missing(self, tmp_path, monkeypatch):
+        """If the template has no entrypoint.sh, seeding must not fail."""
+        repo = tmp_path / "repo"
+        project = tmp_path / "project"
+        project.mkdir()
+        self._make_template(repo, with_entrypoint=False)
+        monkeypatch.setattr(run, "REPO_ROOT", repo)
+        monkeypatch.setattr(run, "PROJECT_DIR", project)
+
+        # Should not raise.
+        agent_dir = run._ensure_project_config()
+        assert not (agent_dir / "entrypoint.sh").exists()
+
+    # Integration test moved to test_config_schema.py — validates the schema
+    # checking logic. The run.py integration is verified by the actual code flow
+    # in main() which calls validate_config() and exits on failure.

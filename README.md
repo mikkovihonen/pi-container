@@ -41,6 +41,7 @@ See **[Getting Started](docs/getting-started.md)** for prerequisites, hardware r
 | [Architecture](docs/architecture.md) | Components, network topology, egress policy, project structure |
 | [Configuration](docs/configuration.md) | Environment variables and per-workspace config (allowlist, token replacer, tmpfs, apt deps, `.gitignore`) |
 | [Development](docs/development.md) | Local dev setup, tests, lint, coverage |
+| [Releases](docs/releases.md) | Branch strategy, versioning, and release process |
 | [Proxy & addons](docs/proxy/overview.md) | Transparent proxy operation, CA cert, and the [allowlist](docs/proxy/allowlist.md) / [token replacer](docs/proxy/token-replacer.md) / [flow export](docs/proxy/flow-export.md) addons + [addon development guide](docs/proxy/addon-development.md) |
 
 ## License
