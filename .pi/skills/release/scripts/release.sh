@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <version>"
+    echo "Example: $0 0.2.0"
+    exit 1
+fi
+
+VERSION="$1"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+echo "=== Release v$VERSION ==="
+echo ""
+
+# 1. Bump pyproject.toml
+echo "✓ Bumping pyproject.toml version to $VERSION"
+sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+
+# 2. Bump schema_version in both config files
+echo "✓ Bumping schema_version in pi-coding-agent/default/config.yaml"
+sed -i "s/^schema_version: .*/schema_version: \"$VERSION\"/" pi-coding-agent/default/config.yaml
+
+echo "✓ Bumping schema_version in .pi-container/config.yaml"
+sed -i "s/^schema_version: .*/schema_version: \"$VERSION\"/" .pi-container/config.yaml
+
+# 3. Regenerate uv.lock
+echo "✓ Regenerating uv.lock"
+uv lock
+
+# 4. Validate
+echo ""
+echo "=== Validating ==="
+uv run python3 .github/workflows/scripts/validate_versions.py
+
+# 5. Run lint
+echo ""
+echo "=== Running lint ==="
+pre-commit run --all-files --show-diff-on-failure || {
+    echo "✗ Lint failed. Fix before releasing."
+    exit 1
+}
+
+# 6. Run tests
+echo ""
+echo "=== Running tests ==="
+uv run pytest --cov || {
+    echo "✗ Tests failed. Fix before releasing."
+    exit 1
+}
+
+echo ""
+echo "=== All checks passed ==="
+echo ""
+echo "Next steps:"
+echo "  1. Update CHANGELOG.md (move [Unreleased] → [$VERSION] - $(date +%Y-%m-%d))"
+echo "  2. git add -A && git commit -m \"release: v$VERSION\""
+echo "  3. git tag -a v$VERSION -m \"Release v$VERSION\""
+echo "  4. git push origin main && git push origin v$VERSION"
