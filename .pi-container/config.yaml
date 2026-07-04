@@ -1,83 +1,67 @@
-# Per-project pi-container configuration (seeded on first run; edit per workspace).
+# Per-project pi-container configuration (this repo's own; edit as needed).
 #
-# This is the single source of truth for orchestration settings. The proxy addon
-# configs (allowlist.yaml, token_replacer.yaml) and chat templates live in their
-# own files/dirs alongside this one.
-#
-# schema_version: Bumped whenever the template changes (new fields, changed types,
-# removed fields, new files in default/). The launch fails if this does not match
-# the pi-container version (the latest git tag). Delete .pi-container to re-seed.
-schema_version: "0.1.0"
+# Single source of truth for orchestration settings. The proxy addon configs
+# (allowlist.yaml, token_replacer.yaml) and chat templates live in their own
+# files/dirs alongside this one.
 
-# Container resource limits. A null/omitted value means "no limit" (the flag is
-# not passed). Applies to the containers this workspace launches.
+# Container resource limits. A null/omitted value means "no limit".
 resources:
   agent:
-    memory: 16g
-    cpus: 8
+    memory: 4g
+    cpus: 2
   proxy:
     memory: 4g
-    cpus: 4
+    cpus: 2
 
-# llama-server startup tuning. Large models load slowly; raise startup_timeout
-# (seconds to wait for /health) or startup_attempts (relaunches) if needed.
+# llama-server startup tuning (seconds to wait for /health; relaunch attempts).
 llama:
   startup_timeout: 180
   startup_attempts: 2
 
 # Network settings for this project's isolated stack.
 network:
-  # Plumb IPv6 through the isolated network + proxy. Only works if the runtime
-  # AND host actually route IPv6 (leave false on macOS / Apple container).
   ipv6: false
-  # Upstream resolver the proxy uses for the agent's DNS lookups.
   dns: "1.1.1.1"
 
-# Proxy container options.
+# Proxy container options. expose_ui: localhost (127.0.0.1 only) | lan (0.0.0.0).
 proxy:
-  # Where the mitmweb UI (auto-assigned port) is published:
-  #   localhost → 127.0.0.1 only (default; not reachable from other hosts)
-  #   lan       → 0.0.0.0 (reachable across the network; UI still password-gated)
   expose_ui: localhost
 
-# Extra agent-container options (rarely needed).
+# Extra agent-container env vars / bind mounts (absolute host paths).
 agent:
-  # Extra environment variables passed to the agent container.
-  #   env:
-  #     MY_TOKEN: abc123
   env: {}
-  # Extra bind mounts (use absolute host paths). "host:container[:ro]".
-  #   mounts:
-  #     - /Users/me/.cache/pip:/home/pi/.cache/pip
   mounts: []
 
-# Transient tmpfs mounts inside the agent container. Each path (under /workspace)
-# is a volatile RAM disk — data is lost when the container stops. Use it for build
-# artifacts / caches you don't want written back to the host workspace.
-#   Example:
-#     tmpfs:
-#       paths:
-#         - /workspace/node_modules/.cache
-#         - /workspace/target
+# Transient tmpfs mounts inside the agent container (volatile; lost on stop).
+# These shadow this repo's own build/runtime artifacts so the agent works against
+# clean, empty dirs rather than the host's caches/locks/models.
 tmpfs:
-  paths: []
+  paths:
+    - /workspace/.venv
+    - /workspace/.pytest_cache
+    - /workspace/.ruff_cache
+    - /workspace/src/__pycache__
+    - /workspace/llama-server/.locks
+    - /workspace/llama-server/logs
+    - /workspace/llama-server/models
+    - /workspace/pi-coding-agent-proxy/.locks
+    - /workspace/pi-coding-agent-proxy/.pytest_cache
+    - /workspace/pi-coding-agent-proxy/__pycache__
+    - /workspace/pi-coding-agent-proxy/addons/allowlist/.pytest_cache
+    - /workspace/pi-coding-agent-proxy/addons/allowlist/__pycache__
+    - /workspace/pi-coding-agent-proxy/addons/token_replacer/.pytest_cache
+    - /workspace/pi-coding-agent-proxy/addons/token_replacer/__pycache__
 
-# mitmweb flow export. When enabled, the proxy's captured HTTP/HTTPS flow history
-# is exported (bucketed by UTC date) under .pi-container/exports/ after the agent
-# shuts down. The export contains full request/response bodies — treat exports/ as
-# sensitive and keep it out of version control. Default: disabled.
+# mitmweb flow export — capture this repo's own HTTP/HTTPS history for auditing.
 flow_export:
   enabled: false
 
-# Proxy egress policy. Only HTTP/HTTPS/DNS are intercepted by mitmproxy; every
-# other protocol is denied by default. Opt a protocol in to let the agent use it —
-# but note these are forwarded UNINSPECTED (plain NAT); mitmproxy and the allowlist
-# do not see them.
+# Proxy egress policy — deny-all except the inspected HTTP/HTTPS/DNS.
 egress:
   allow:
-    ssh: false            # TCP 22 (e.g. git over SSH)
-    smtp: false           # TCP 25, 465, 587
-    git: false            # TCP 9418 (git:// protocol)
-    ntp: false            # UDP 123 (time sync)
-    tcp_ports: []         # arbitrary extra TCP ports, e.g. [2222, 8443]
-    udp_ports: []         # arbitrary extra UDP ports, e.g. [51820]
+    ssh: false
+    smtp: false
+    git: false
+    ntp: false
+    tcp_ports: []
+    udp_ports: []
