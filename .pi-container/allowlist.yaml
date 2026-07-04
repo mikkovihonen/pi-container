@@ -2,60 +2,6 @@
 # npm package registries, and Debian/Ubuntu apt infrastructure. All other
 # traffic is blocked by default.
 global:
-  mode: "allow"
-  default_action: "block"
+  mode: "block"
+  default_action: "allow"
   status_code: 403
-  rules:
-    - name: "pypi-org-allow"
-      mode: "allow"
-      hostnames:
-        - "pypi.org"
-        - "*.pypi.org"
-      ip_ranges: []
-
-    - name: "pythonhosted-org-allow"
-      mode: "allow"
-      hostnames:
-        - "files.pythonhosted.org"
-        - "*.files.pythonhosted.org"
-      ip_ranges: []
-
-    - name: "npm-registry-allow"
-      mode: "allow"
-      hostnames:
-        - "registry.npmjs.org"
-        - "*.registry.npmjs.org"
-        - "*.npmjs.org"
-      ip_ranges: []
-
-    - name: "github-allow"
-      mode: "allow"
-      hostnames:
-        - "github.com"
-        - "api.github.com"
-        - "codeload.github.com"
-        - "objects.githubusercontent.com"
-        - "collector.github.com"
-        - "*.github.com"
-        - "*.githubassets.com"
-        - "*.githubusercontent.com"
-      ip_ranges: []
-
-    - name: "yarn-registry-allow"
-      mode: "allow"
-      hostnames:
-        - "registry.yarnpkg.com"
-        - "*.yarnpkg.com"
-      ip_ranges: []
-
-    - name: "debian-apt-allow"
-      mode: "allow"
-      hostnames:
-        - "debian.map.fastlydns.net"
-        - "deb.debian.org"
-        - "*.deb.debian.org"
-        - "security.debian.org"
-        - "*.security.debian.org"
-        - "packages.debian.org"
-        - "*.packages.debian.org"
-      ip_ranges: []
