@@ -108,50 +108,95 @@ next launch. They must `rm -rf .pi-container` and re-run to get the new field.
 
 ## Creating a release
 
-1. **Make sure `main` is green** — CI must pass on the commit you want to release.
-2. **Update the schema version** in `pi-coding-agent/default/config.yaml` if the
-   template changed (new fields, changed types, new files).
-3. **Update `CHANGELOG.md`** — Move `[Unreleased]` to the new version, add a date.
-4. **Commit** with message `chore: release v1.2.3`.
-5. **Tag** with `git tag -s v1.2.3 -m "Release v1.2.3"`.
-6. **Push** the tag: `git push origin main --tags`.
+The version is authoritative from the latest git tag. Three places must always
+stay in sync:
 
-CI detects the tag push and automatically:
-- Runs the lint and test jobs (they must both pass).
-- Creates a GitHub Release with the changelog notes.
+| Source | Location |
+|--------|----------|
+| Git tag | `v<version>` (e.g. `v0.2.0`) |
+| Python package version | `pyproject.toml` → `[project].version` |
+| Config schema version | `pi-coding-agent/default/config.yaml` → `schema_version` |
+| Runtime config version | `.pi-container/config.yaml` → `schema_version` |
 
-Users clone the repo, check out the tag, and run `build.sh` to build the Docker
-images for their local runtime (Apple `container`, `podman`, or `docker`).
+The `validate_versions.py` script in CI enforces that the first three match. The
+runtime config (`.pi-container/config.yaml`) is checked at launch time by
+`src/config_schema.py` — if it does not match the latest git tag, the container
+refuses to start.
+
+### Steps
+
+1. **Make sure `main` is green** — CI must pass on the commit you want to
+   release (`check` and `test` jobs).
+2. **Update `CHANGELOG.md`** — Move the `[Unreleased]` entries into a new
+   version block with the release date, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+3. **Bump the version** in `pyproject.toml` (`[project] version`).
+4. **Bump `schema_version` in the seed template** —
+   `pi-coding-agent/default/config.yaml`. This is what new workspaces get on
+   first run.
+5. **Bump `schema_version` in the runtime config** —
+   `.pi-container/config.yaml`. This is what the currently running container
+   uses. Seeding is copy-once (missing-only), so updating the template alone
+   will not update the runtime config.
+6. **Validate locally** before pushing:
+
+   ```bash
+   uv run python3 .github/workflows/scripts/validate_versions.py
+   pre-commit run --all-files --show-diff-on-failure
+   uv run pytest --cov
+   ```
+7. **Commit, tag, and push**:
+
+   ```bash
+   git add CHANGELOG.md pyproject.toml \
+       pi-coding-agent/default/config.yaml \
+       .pi-container/config.yaml
+   git commit -m "chore: release v0.2.0"
+   git push origin main
+   git tag -a v0.2.0 -m "Release v0.2.0"
+   git push origin v0.2.0
+   ```
+
+### What CI does
+
+The `ci.yml` workflow triggers on `push` to `refs/tags/v*`:
+
+- **`check`** — runs lint, tests, and `validate_versions.py`.
+- **`test`** — runs the full test suite with coverage, updates the coverage
+  badge on `main`.
+- **`release`** — if both jobs pass, creates a GitHub Release via
+  `softprops/action-gh-release` with auto-generated release notes from merged
+  commits since the last tag.
 
 ### Example
 
 ```bash
-# Bump schema_version in pi-coding-agent/default/config.yaml to "1.0.0"
-# Update CHANGELOG.md: move [Unreleased] → [1.0.0] - 2026-07-04
-
-git add pi-coding-agent/default/config.yaml CHANGELOG.md
-git commit -m "chore: release v1.0.0"
-git tag -s v1.0.0 -m "Release v1.0.0"
-git push origin main --tags
+# 1. Update CHANGELOG.md: move [Unreleased] → [0.2.0] - 2026-07-04
+# 2. Bump pyproject.toml version to "0.2.0"
+# 3. Bump schema_version in pi-coding-agent/default/config.yaml to "0.2.0"
+# 4. Bump schema_version in .pi-container/config.yaml to "0.2.0"
+# 5. Validate and commit:
+git add CHANGELOG.md pyproject.toml \
+    pi-coding-agent/default/config.yaml \
+    .pi-container/config.yaml
+git commit -m "chore: release v0.2.0"
+git tag -a v0.2.0 -m "Release v0.2.0"
+git push origin main
+git push origin v0.2.0
 ```
 
-## Creating a release
-
-1. **Make sure `main` is green** — CI must pass on the commit you want to release.
-2. **Update the version** in `pyproject.toml`.
-3. **Update `CHANGELOG.md`** — Move `[Unreleased]` to the new version, add a date.
-4. **Commit** with message `chore: release v1.2.3`.
-5. **Tag** with `git tag -s v1.2.3 -m "Release v1.2.3"`.
-6. **Push** the tag: `git push origin main --tags`.
-
-CI detects the tag push and automatically:
-- Runs the lint and test jobs (they must both pass).
-- Creates a GitHub Release with the changelog notes.
+### After the release
 
 Users clone the repo, check out the tag, and run `build.sh` to build the Docker
 images for their local runtime (Apple `container`, `podman`, or `docker`).
 
+If a workspace's `.pi-container/config.yaml` is outdated (e.g. a user skipped
+step 5 above), the launch fails with:
 
+> schema_version mismatch: config has '0.1.1', the latest pi-container
+> version is '0.2.0'.
+
+The user must update `schema_version` in `.pi-container/config.yaml`, or delete
+`.pi-container` and re-run to re-seed from the new template.
 
 ## Rolling back
 
