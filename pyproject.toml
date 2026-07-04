@@ -1,6 +1,6 @@
 [project]
 name = "pi-container"
-version = "0.1.0"
+version = "0.1.1"
 description = "Containerized environment for running the pi-coding-agent with local LLM inference"
 requires-python = ">=3.14.6"
 dependencies = [
