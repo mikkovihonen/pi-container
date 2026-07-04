@@ -130,7 +130,9 @@ refuses to start.
 2. **Update `CHANGELOG.md`** — Move the `[Unreleased]` entries into a new
    version block with the release date, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 3. **Bump the version** in `pyproject.toml` (`[project] version`).
-4. **Bump `schema_version` in the seed template** —
+4. **Regenerate `uv.lock`** — `uv lock` (the lockfile embeds the project
+   version).
+5. **Bump `schema_version` in the seed template** —
    `pi-coding-agent/default/config.yaml`. This is what new workspaces get on
    first run.
 5. **Bump `schema_version` in the runtime config** —
@@ -148,6 +150,7 @@ refuses to start.
 
    ```bash
    git add CHANGELOG.md pyproject.toml \
+       uv.lock \
        pi-coding-agent/default/config.yaml \
        .pi-container/config.yaml
    git commit -m "chore: release v0.2.0"
@@ -174,8 +177,10 @@ The `ci.yml` workflow triggers on `push` to `refs/tags/v*`:
 # 2. Bump pyproject.toml version to "0.2.0"
 # 3. Bump schema_version in pi-coding-agent/default/config.yaml to "0.2.0"
 # 4. Bump schema_version in .pi-container/config.yaml to "0.2.0"
-# 5. Validate and commit:
+# 5. Regenerate uv.lock: uv lock
+# 6. Validate and commit:
 git add CHANGELOG.md pyproject.toml \
+    uv.lock \
     pi-coding-agent/default/config.yaml \
     .pi-container/config.yaml
 git commit -m "chore: release v0.2.0"
