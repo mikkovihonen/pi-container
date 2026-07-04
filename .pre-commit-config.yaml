@@ -23,3 +23,11 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+      - id: validate-seed-models
+        name: validate-seed-models
+        entry: uv run --project . python .github/workflows/scripts/validate_seed_models.py
+        language: system
+        types: [python]
+        pass_filenames: false
+        always_run: false
