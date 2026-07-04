@@ -218,6 +218,94 @@ def _validate_seed_config(data: dict, schema: dict | None = None) -> list[str]:
     return errors
 
 
+# ─── Seed models.json schema validation ───────────────────────────────
+
+
+def _validate_seed_models(data: dict) -> list[str]:
+    """Validate seed models.json structure against the expected schema.
+
+    Checks:
+    - providers dict is present
+    - Each provider has serverCustomParameters with valid structure
+    - hfModels is non-null, non-empty, and has required fields
+    - flags array contains only valid types (str, int, float)
+    """
+    errors: list[str] = []
+
+    if "providers" not in data or not isinstance(data["providers"], dict):
+        errors.append("  providers: expected dict")
+        return errors
+
+    providers = data["providers"]
+    for provider_name, provider_cfg in providers.items():
+        if not isinstance(provider_cfg, dict):
+            errors.append(f"  providers.{provider_name}: expected dict")
+            continue
+
+        server_params = provider_cfg.get("serverCustomParameters")
+        if server_params is None:
+            errors.append(
+                f"  providers.{provider_name}.serverCustomParameters: required field missing"
+            )
+            continue
+
+        if not isinstance(server_params, dict):
+            errors.append(
+                f"  providers.{provider_name}.serverCustomParameters: expected dict"
+            )
+            continue
+
+        # Validate hfModels
+        hf_models = server_params.get("hfModels")
+        if hf_models is None:
+            errors.append(
+                f"  providers.{provider_name}.serverCustomParameters.hfModels: must not be null"
+            )
+        elif not isinstance(hf_models, dict):
+            errors.append(
+                f"  providers.{provider_name}.serverCustomParameters.hfModels: expected dict"
+            )
+        elif len(hf_models) == 0:
+            errors.append(
+                f"  providers.{provider_name}.serverCustomParameters.hfModels: must not be empty"
+            )
+        else:
+            required_hf_fields = ("fileFlag", "repo", "file", "dir")
+            for model_name, model_cfg in hf_models.items():
+                if not isinstance(model_cfg, dict):
+                    errors.append(
+                        f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}: expected dict"
+                    )
+                    continue
+
+                for field in required_hf_fields:
+                    value = model_cfg.get(field)
+                    if value is None:
+                        errors.append(
+                            f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}.{field}: must not be null"
+                        )
+                    elif not isinstance(value, str):
+                        errors.append(
+                            f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}.{field}: expected str, got {type(value).__name__}"
+                        )
+
+        # Validate flags array
+        flags = server_params.get("flags")
+        if flags is not None:
+            if not isinstance(flags, list):
+                errors.append(
+                    f"  providers.{provider_name}.serverCustomParameters.flags: expected list"
+                )
+            else:
+                for i, item in enumerate(flags):
+                    if not isinstance(item, (str, int, float)):
+                        errors.append(
+                            f"  providers.{provider_name}.serverCustomParameters.flags[{i}]: expected str/int/float, got {type(item).__name__}"
+                        )
+
+    return errors
+
+
 # ─── Main validation logic ──────────────────────────────────────────────
 
 
@@ -420,6 +508,21 @@ def main() -> int:
         all_pass = False
     else:
         _info("All --chat-template-file paths exist")
+
+    # ── Check 7: Seed models.json schema validation ─────────────────────
+    if models_data is not None:
+        print()
+        print("Validating seed models.json schema...")
+        models_schema_errors = _validate_seed_models(models_data)
+        if models_schema_errors:
+            _error(f"Seed models.json has {len(models_schema_errors)} error(s):")
+            for err in models_schema_errors:
+                print(f"    {err}")
+            all_pass = False
+        else:
+            _info("Seed models.json: schema valid")
+    else:
+        _info("No models.json found — skipping models schema validation.")
 
     # ── Summary ──────────────────────────────────────────────────────────
     print()
