@@ -29,10 +29,11 @@ sed -i "s/^schema_version: .*/schema_version: \"$VERSION\"/" .pi-container/confi
 echo "✓ Regenerating uv.lock"
 uv lock
 
-# 4. Validate
+# 4. Validate (pass --new-version so the script compares against the target
+#    version instead of the still-old git tag — the new tag isn't created yet)
 echo ""
 echo "=== Validating ==="
-uv run python3 .github/workflows/scripts/validate_versions.py
+uv run python3 .github/workflows/scripts/validate_versions.py --new-version "$VERSION"
 
 # 5. Run lint
 echo ""

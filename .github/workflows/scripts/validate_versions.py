@@ -22,6 +22,7 @@ Usage:
   .github/workflows/scripts/validate_versions.py
 """
 
+import argparse
 import subprocess
 import sys
 import tomllib
@@ -306,22 +307,51 @@ def _validate_seed_models(data: dict) -> list[str]:
     return errors
 
 
+# ─── CLI ────────────────────────────────────────────────────────────────
+
+
+def _parse_args() -> argparse.Namespace:
+    """Parse CLI arguments.
+
+    --new-version <version>
+        Compare pyproject.toml and schema_version against this value instead
+        of the latest git tag. Used by the release script (release.sh) because
+        the new tag has not been created yet when validation runs.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--new-version",
+        help=(
+            "Target version to validate against (used by release.sh before the "
+            "tag is created). Skips git-tag comparison."
+        ),
+    )
+    return parser.parse_args()
+
+
 # ─── Main validation logic ──────────────────────────────────────────────
 
 
 def main() -> int:
     """Run all validation checks. Returns 0 on success, 1 on failure."""
+    args = _parse_args()
+    new_version = args.new_version  # may be None (normal CI usage)
+
     print("Validating version consistency...")
     all_pass = True
 
-    # ── Check 1: Git tag version ─────────────────────────────────────────
-    git_version = get_git_tag_version()
-    if git_version is None:
-        print("  ⚠ No git tags found — skipping version consistency checks.")
-        print("    (This is normal for forks or shallow clones without tags.)")
-        print("  ✓ Proceeding with schema-only validation.")
+    # ── Check 1: Git tag version (skipped when --new-version is given) ───
+    git_version: str | None = None
+    if new_version is None:
+        git_version = get_git_tag_version()
+        if git_version is None:
+            print("  ⚠ No git tags found — skipping version consistency checks.")
+            print("    (This is normal for forks or shallow clones without tags.)")
+            print("  ✓ Proceeding with schema-only validation.")
+        else:
+            _info(f"Git tag version: {TAG_PREFIX}{git_version}")
     else:
-        _info(f"Git tag version: {TAG_PREFIX}{git_version}")
+        print(f"  ℹ Comparing against target version {new_version} (git tag check skipped).")
 
     # ── Check 2: pyproject.toml version ──────────────────────────────────
     pyproject_version = get_pyproject_version()
@@ -341,6 +371,16 @@ def main() -> int:
             all_pass = False
         else:
             _info(f"Git tag matches pyproject.toml: {TAG_PREFIX}{git_version}")
+    elif new_version is not None and pyproject_version is not None:
+        # Release script path: compare pyproject.toml against target version.
+        if pyproject_version != new_version:
+            _error(
+                f"pyproject.toml vs target version: pyproject.toml is "
+                f"'{pyproject_version}', target is '{new_version}'"
+            )
+            all_pass = False
+        else:
+            _info(f"pyproject.toml matches target version: {new_version}")
 
     # ── Check 3: schema_version in seed config ───────────────────────────
     seed_config_path = REPO_ROOT / "pi-coding-agent" / "default" / "config.yaml"
@@ -377,7 +417,7 @@ def main() -> int:
                             f"pyproject.toml matches schema_version: {pyproject_version}"
                         )
 
-                # Check git tag matches schema_version
+                # Check git tag matches schema_version (skipped in release path)
                 if git_version is not None:
                     if git_version != schema_version_str:
                         _error(
@@ -388,6 +428,17 @@ def main() -> int:
                     else:
                         _info(
                             f"Git tag matches schema_version: {TAG_PREFIX}{git_version}"
+                        )
+                elif new_version is not None:
+                    if new_version != schema_version_str:
+                        _error(
+                            f"Target version vs schema_version: target is "
+                            f"'{new_version}', config.yaml has '{schema_version_str}'"
+                        )
+                        all_pass = False
+                    else:
+                        _info(
+                            f"Target version matches schema_version: {new_version}"
                         )
 
     # ── Check 4: Seed config schema validation ───────────────────────────
