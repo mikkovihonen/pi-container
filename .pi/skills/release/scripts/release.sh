@@ -38,7 +38,7 @@ uv run python3 .github/workflows/scripts/validate_versions.py --new-version "$VE
 # 5. Run lint
 echo ""
 echo "=== Running lint ==="
-pre-commit run --all-files --show-diff-on-failure || {
+uv run pre-commit run --all-files --show-diff-on-failure || {
     echo "✗ Lint failed. Fix before releasing."
     exit 1
 }

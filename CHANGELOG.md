@@ -26,6 +26,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `flow_export.enabled` in `.pi-container/config.yaml`; when disabled, no raw
   `flows-*.jsonl` files are created.
 
+## [0.1.4] - 2026-07-05
+
+### Fixed
+- Release script validation no longer fails when the new git tag has not yet been created (`validate_versions.py` now accepts `--new-version` to compare against the target version instead of the existing tag).
+- Release script now uses `uv run pre-commit` so it works inside the project venv.
+
 ## [Unreleased]
 
 ## [0.1.0] - 2026-07-04
