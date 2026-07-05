@@ -43,7 +43,24 @@ uv run pre-commit run --all-files --show-diff-on-failure || {
     exit 1
 }
 
-# 6. Run tests
+# 6. Enforce CHANGELOG reverse chronological order
+echo ""
+echo "=== Checking CHANGELOG order ==="
+if [ -f CHANGELOG.md ]; then
+    # Find the first ## heading after [Unreleased]
+    first_section=$(grep -n '^## \[' CHANGELOG.md | head -1 | cut -d: -f1)
+    unreleased_line=$(grep -n '^## \[Unreleased\]' CHANGELOG.md | head -1 | cut -d: -f1)
+    if [ -n "$unreleased_line" ] && [ "$unreleased_line" != "$first_section" ]; then
+        echo "✗ CHANGELOG.md has [Unreleased] at line $unreleased_line, not first."
+        echo "  Reverse chronological order required: [Unreleased] must be on top."
+        exit 1
+    fi
+    echo "  ✓ CHANGELOG.md has [Unreleased] at top."
+else
+    echo "⚠ No CHANGELOG.md found — skipping order check."
+fi
+
+# 7. Run tests
 echo ""
 echo "=== Running tests ==="
 uv run pytest --cov || {

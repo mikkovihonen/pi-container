@@ -46,14 +46,23 @@ The script will:
 - Run lint and tests
 - Report success/failure
 
-### 3. Update CHANGELOG
+### 3. Update CHANGELOG and amend the release commit
 
 If the script succeeds, update `CHANGELOG.md`:
 - Move `[Unreleased]` entries to the new version block
 - Add today's date
 - Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format
-
-### 4. Commit and tag
+- **Enforce reverse chronological order**: `[Unreleased]` must be at the top,
+  followed by newest version, then older ones. If out of order, rewrite the
+  file with correct ordering before committing.
+- **After editing, re-read the file to verify `[Unreleased]` is still first.**
+  It's easy to accidentally place the new version block above `[Unreleased]`.
+- **Amend the release commit** (the script has already bumped versions):
+  ```bash
+  git add -A && git commit --amend -m "release: v<version>"
+  ```
+  **Never re-run the release script** after editing CHANGELOG — that would
+  re-bump versions and create a second tag.
 
 ```bash
 git add -A
