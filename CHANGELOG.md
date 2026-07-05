@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-07-05
+
+### Added
+- Documentation site powered by MkDocs Material, published to GitHub Pages on every push to `main`. The site is generated from `README.md` and live at <https://mikkovihonen.github.io/pi-container/>.
+
 ## [0.1.7] - 2026-07-05
 
 ### Changed

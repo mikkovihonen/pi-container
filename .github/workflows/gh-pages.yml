@@ -22,14 +22,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # Avoid deploy loop: skip if this run was triggered by gh-pages push
-          ref: ${{ github.event.release.tag_name }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.14"
+
+      - name: Generate index from README
+        run: python .github/scripts/generate_index.py
 
       - name: Install MkDocs Material
         run: pip install mkdocs-material

@@ -7,7 +7,7 @@
 # schema_version: Bumped whenever the template changes (new fields, changed types,
 # removed fields, new files in default/). The launch fails if this does not match
 # the pi-container version (the latest git tag). Delete .pi-container to re-seed.
-schema_version: "0.1.7"
+schema_version: "0.1.8"
 
 # Container resource limits. A null/omitted value means "no limit".
 resources:
