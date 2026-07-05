@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import flow_export
 
 # Filename produced by export_mitmweb_flows: millisecond-precision, UTC, no colons.
-_TS_FILENAME = re.compile(r"\d{2}-\d{2}-\d{2}-\d{3}_.+\.json")
+_TS_FILENAME = re.compile(r"\d{2}-\d{2}-\d{2}-\d{3}_.+\.jsonl")
 
 
 def _make_session(sessions_dir: Path, session_id: str) -> None:
@@ -28,34 +28,34 @@ def _make_session(sessions_dir: Path, session_id: str) -> None:
 
 class TestExportMitmwebFlows:
     def test_creates_file_when_source_missing(self, tmp_path):
-        """A missing per-IP file must still produce an (empty) session export."""
+        """A missing per-IP file means nothing to copy, so we skip silently."""
         sessions = tmp_path / "sessions"
         exports = tmp_path / "exports"
         session_id = "abc123-session-uuid"
         _make_session(sessions, session_id)
 
-        with patch.object(flow_export, "_load_flows_from_mount", return_value=None):
-            out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
+        # No raw flows file exists on the mount.
+        out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
 
-        assert out is not None
-        data = json.loads(out.read_text())
-        assert data["session_id"] == session_id
-        assert data["flows"] == []
+        assert out is None
+        # No export directory was created either — nothing to do.
+        assert not (exports / "flows").exists()
 
     def test_file_lives_under_exports_flows_bucketed_by_date(self, tmp_path):
         sessions = tmp_path / "sessions"
         exports = tmp_path / "exports"
+        exports.mkdir()
         session_id = "the-session-id"
         _make_session(sessions, session_id)
+        (exports / "flows-10.0.0.5.jsonl").write_text('{"id": "f1"}\n')
 
-        with patch.object(flow_export, "_load_flows_from_mount", return_value=[{"id": "f1"}]):
-            out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
+        out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
 
-        # flows/<YYYY-MM-DD>/<HH-MM-SS-mmm>_<session-id>.json
+        # flows/<YYYY-MM-DD>/<HH-MM-SS-mmm>_<session-id>.jsonl
         assert out.parent.parent == exports / "flows"
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", out.parent.name)
-        assert out.name.endswith(f"_{session_id}.json")
-        assert re.fullmatch(r"\d{2}-\d{2}-\d{2}-\d{3}_" + re.escape(session_id) + r"\.json", out.name)
+        assert out.name.endswith(f"_{session_id}.jsonl")
+        assert re.fullmatch(r"\d{2}-\d{2}-\d{2}-\d{3}_" + re.escape(session_id) + r"\.jsonl", out.name)
 
     def test_reads_flows_for_client_ip(self, tmp_path):
         """The client IP selects its own flows-<ip>.jsonl file."""
@@ -69,13 +69,18 @@ class TestExportMitmwebFlows:
 
         out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
 
-        assert json.loads(out.read_text())["flows"] == [{"id": "mine"}]
+        # Raw JSONL preserved as-is — no wrapper object, no parsing.
+        assert out.read_text() == '{"id": "mine"}\n'
+        # The consumed raw file is gone.
+        assert not (exports / "flows-10.0.0.5.jsonl").exists()
+        # The unattributed file remains.
+        assert (exports / "flows-10.0.0.9.jsonl").exists()
 
     def test_snapshot_and_raw_share_the_project_exports_dir(self, tmp_path):
         """Raw staging and the session snapshot both live in the one per-project
         exports dir; the consumed raw file is removed after the snapshot."""
         sessions = tmp_path / "sessions"
-        exports = tmp_path / "exports"  # PROJECT_DIR/.pi-container/exports in prod
+        exports = tmp_path / "exports"
         exports.mkdir()
         _make_session(sessions, "sid")
         raw_file = exports / "flows-10.0.0.5.jsonl"
@@ -85,7 +90,8 @@ class TestExportMitmwebFlows:
 
         # Snapshot lands under the same exports dir the raw file was read from.
         assert result.parent.parent == exports / "flows"
-        assert json.loads(result.read_text())["flows"] == [{"id": "f1"}]
+        # Content is the raw JSONL line, copied verbatim.
+        assert result.read_text() == '{"id": "f1"}\n'
         # The consumed raw file is removed once the snapshot is written.
         assert not raw_file.exists()
 
@@ -94,11 +100,13 @@ class TestExportMitmwebFlows:
         sessions = tmp_path / "sessions"
         _make_session(sessions, "sid")
         monkeypatch.setattr(flow_export, "PROJECT_DIR", tmp_path)
+        (tmp_path / ".pi-container" / "exports").mkdir(parents=True)
+        (tmp_path / ".pi-container" / "exports" / "flows-10.0.0.5.jsonl").write_text('{"id": "f1"}\n')
 
-        with patch.object(flow_export, "_load_flows_from_mount", return_value=None):
-            out = flow_export.export_mitmweb_flows(sessions_dir=sessions, client_ips=["10.0.0.5"])
+        out = flow_export.export_mitmweb_flows(sessions_dir=sessions, client_ips=["10.0.0.5"])
 
         assert out.parent.parent == tmp_path / ".pi-container" / "exports" / "flows"
+        assert out.name.endswith(".jsonl")
 
     def test_ipv6_client_ip_sanitized_to_filename(self, tmp_path):
         sessions = tmp_path / "sessions"
@@ -109,15 +117,16 @@ class TestExportMitmwebFlows:
 
         out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["fd00::2"])
 
-        assert json.loads(out.read_text())["flows"] == [{"id": "v6"}]
+        assert out.read_text() == '{"id": "v6"}\n'
 
     def test_filename_carries_timestamp(self, tmp_path):
         sessions = tmp_path / "sessions"
         exports = tmp_path / "exports"
+        exports.mkdir()
         _make_session(sessions, "sid")
+        (exports / "flows-10.0.0.5.jsonl").write_text('{"id": "f1"}\n')
 
-        with patch.object(flow_export, "_load_flows_from_mount", return_value=[]):
-            out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
+        out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
 
         assert _TS_FILENAME.fullmatch(out.name), out.name
         assert ":" not in out.name  # filename-safe on all platforms
@@ -125,48 +134,48 @@ class TestExportMitmwebFlows:
     def test_writes_captured_flows(self, tmp_path):
         sessions = tmp_path / "sessions"
         exports = tmp_path / "exports"
+        exports.mkdir()
         session_id = "sid"
         _make_session(sessions, session_id)
-        flows = [{"id": "f1"}, {"id": "f2"}]
+        raw = '{"id": "f1"}\n{"id": "f2"}\n'
+        (exports / "flows-10.0.0.5.jsonl").write_text(raw)
 
-        with patch.object(flow_export, "_load_flows_from_mount", return_value=flows):
-            out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
+        out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
 
-        data = json.loads(out.read_text())
-        assert data["flows"] == flows
-        assert data["session_id"] == session_id
+        assert out.read_text() == raw
+        assert not (exports / "flows-10.0.0.5.jsonl").exists()
 
     def test_no_session_files_skips(self, tmp_path):
         """With no pi session at all there is no id to key the directory on."""
         sessions = tmp_path / "sessions"
         exports = tmp_path / "exports"
+        exports.mkdir()
         sessions.mkdir()
+        (exports / "flows-10.0.0.5.jsonl").write_text('{"id": "f1"}\n')
 
-        with patch.object(flow_export, "_load_flows_from_mount", return_value=[{"id": "f1"}]):
-            out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
+        out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
 
         assert out is None
 
-    def test_dual_stack_merges_both_families_sorted(self, tmp_path):
-        """A dual-stack agent's IPv4 and IPv6 files are merged, ordered by time."""
+    def test_dual_stack_concatenates_both_families(self, tmp_path):
+        """A dual-stack agent's IPv4 and IPv6 files are concatenated (preserving
+        their original line order) into a single .jsonl export."""
         sessions = tmp_path / "sessions"
         exports = tmp_path / "exports"
         exports.mkdir()
         _make_session(sessions, "sid")
-        (exports / "flows-10.0.0.5.jsonl").write_text(
-            '{"id": "v4-b", "timestamp_start": 20}\n{"id": "v4-a", "timestamp_start": 10}\n'
-        )
-        (exports / "flows-fd00--2.jsonl").write_text('{"id": "v6", "timestamp_start": 15}\n')
+        (exports / "flows-10.0.0.5.jsonl").write_text('{"id": "v4-a"}\n{"id": "v4-b"}\n')
+        (exports / "flows-fd00--2.jsonl").write_text('{"id": "v6"}\n')
 
         out = flow_export.export_mitmweb_flows(
             sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5", "fd00::2"]
         )
 
-        ids = [f["id"] for f in json.loads(out.read_text())["flows"]]
-        assert ids == ["v4-a", "v6", "v4-b"]  # merged and sorted by timestamp_start
+        lines = [line for line in out.read_text().splitlines() if line]
+        assert [json.loads(line)["id"] for line in lines] == ["v4-a", "v4-b", "v6"]
 
     def test_consumed_raw_files_deleted_after_export(self, tmp_path):
-        """Once flows are stored in the session snapshot, the raw files are gone."""
+        """Once flows are copied to the session snapshot, the raw files are gone."""
         sessions = tmp_path / "sessions"
         exports = tmp_path / "exports"
         exports.mkdir()
@@ -192,7 +201,7 @@ class TestExportMitmwebFlows:
         raw = exports / "flows-10.0.0.5.jsonl"
         raw.write_text('{"id": "a"}\n')
 
-        with patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
+        with patch("pathlib.Path.write_bytes", side_effect=OSError("disk full")):
             out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
 
         assert out is None
@@ -212,6 +221,26 @@ class TestExportMitmwebFlows:
         flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=None)
 
         assert a.exists() and b.exists()  # nothing attributed → nothing removed
+
+    def test_concatenation_adds_newline_between_files(self, tmp_path):
+        """When two files are concatenated, a newline is inserted between them so
+        line boundaries don't merge across files."""
+        sessions = tmp_path / "sessions"
+        exports = tmp_path / "exports"
+        exports.mkdir()
+        _make_session(sessions, "sid")
+        # Second file has no trailing newline.
+        (exports / "flows-10.0.0.5.jsonl").write_text('{"id": "first"}\n')
+        (exports / "flows-fd00--2.jsonl").write_text('{"id": "second"}')
+
+        out = flow_export.export_mitmweb_flows(
+            sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5", "fd00::2"]
+        )
+
+        lines = [line for line in out.read_text().splitlines() if line]
+        assert len(lines) == 2
+        assert json.loads(lines[0])["id"] == "first"
+        assert json.loads(lines[1])["id"] == "second"
 
 
 class TestResolveFlowsFilenames:

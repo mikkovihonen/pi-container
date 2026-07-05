@@ -542,12 +542,21 @@ class ContainerNetworkManager:
         # the container would fail to start (surfacing as a 30s health-probe
         # hang, since the run error → DEVNULL).
         exports_host_dir = self.config_dir / "exports"
-        exports_host_dir.mkdir(parents=True, exist_ok=True)
         exports_container_path = "/home/mitmproxy/exports"
-        exports_mounts: list[str] = [
-            "--volume",
-            f"{exports_host_dir}:{exports_container_path}",
-        ]
+        # Only mount the exports volume and enable the addon when the user has
+        # opted in (flow_export.enabled = true). When disabled, the addon stays
+        # silent (see FLOW_EXPORT_ENABLED below) so no raw flows-<ip>.jsonl files
+        # pollute the host-side exports directory.
+        flow_export_enabled = read_flow_export_enabled(self.config_dir)
+        exports_mounts: list[str]
+        if flow_export_enabled:
+            exports_host_dir.mkdir(parents=True, exist_ok=True)
+            exports_mounts = [
+                "--volume",
+                f"{exports_host_dir}:{exports_container_path}",
+            ]
+        else:
+            exports_mounts = []
 
         cmd = [
             self.container_runtime,
@@ -582,6 +591,10 @@ class ContainerNetworkManager:
             *[flag for k, v in read_proxy_forward_env(self.config_dir).items() for flag in ("--env", f"{k}={v}")],
             *config_mounts,
             *exports_mounts,
+            # Flow export toggle — forwarded to the proxy addon so it skips
+            # capture entirely when the user has disabled it in config.yaml.
+            "--env",
+            f"FLOW_EXPORT_ENABLED={str(flow_export_enabled).lower()}",
             *self._env_flags(secrets),
             self.proxy_image,
         ]

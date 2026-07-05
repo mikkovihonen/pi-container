@@ -207,18 +207,20 @@ def export_mitmweb_flows(
 ) -> Path | None:
     """Export mitmweb flow history to the exports directory, keyed by session.
 
-    Reads the flows attributed to this agent container (by client IP, across both
-    address families) from the proxy's mounted exports directory and writes a
-    merged snapshot bucketed by UTC date under
-    ``{exports_dir}/flows/{YYYY-MM-DD}/{HH-MM-SS-mmm}_{session-id}.json``.
+    Reads the raw ``flows-<ip>.jsonl`` file(s) attributed to this agent container
+    from the proxy's mounted exports directory and copies them (concatenated into
+    one, if there are both IPv4 and IPv6 files) into a date-bucketed directory
+    under ``{exports_dir}/flows/{YYYY-MM-DD}/{HH-MM-SS-mmm}_{session-id}.jsonl``.
+
+    No parsing, merging, or format conversion — the raw JSON Lines file is
+    copied as-is, keeping the ``.jsonl`` extension.
 
     Args:
         sessions_dir: Where the pi session ``.jsonl`` files live — read only to
-            determine the current session id.
+            determine the current session id (used in the output filename).
         exports_dir: The per-project exports directory — both where the proxy
             stages raw ``flows-<ip>.jsonl`` files (its bind mount) and where the
-            session snapshot is written. Now that each workspace has its own
-            proxy, this is per-project. Defaults to
+            session snapshot is written. Defaults to
             ``{PROJECT_DIR}/.pi-container/exports``.
         client_ips: The agent container's isolated-net IPs (IPv4 and/or IPv6),
             used to select its ``flows-<ip>.jsonl`` files. See
@@ -244,55 +246,46 @@ def export_mitmweb_flows(
         logger.warning(f"Could not read session ID from {latest}: {e}")
         return None
 
-    # 2. Load this agent container's flows from the proxy's mounted exports dir,
-    #    merging its per-family (v4/v6) files. The flow_export addon appends
-    #    per-client-IP files as flows complete; the volume mount makes them
-    #    accessible to run.py on the host. Always create the session export file,
-    #    even when no flows were captured — an empty export records that the
-    #    session ran without traffic.
-    flows: list[dict] = []
-    consumed: list[Path] = []
+    # 2. Resolve which raw flows file(s) to copy and concatenate them.
+    raw_files: list[Path] = []
     for filename in _resolve_flows_filenames(exports_dir, client_ips):
-        part = _load_flows_from_mount(exports_dir, filename)
-        if part is not None:
-            flows.extend(part)
-            consumed.append(exports_dir / filename)
-    if not consumed:
-        logger.info("No flow export file(s) found on the mount; writing an empty session export.")
-    elif not flows:
-        logger.info("mitmweb captured 0 flows; writing empty export.")
-    # Merge into a single coherent timeline ordered by capture start time.
-    flows.sort(key=lambda f: f.get("timestamp_start") or 0)
+        raw_path = exports_dir / filename
+        if raw_path.exists():
+            raw_files.append(raw_path)
 
-    # 3. Write the flow export as a timestamped JSON file, bucketed by UTC date.
-    #    The millisecond-precision time plus the session id in the filename
-    #    (e.g. 13-45-12-123_the-session-id.json) keeps exports sortable and
-    #    unique even when the session id changes across the container's lifetime.
+    if not raw_files:
+        logger.info("No flow export file(s) found on the mount; nothing to export.")
+        return None
+
+    # 3. Concatenate (or copy single) raw file(s) into the date-bucketed
+    #    directory, keeping the .jsonl extension. The filename pattern is
+    #    preserved so the export is sortable and unique.
     now = datetime.now(UTC)
     date_dir = exports_dir / "flows" / now.strftime("%Y-%m-%d")
     date_dir.mkdir(parents=True, exist_ok=True)
     timestamp = now.strftime("%H-%M-%S-") + f"{now.microsecond // 1000:03d}"
-    export_path = date_dir / f"{timestamp}_{session_id}.json"
+    export_path = date_dir / f"{timestamp}_{session_id}.jsonl"
+
     try:
-        export_path.write_text(
-            json.dumps(
-                {"session_id": session_id, "timestamp": now.isoformat(), "flows": flows},
-                indent=2,
-            )
-        )
+        chunks = [raw_path.read_bytes() for raw_path in raw_files]
+        data = b"".join(chunks)
+        # Ensure the concatenated file ends with a newline so the last line
+        # is always complete.
+        if not data.endswith(b"\n"):
+            data += b"\n"
+        export_path.write_bytes(data)
     except OSError as e:
         logger.warning(f"Could not write mitmweb flow export to {export_path}: {e}")
         return None
 
-    # 4. The snapshot is now the durable copy — remove the raw per-IP file(s) we
-    #    consumed so the same flows aren't stored twice. Only runs after a
-    #    successful write; a failed write above returns early and keeps the raw
-    #    files intact. The addon re-creates a file on the next flow from that IP.
-    for raw_file in consumed:
+    # 4. Remove the raw per-IP files we consumed so the same flows aren't
+    #    stored twice. Only after a successful write; a failed write above
+    #    returns early and keeps the raw files intact.
+    for raw_path in raw_files:
         try:
-            raw_file.unlink()
+            raw_path.unlink()
         except OSError as e:
-            logger.warning(f"Could not remove consumed flow file {raw_file}: {e}")
+            logger.warning(f"Could not remove consumed flow file {raw_path}: {e}")
 
-    logger.info(f"Exported {len(flows)} flow(s) from mitmweb → {export_path}")
+    logger.info(f"Exported {len(raw_files)} flow file(s) → {export_path}")
     return export_path

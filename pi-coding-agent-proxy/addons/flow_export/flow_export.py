@@ -133,6 +133,13 @@ class FlowExporter:
         # IP starts fresh rather than accumulating a prior session's flows.
         self._truncated: set[str] = set()
         self._count: int = 0
+        # Controlled by the host via FLOW_EXPORT_ENABLED env var — when "false"
+        # (or unset/anything else), the addon is a no-op so raw flows-<ip>.jsonl
+        # files never pollute the bind-mounted exports directory.
+        self._enabled: bool = os.environ.get("FLOW_EXPORT_ENABLED", "false").lower() == "true"
+        if not self._enabled:
+            log.info("[flow-export] Disabled (FLOW_EXPORT_ENABLED is not 'true'); skipping capture.")
+            return
 
         try:
             os.makedirs(self.export_dir, exist_ok=True)
@@ -147,6 +154,8 @@ class FlowExporter:
         flow id so a flow is never written twice. Best-effort: a write failure is
         logged, not raised, so it never disrupts the proxied request.
         """
+        if not self._enabled:
+            return
         flow_id = getattr(flow, "id", None) or str(id(flow))
         if flow_id in self._seen:
             return
