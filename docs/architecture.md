@@ -1,6 +1,5 @@
 # Architecture
 
-[← Documentation index](../README.md) · [Getting Started](getting-started.md) · [Configuration](configuration.md) · [Development](development.md)
 
 The system consists of three components running as containers or processes:
 

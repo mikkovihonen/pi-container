@@ -1,7 +1,5 @@
 # Releases
 
-[← Documentation index](../README.md) · [Getting Started](getting-started.md) · [Architecture](architecture.md) · [Configuration](configuration.md) · [Development](development.md)
-
 This project is installed by cloning. Releases are **git tags** on `main`. Docker
 images are built locally with `build.sh` — no image registry publishing. The
 version is authoritative from the latest git tag (not `pyproject.toml`).

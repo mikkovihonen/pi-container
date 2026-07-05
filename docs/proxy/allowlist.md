@@ -1,7 +1,5 @@
 # Allowlist Addon
 
-[← Documentation index](../../README.md) · [Proxy overview](overview.md) · [Token replacer](token-replacer.md) · [Flow export](flow-export.md) · [Addon development](addon-development.md)
-
 Filters HTTP traffic so that only requests to allowlisted domains and IP address ranges pass through the proxy. All other connections are blocked (HTTP 403 by default, or connection closed via status 444).
 
 This addon also works in reverse: in `block` mode, only blocked hosts/IPs are denied and everything else is allowed.
@@ -20,7 +18,7 @@ This addon also works in reverse: in `block` mode, only blocked hosts/IPs are de
 
 > **In this project the allowlist is already wired in and active.** The
 > `pi-coding-agent-proxy` image bakes the script and a fail-closed default config,
-> and `run.py` mounts the host's [`.pi-container/allowlist.yaml`](../../.pi-container/allowlist.yaml)
+> and `run.py` mounts the host's [`.pi-container/allowlist.yaml`](https://github.com/mikkovihonen/pi-container/blob/main/.pi-container/allowlist.yaml)
 > over it at runtime. Edit that host file to change the policy — you don't need
 > the manual steps below unless you're wiring the addon into a different proxy.
 
@@ -30,7 +28,7 @@ Load the addon in mitmproxy/mitmweb (`-s` is the short form of `--set scripts=`,
 mitmweb -s allowlist.py
 ```
 
-Or in Docker (pi-coding-agent-proxy) — see the [Containerfile](../../pi-coding-agent-proxy/Containerfile) and [entrypoint.sh](../../pi-coding-agent-proxy/entrypoint.sh):
+Or in Docker (pi-coding-agent-proxy) — see the [Containerfile](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/Containerfile) and [entrypoint.sh](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/entrypoint.sh):
 
 ```dockerfile
 COPY addons/allowlist/allowlist.py /home/mitmproxy/scripts/allowlist.py

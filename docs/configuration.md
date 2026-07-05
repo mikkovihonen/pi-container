@@ -1,6 +1,5 @@
 # Configuration
 
-[← Documentation index](../README.md) · [Getting Started](getting-started.md) · [Architecture](architecture.md) · [Development](development.md)
 
 ## Environment Configuration
 
@@ -130,7 +129,7 @@ Add new rules for any additional hostnames the agent needs to reach (e.g. intern
 
 ### Token Replacer Secrets
 
-The `token_replacer.yaml` config in `.pi-container/` may reference `${ENV:VAR}` values that must be set in the host environment before running. `run.py` scans this config and injects the values as environment variables into the proxy container. Override `ContainerNetworkManager._pull_secrets_from_config()` (in [`src/network.py`](../src/network.py)) to integrate with a secret store (Vault, AWS Secrets Manager, etc.).
+The `token_replacer.yaml` config in `.pi-container/` may reference `${ENV:VAR}` values that must be set in the host environment before running. `run.py` scans this config and injects the values as environment variables into the proxy container. Override `ContainerNetworkManager._pull_secrets_from_config()` (in [`src/network.py`](https://github.com/mikkovihonen/pi-container/blob/main/src/network.py)) to integrate with a secret store (Vault, AWS Secrets Manager, etc.).
 
 ### Transient tmpfs Mounts
 
@@ -189,7 +188,7 @@ Some models need an explicit Jinja chat template. Place them under `.pi-containe
 
 ### Version control (.gitignore)
 
-A ready-to-copy [`.gitignore.example`](../.gitignore.example) lists every entry a workspace needs. Copy the relevant lines into your project's `.gitignore`.
+A ready-to-copy [`.gitignore.example`](https://github.com/mikkovihonen/pi-container/blob/main/.gitignore.example) lists every entry a workspace needs. Copy the relevant lines into your project's `.gitignore`.
 
 Most of `.pi-container/` is project configuration you **should commit** so the environment is reproducible: `config.yaml`, `allowlist.yaml`, `token_replacer.yaml`, `chat-templates/`, and `dependencies/apt/packages.txt`. (`token_replacer.yaml` holds only `${ENV:VAR}` references, never resolved secrets — see [Token Replacer Secrets](#token-replacer-secrets).)
 

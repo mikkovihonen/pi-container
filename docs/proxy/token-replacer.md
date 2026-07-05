@@ -1,7 +1,5 @@
 # Token Replacement Proxy Addon
 
-[← Documentation index](../../README.md) · [Proxy overview](overview.md) · [Allowlist](allowlist.md) · [Flow export](flow-export.md) · [Addon development](addon-development.md)
-
 ## Design Document
 
 ### Overview
@@ -202,10 +200,10 @@ The addon applies the same hostname + content-pattern matching to HTTP responses
 ### Integration with the Proxy Container
 
 > **In this project the token_replacer is already wired in and active.** The
-> [Containerfile](../../pi-coding-agent-proxy/Containerfile) bakes the script + a default config, the
-> [entrypoint](../../pi-coding-agent-proxy/entrypoint.sh) loads it with `-s` and points
+> [Containerfile](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/Containerfile) bakes the script + a default config, the
+> [entrypoint](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/entrypoint.sh) loads it with `-s` and points
 > `TOKEN_REPLACER_CONFIG_PATH` at `/home/mitmproxy/config/token_replacer.yaml`,
-> and `run.py` mounts the host's [`.pi-container/token_replacer.yaml`](../../.pi-container/token_replacer.yaml)
+> and `run.py` mounts the host's [`.pi-container/token_replacer.yaml`](https://github.com/mikkovihonen/pi-container/blob/main/.pi-container/token_replacer.yaml)
 > over it (also injecting any `${ENV:VAR}` secrets it references). The steps below
 > describe that wiring for reference / other proxies.
 

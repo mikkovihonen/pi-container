@@ -46,3 +46,6 @@ pi-coding-agent-proxy/.locks/**
 
 # Generated coverage badge (committed by CI)
 docs/assets/coverage.svg
+
+# Build artifacts
+site/

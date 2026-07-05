@@ -1,7 +1,5 @@
 # mitmproxy Addon Development Guide
 
-[← Documentation index](../../README.md) · [Proxy overview](overview.md) · [Allowlist](allowlist.md) · [Token replacer](token-replacer.md) · [Flow export](flow-export.md)
-
 This guide covers writing addons (scripts) for [mitmproxy](https://mitmproxy.org/) and [mitmweb](https://mitmproxy.org/).
 
 ## How mitmproxy Loads Addons
@@ -438,6 +436,6 @@ This writes `index.html`, `static/`, `flows.json`, and flow content to the speci
 
 | Addon | Path | Description |
 |-------|------|-------------|
-| Token Replacer | [`token_replacer/`](../../pi-coding-agent-proxy/addons/token_replacer/) | Replaces sensitive tokens in HTTP bodies/headers based on hostname + content patterns |
-| Allowlist | [`allowlist/`](../../pi-coding-agent-proxy/addons/allowlist/) | Filters HTTP traffic by domain/IP allowlist or blocklist; supports glob, regex, CIDR ranges |
-| Flow Export | [`flow_export/`](../../pi-coding-agent-proxy/addons/flow_export/) | Appends all flows (including blocked/killed) to a JSON Lines audit trail as they complete |
+| Token Replacer | [`token_replacer/`](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/addons/token_replacer/) | Replaces sensitive tokens in HTTP bodies/headers based on hostname + content patterns |
+| Allowlist | [`allowlist/`](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/addons/allowlist/) | Filters HTTP traffic by domain/IP allowlist or blocklist; supports glob, regex, CIDR ranges |
+| Flow Export | [`flow_export/`](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/addons/flow_export/) | Appends all flows (including blocked/killed) to a JSON Lines audit trail as they complete |

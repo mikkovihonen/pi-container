@@ -1,7 +1,5 @@
 # Getting Started
 
-[← Documentation index](../README.md) · [Architecture](architecture.md) · [Configuration](configuration.md) · [Development](development.md)
-
 ## Prerequisites
 
 Before running, ensure you have the following installed on your host machine:
@@ -58,7 +56,7 @@ To run this environment comfortably, especially when utilizing the full 128k con
 - **Container runtime**: The Apple `container` CLI is the default.
 - **Network**: The default bridge interface is `bridge100` and the proxy upstream network defaults to `default`. These per-runtime defaults are applied automatically; `BRIDGE_INTERFACE` / `PROXY_UPSTREAM_NETWORK` are only needed to override them.
 - **LLaMA backend**: Runs natively using Apple's Metal GPU acceleration.
-- **podman / docker on macOS**: These run containers inside a Linux VM (no `podman0`/`docker0` bridge exists on the host), so `socat` is not used — the proxy reaches host `llama-server` via `host.containers.internal` (gvproxy). The runtime abstraction ([`src/runtimes.py`](../src/runtimes.py)) handles these differences; the isolated network is created with `--internal --disable-dns` and the proxy is attached to both networks with pinned `eth0`/`eth1` interface names.
+- **podman / docker on macOS**: These run containers inside a Linux VM (no `podman0`/`docker0` bridge exists on the host), so `socat` is not used — the proxy reaches host `llama-server` via `host.containers.internal` (gvproxy). The runtime abstraction ([`src/runtimes.py`](https://github.com/mikkovihonen/pi-container/blob/main/src/runtimes.py)) handles these differences; the isolated network is created with `--internal --disable-dns` and the proxy is attached to both networks with pinned `eth0`/`eth1` interface names.
 
 ## Build and Run
 

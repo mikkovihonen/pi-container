@@ -1,7 +1,5 @@
 # Flow Export Proxy Addon
 
-[← Documentation index](../../README.md) · [Proxy overview](overview.md) · [Allowlist](allowlist.md) · [Token replacer](token-replacer.md) · [Addon development](addon-development.md)
-
 ## Design Document
 
 ### Overview
@@ -109,9 +107,9 @@ Notes on serialization:
 ### Integration with the Proxy Container
 
 > **In this project the flow_export addon is already wired in and active.** The
-> [Containerfile](../../pi-coding-agent-proxy/Containerfile) bakes the script and creates a
+> [Containerfile](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/Containerfile) bakes the script and creates a
 > `mitmproxy`-owned `/home/mitmproxy/exports` directory, and the
-> [entrypoint](../../pi-coding-agent-proxy/entrypoint.sh) loads it with `-s`. `run.py` mounts the host
+> [entrypoint](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/entrypoint.sh) loads it with `-s`. `run.py` mounts the host
 > export directory over `/home/mitmproxy/exports`. It names each run's agent
 > container `pi-coding-agent-<run-id>`, looks up that container's isolated-net
 > IPs (IPv4 **and** IPv6), and after the agent exits reads and merges the

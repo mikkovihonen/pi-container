@@ -1,7 +1,5 @@
 # Development
 
-[← Documentation index](../README.md) · [Getting Started](getting-started.md) · [Architecture](architecture.md) · [Configuration](configuration.md) · [Releases](releases.md)
-
 The host-side Python (`src/`) is managed with [uv](https://docs.astral.sh/uv/). Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`.
 
 ```bash

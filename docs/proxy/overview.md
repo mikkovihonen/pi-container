@@ -1,7 +1,4 @@
 # Transparent proxy container
-
-[← Documentation index](../../README.md) · [Allowlist](allowlist.md) · [Token replacer](token-replacer.md) · [Flow export](flow-export.md) · [Addon development](addon-development.md)
-
 - Debian based router container that transparently intercepts the agent's HTTP/HTTPS/DNS traffic via mitmproxy
 - mitmproxy generates a self-signed certificate with its certificate authority the first time it's run
 - mitmweb provides a web UI (port 8081) for monitoring traffic
@@ -25,7 +22,7 @@ RUN timeout 3s mitmweb || [ $? -eq 124 ]
 To use the transparent proxy, the container must be run with additional capabilities to allow it to manage network interfaces and routing tables:
 - `CAP_NET_ADMIN`
 
-The [entrypoint](../../pi-coding-agent-proxy/entrypoint.sh) uses `iptables` on the isolated-net interface
+The [entrypoint](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/entrypoint.sh) uses `iptables` on the isolated-net interface
 (`eth1`) to transparently intercept the agent's traffic. HTTP, HTTPS and DNS are
 redirected into mitmproxy (running transparent + DNS modes); the local
 `llama-server` API is DNAT'd out to the host; everything else is denied by
