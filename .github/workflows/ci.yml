@@ -35,7 +35,7 @@ jobs:
           restore-keys: ${{ runner.os }}-uv-
 
       - name: Install dependencies
-        run: uv sync --frozen --project .
+        run: uv sync --frozen --project . --all-groups
 
       - name: Install pre-commit
         run: uv tool install pre-commit
@@ -75,10 +75,10 @@ jobs:
           restore-keys: ${{ runner.os }}-uv-
 
       - name: Install dependencies
-        run: uv sync --frozen --project .
+        run: uv sync --frozen --project . --all-groups
 
       - name: Run tests with coverage
-        run: uv run pytest --cov --cov-report=xml --cov-report=term-missing
+        run: uv run --group src --group proxy pytest --cov --cov-report=xml --cov-report=term-missing
 
       - name: Generate coverage badge
         run: uv run python3 .github/workflows/scripts/generate_coverage_badge.py
