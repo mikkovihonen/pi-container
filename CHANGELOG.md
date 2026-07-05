@@ -4,13 +4,13 @@ All notable changes to this project will be documented in this file. The format 
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.2] - 2026-07-04
+## [Unreleased]
 
-### Changed
-- Relaxed `.pi-container` shadowing: dependency manifest (`dependencies/`) is no longer bind-mounted inside the container; only the `exports` tmpfs is kept.
+## [0.1.4] - 2026-07-05
 
-### Removed
-- `deps_dir` variable and conditional bind mount for the dependency manifest (unused).
+### Fixed
+- Release script validation no longer fails when the new git tag has not yet been created (`validate_versions.py` now accepts `--new-version` to compare against the target version instead of the existing tag).
+- Release script now uses `uv run pre-commit` so it works inside the project venv.
 
 ## [0.1.3] - 2026-07-05
 
@@ -26,13 +26,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `flow_export.enabled` in `.pi-container/config.yaml`; when disabled, no raw
   `flows-*.jsonl` files are created.
 
-## [0.1.4] - 2026-07-05
+## [0.1.2] - 2026-07-04
 
-### Fixed
-- Release script validation no longer fails when the new git tag has not yet been created (`validate_versions.py` now accepts `--new-version` to compare against the target version instead of the existing tag).
-- Release script now uses `uv run pre-commit` so it works inside the project venv.
+### Changed
+- Relaxed `.pi-container` shadowing: dependency manifest (`dependencies/`) is no longer bind-mounted inside the container; only the `exports` tmpfs is kept.
 
-## [Unreleased]
+### Removed
+- `deps_dir` variable and conditional bind mount for the dependency manifest (unused).
 
 ## [0.1.0] - 2026-07-04
 
