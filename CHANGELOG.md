@@ -12,12 +12,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 - `deps_dir` variable and conditional bind mount for the dependency manifest (unused).
 
-## [Unreleased]
+## [0.1.3] - 2026-07-05
 
 ### Added
 - Seed `pi-coding-agent/default/entrypoint.sh` into `.pi-container/agent/` when
   missing, so users have a customizable entrypoint that runs before `pi` launches
   inside the container.
+
+### Changed
+- Flow export now copies raw `.jsonl` files as-is into the sessions directory
+  instead of parsing, merging, and re-serializing them as `.json`.
+- Flow export volume mount and proxy addon are now gated by
+  `flow_export.enabled` in `.pi-container/config.yaml`; when disabled, no raw
+  `flows-*.jsonl` files are created.
+
+## [Unreleased]
 
 ## [0.1.0] - 2026-07-04
 
