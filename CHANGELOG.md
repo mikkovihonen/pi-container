@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-07-05
+
+### Changed
+- Updated `requires-python` from `3.14.6` to `3.14` to improve dependabot compatibility.
+
 ## [0.1.5] - 2026-07-05
 
 ### Fixed
