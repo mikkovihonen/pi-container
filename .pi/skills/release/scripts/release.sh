@@ -63,7 +63,7 @@ fi
 # 7. Run tests
 echo ""
 echo "=== Running tests ==="
-uv run pytest --cov || {
+uv run --group src --group proxy pytest --cov || {
     echo "✗ Tests failed. Fix before releasing."
     exit 1
 }

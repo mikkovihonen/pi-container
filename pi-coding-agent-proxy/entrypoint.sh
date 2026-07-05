@@ -139,7 +139,7 @@ export TOKEN_REPLACER_CONFIG_PATH="${TOKEN_REPLACER_CONFIG_PATH:-/home/mitmproxy
 # per-client-IP file /home/mitmproxy/exports/flows-<ip>.jsonl as it completes,
 # which is mounted from the host so run.py can read it after the session ends.
 exec gosu mitmproxy bash -c '
-    mitmweb --mode transparent@8080 --mode dns@5353 --web-host 0.0.0.0 \
+    uv run mitmweb --mode transparent@8080 --mode dns@5353 --web-host 0.0.0.0 \
         -s /home/mitmproxy/scripts/allowlist.py \
         -s /home/mitmproxy/scripts/token_replacer.py \
         -s /home/mitmproxy/scripts/flow_export.py \

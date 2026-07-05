@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-07-05
+
+### Changed
+- Switched proxy container to use `uv` for dependency management instead of `pip` with pinned requirements.
+- Split project dependencies into groups (`src`, `proxy`, `dev`) for cleaner isolation.
+
 ## [0.1.6] - 2026-07-05
 
 ### Changed

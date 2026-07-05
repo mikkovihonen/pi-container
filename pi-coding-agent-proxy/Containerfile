@@ -1,9 +1,10 @@
 FROM python:3.14.6-slim-trixie
 
-# Version-pinned, hash-verified pip requirements (generated with pip hash)
-COPY pi-coding-agent-proxy/requirements-pinned.txt /requirements-pinned.txt
-
+# Install uv and system dependencies in a single layer.
+# uv is used to install proxy dependencies from the main pyproject.toml + uv.lock
+# (frozen, only the proxy dependency group).
 RUN apt-get update && apt-get install -y \
+    curl \
     iptables \
     iproute2 \
     ca-certificates \
@@ -11,17 +12,19 @@ RUN apt-get update && apt-get install -y \
     expect \
     procps \
     jq \
-    && pip install --require-hashes -r /requirements-pinned.txt \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv@sha256:3d868e555f8f1dbc324afa005066cd11e1053fc4743b9808ca8025283e65efa5  /uv /uvx /usr/local/bin/
 
 RUN useradd -m mitmproxy
 
 USER mitmproxy
 WORKDIR /home/mitmproxy
-RUN timeout 3s mitmweb || [ $? -eq 124 ]
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --only-group proxy --no-dev
+RUN timeout 3s /home/mitmproxy/.venv/bin/mitmweb || [ $? -eq 124 ]
 
 USER root
-# Set up entrypoint script
 COPY pi-coding-agent-proxy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
