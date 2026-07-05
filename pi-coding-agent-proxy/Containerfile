@@ -18,9 +18,11 @@ COPY --from=ghcr.io/astral-sh/uv@sha256:3d868e555f8f1dbc324afa005066cd11e1053fc4
 
 RUN useradd -m mitmproxy
 
+COPY pyproject.toml uv.lock /home/mitmproxy/
+RUN chown mitmproxy:mitmproxy /home/mitmproxy/pyproject.toml /home/mitmproxy/uv.lock
+
 USER mitmproxy
 WORKDIR /home/mitmproxy
-COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --only-group proxy --no-dev
 RUN timeout 3s /home/mitmproxy/.venv/bin/mitmweb || [ $? -eq 124 ]
 

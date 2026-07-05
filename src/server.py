@@ -17,7 +17,7 @@ import urllib.request
 from typing import TYPE_CHECKING, Any
 
 from models import Model, ServerConfig
-from util import get_free_port, stop_process_group
+from util import extract_ipv4_from_ip_addr, get_free_port, stop_process_group
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -138,15 +138,16 @@ class Server:
             result = subprocess.check_output(
                 ["ip", "addr", "show", self.bridge_interface], text=True, stderr=subprocess.DEVNULL, timeout=5
             )
-            match = re.search(r"inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+", result)
-            if match:
-                return match.group(1)
+            ip_addr = extract_ipv4_from_ip_addr(result)
+            if ip_addr:
+                return ip_addr
 
         # Fallback to 'ifconfig' (macOS / older Linux)
         with contextlib.suppress(subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
             result = subprocess.check_output(
                 ["ifconfig", self.bridge_interface], text=True, stderr=subprocess.DEVNULL, timeout=5
             )
+            # If the /cidr form didn't match, try without cidr (ifconfig doesn't include it)
             match = re.search(r"inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", result)
             if match:
                 return match.group(1)

@@ -49,3 +49,6 @@ docs/assets/coverage.svg
 
 # Build artifacts
 site/
+
+# Generated index (from README.md)
+docs/index.md

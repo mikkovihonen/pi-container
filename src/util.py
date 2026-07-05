@@ -156,6 +156,18 @@ def stop_process_group(pid: int, name: str, logger) -> None:
             logger.error(f"Error stopping process group for {name}: {e}")
 
 
+def extract_ipv4_from_ip_addr(output: str) -> str | None:
+    """Extract the first IPv4 address from ``ip addr show`` output.
+
+    Matches ``inet 1.2.3.4/n`` — the standard format for both ``ip addr`` and
+    ``ifconfig`` output on Linux. Returns None if no match is found.
+    """
+    import re as _re
+
+    match = _re.search(r"inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+", output)
+    return match.group(1) if match else None
+
+
 def get_sanitized_git_config_json(logger):
     """
     Generates a JSON-serialized dictionary of 'key': 'value' pairs.

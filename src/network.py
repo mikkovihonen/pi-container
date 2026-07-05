@@ -8,7 +8,6 @@ import fcntl
 import logging
 import os
 import re
-import socket
 import subprocess
 import time
 import urllib.error
@@ -19,7 +18,7 @@ import yaml
 
 from config import ADMIN_PASSWORD, CONFIG_DIR, REPO_ROOT
 from runtimes import ContainerRuntime
-from util import run_quiet
+from util import get_free_port, run_quiet
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -256,19 +255,6 @@ def scan_config_env_refs(config: dict) -> list[str]:
         if m:
             refs.add(m.group(1))
     return sorted(refs)
-
-
-def _find_free_port() -> int:
-    """Ask the OS for a currently-free TCP port on the loopback interface.
-
-    Used to publish each per-project proxy's mitmweb UI on its own host port so
-    multiple projects' proxies can run at once (the old fixed 8081 is a singleton).
-    There is a small TOCTOU window between closing the socket and the runtime
-    binding the port; acceptable for a local dev UI.
-    """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 # ─── Container Network Manager ───────────────────────────────────────────
@@ -518,7 +504,7 @@ class ContainerNetworkManager:
 
         # Publish the mitmweb UI on an auto-assigned host port so multiple
         # per-project proxies can coexist (the old fixed 8081 could bind once).
-        self.mitmweb_port = _find_free_port()
+        self.mitmweb_port = get_free_port()
 
         # Mount the host addon configs over the image's baked defaults. Each is
         # only mounted if present so a missing host config falls back to the

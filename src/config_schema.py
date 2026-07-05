@@ -1,8 +1,18 @@
-import subprocess
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import yaml
+
+from schema_common import (
+    MODELS_SCHEMA,
+    SCHEMA,
+    _validate_hf_models,
+    _validate_models_flags,
+    _validate_models_schema,
+    _validate_schema,
+)
+from template_paths import _check_chat_template_paths as _shared_check_chat_template_paths
+from version import get_git_tag_version
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -17,6 +27,9 @@ required configuration fields are present with the correct types.
 
 Importing this module has no gating side effects — it does NOT validate the
 environment or call ``sys.exit``.
+
+All helper functions and schema definitions are shared with
+``.github/workflows/scripts/validate_versions.py`` via ``schema_common.py``.
 """
 
 
@@ -31,175 +44,20 @@ def get_app_version() -> str | None:
     """
     from config import REPO_ROOT
 
-    try:
-        result = subprocess.run(
-            ["git", "tag", "--sort=-v:refname", "--merged", "HEAD"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=5,
-        )
-        tags = [t.strip() for t in result.stdout.strip().splitlines() if t.strip()]
-        if not tags:
-            return None
-        # Strip leading 'v' if present
-        return tags[0].lstrip("v")
-    # fmt: off
-    except (
-        FileNotFoundError,
-        subprocess.CalledProcessError,
-        subprocess.TimeoutExpired,
-    ):
-        return None
-    # fmt: on
+    return get_git_tag_version(REPO_ROOT)
 
 
 # ─── Schema definition ─────────────────────────────────────────────────────
+#
+# Schema definitions live in ``schema_common.py``. Local aliases keep the
+# existing ``_SCHEMA`` / ``_MODELS_SCHEMA`` names stable for callers and tests.
 
-
-# Required top-level keys with their expected types. Sub-keys are validated
-# recursively when the parent is present. ``None`` for the type means the value
-# can be any YAML type (used for ``egress.allow`` which has a heterogeneous dict).
-_SCHEMA = {
-    "resources": {
-        "type": dict,
-        "keys": {
-            "agent": {
-                "type": dict,
-                "keys": {
-                    "memory": {"type": (str, type(None))},
-                    "cpus": {"type": (int, type(None))},
-                },
-            },
-            "proxy": {
-                "type": dict,
-                "keys": {
-                    "memory": {"type": (str, type(None))},
-                    "cpus": {"type": (int, type(None))},
-                },
-            },
-        },
-    },
-    "llama": {
-        "type": dict,
-        "keys": {
-            "startup_timeout": {"type": int},
-            "startup_attempts": {"type": int},
-        },
-    },
-    "network": {
-        "type": dict,
-        "keys": {
-            "ipv6": {"type": (bool, str, int)},  # YAML bools, "true"/"1"/0/1 strings
-            "dns": {"type": str},
-        },
-    },
-    "proxy": {
-        "type": dict,
-        "keys": {
-            "expose_ui": {"type": str},
-        },
-    },
-    "agent": {
-        "type": dict,
-        "keys": {
-            "env": {"type": dict},
-            "mounts": {"type": list},
-        },
-    },
-    "tmpfs": {
-        "type": dict,
-        "keys": {
-            "paths": {"type": list},
-        },
-    },
-    "flow_export": {
-        "type": dict,
-        "keys": {
-            "enabled": {"type": (bool, str, int)},
-        },
-    },
-    "egress": {
-        "type": dict,
-        "keys": {
-            "allow": {"type": dict},
-        },
-    },
-}
-
-# Schema for models.json serverCustomParameters structure.
-# Validates hfModels and flags arrays within each provider.
-_MODELS_SCHEMA = {
-    "providers": {
-        "type": dict,
-        "keys": {
-            "serverCustomParameters": {
-                "type": dict,
-                "required": False,
-                "keys": {
-                    "hfModels": {
-                        "type": dict,
-                        "required": True,
-                        "keys": {
-                            "fileFlag": {"type": str},
-                            "repo": {"type": str},
-                            "file": {"type": str},
-                            "dir": {"type": str},
-                            "additionalServerFlags": {"type": list},
-                            "sha256": {"type": str},
-                        },
-                    },
-                    "flags": {
-                        "type": list,
-                        "required": False,
-                        "item_type": {"type": (str, int, float)},
-                    },
-                },
-            },
-        },
-    },
-}
+_SCHEMA = SCHEMA
+_MODELS_SCHEMA = MODELS_SCHEMA
 
 
 # ─── Validation ─────────────────────────────────────────────────────────────
-
-
-def _validate_field(value: Any, expected: type | tuple[type, ...], path: str) -> list[str]:
-    """Validate a single field's type. Returns a list of error messages (empty = OK)."""
-    errors: list[str] = []
-    if not isinstance(value, expected):
-        errors.append(f"  {path}: expected {expected}, got {type(value).__name__} (value: {value!r})")
-    return errors
-
-
-def _validate_schema(data: dict, schema: dict, path: str = "") -> list[str]:
-    """Recursively validate a config dict against the schema.
-
-    Returns a list of error messages (empty = valid).
-    """
-    errors: list[str] = []
-    for key, spec in schema.items():
-        current_path = f"{path}.{key}" if path else key
-        value = data.get(key)
-
-        if value is None:
-            # Missing key — check if it's required by the schema
-            if spec.get("required", True):
-                errors.append(f"  {current_path}: required field missing")
-            continue
-
-        # Type check the parent
-        errors.extend(_validate_field(value, spec["type"], current_path))
-        if not isinstance(value, dict):
-            continue
-
-        # Recurse into sub-keys
-        sub_schema = spec.get("keys", {})
-        if sub_schema:
-            errors.extend(_validate_schema(value, sub_schema, current_path))
-
-    return errors
+# All helpers are imported from ``schema_common.py``.
 
 
 def validate_config(config_path: Path) -> tuple[bool, list[str], str | None]:
@@ -245,7 +103,7 @@ def validate_config(config_path: Path) -> tuple[bool, list[str], str | None]:
         )
 
     # Validate schema
-    schema_errors = _validate_schema(data, _SCHEMA)
+    schema_errors = _validate_schema(data, SCHEMA)
     if schema_errors:
         errors.extend(schema_errors)
 
@@ -254,101 +112,7 @@ def validate_config(config_path: Path) -> tuple[bool, list[str], str | None]:
 
 
 # ─── Models.json validation ──────────────────────────────────────────────────
-
-
-def _validate_models_schema(
-    data: dict,
-    schema: dict,
-    path: str = "",
-) -> list[str]:
-    """Recursively validate a models.json dict against the schema.
-
-    Returns a list of error messages (empty = valid).
-    """
-    errors: list[str] = []
-    for key, spec in schema.items():
-        current_path = f"{path}.{key}" if path else key
-        value = data.get(key)
-
-        if value is None:
-            # Missing key — check if it's required
-            if spec.get("required", True):
-                errors.append(f"  {current_path}: required field missing")
-            continue
-
-        # Type check the parent
-        errors.extend(_validate_field(value, spec["type"], current_path))
-        if not isinstance(value, dict):
-            continue
-
-        # Recurse into sub-keys
-        sub_schema = spec.get("keys", {})
-        if sub_schema:
-            errors.extend(_validate_models_schema(value, sub_schema, current_path))
-
-    return errors
-
-
-def _validate_models_flags(flags: list, path: str) -> list[str]:
-    """Validate the flags array in serverCustomParameters.
-
-    Each item must be a string (flag name) or number (flag value).
-    Returns a list of error messages (empty = valid).
-    """
-    errors: list[str] = []
-    for i, item in enumerate(flags):
-        if not isinstance(item, (str, int, float)):
-            errors.append(f"  {path}[{i}]: expected str/int/float, got {type(item).__name__}")
-    return errors
-
-
-def _validate_hf_models(
-    hf_models: dict | None,
-    provider_name: str,
-) -> list[str]:
-    """Validate hfModels entries have required non-null fields.
-
-    Returns a list of error messages (empty = valid).
-    """
-    errors: list[str] = []
-    if hf_models is None:
-        errors.append(f"  providers.{provider_name}.serverCustomParameters.hfModels: must not be null")
-        return errors
-
-    if not isinstance(hf_models, dict):
-        errors.append(
-            f"  providers.{provider_name}.serverCustomParameters.hfModels: "
-            f"expected dict, got {type(hf_models).__name__}"
-        )
-        return errors
-
-    if len(hf_models) == 0:
-        errors.append(f"  providers.{provider_name}.serverCustomParameters.hfModels: must not be empty")
-        return errors
-
-    required_fields = ("fileFlag", "repo", "file", "dir")
-    for model_name, model_cfg in hf_models.items():
-        if not isinstance(model_cfg, dict):
-            errors.append(
-                f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}: "
-                f"expected dict, got {type(model_cfg).__name__}"
-            )
-            continue
-
-        for field in required_fields:
-            value = model_cfg.get(field)
-            if value is None:
-                errors.append(
-                    f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}.{field}: "
-                    f"must not be null"
-                )
-            elif not isinstance(value, str):
-                errors.append(
-                    f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}.{field}: "
-                    f"expected str, got {type(value).__name__}"
-                )
-
-    return errors
+# All helpers and schemas are imported from ``schema_common.py``.
 
 
 def validate_models(
@@ -383,7 +147,7 @@ def validate_models(
         return False, errors
 
     # Validate top-level structure
-    schema_errors = _validate_models_schema(data, _MODELS_SCHEMA)
+    schema_errors = _validate_models_schema(data, MODELS_SCHEMA)
     if schema_errors:
         errors.extend(schema_errors)
         return False, errors
@@ -410,64 +174,7 @@ def validate_models(
 
     # Validate --chat-template-file paths if requested
     if check_chat_template_paths:
-        _check_chat_template_paths(data, models_path, errors)
+        _shared_check_chat_template_paths(data, models_path, errors)
 
     is_valid = len(errors) == 0
     return is_valid, errors
-
-
-def _check_chat_template_paths(
-    data: dict,
-    models_path: Path,
-    errors: list[str],
-) -> None:
-    """Check that --chat-template-file paths exist on disk.
-
-    For seed templates, resolves .pi-container -> pi-coding-agent/default/.
-    For seeded configs, resolves .pi-container from the project root.
-    """
-    providers = data.get("providers", {})
-    for provider_name, provider_cfg in providers.items():
-        server_params = provider_cfg.get("serverCustomParameters", {})
-        flags = server_params.get("flags", [])
-        if not isinstance(flags, list):
-            continue
-
-        for i, flag in enumerate(flags):
-            if flag == "--chat-template-file":
-                if i + 1 >= len(flags):
-                    errors.append(
-                        f"  providers.{provider_name}.serverCustomParameters.flags[{i}] "
-                        f"--chat-template-file has no following path"
-                    )
-                    continue
-
-                template_path = flags[i + 1]
-                if not isinstance(template_path, str):
-                    errors.append(
-                        f"  providers.{provider_name}.serverCustomParameters.flags[{i}] "
-                        f"--chat-template-file path is not a string"
-                    )
-                    continue
-
-                # Resolve path
-                if template_path.startswith(".pi-container/"):
-                    # For seed templates, .pi-container -> pi-coding-agent/default/
-                    # For seeded configs, .pi-container is relative to project root
-                    suffix = template_path[len(".pi-container/") :]
-                    if models_path.parent.name == "agent" and "pi-coding-agent" in str(models_path):
-                        # Seed template: models.json is at pi-coding-agent/default/agent/models.json
-                        # .pi-container -> pi-coding-agent/default/
-                        resolved = models_path.parent.parent.parent / "default" / suffix
-                    else:
-                        # Seeded config: models.json is at .pi-container/agent/models.json
-                        # .pi-container is the grandparent directory
-                        resolved = models_path.parent.parent / suffix
-                else:
-                    resolved = models_path.parent / template_path
-
-                if not resolved.exists():
-                    errors.append(
-                        f"  providers.{provider_name}.serverCustomParameters.flags[{i}] "
-                        f"--chat-template-file path does not exist: {resolved}"
-                    )

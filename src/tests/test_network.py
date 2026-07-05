@@ -318,9 +318,9 @@ class TestPerProjectProxy:
         assert a.paths["lock_dir"] == b.paths["lock_dir"]
 
     def test_find_free_port_returns_valid_port(self):
-        from network import _find_free_port
+        from util import get_free_port
 
-        port = _find_free_port()
+        port = get_free_port()
         assert isinstance(port, int)
         assert 1024 <= port <= 65535
 

@@ -23,15 +23,30 @@ Usage:
 """
 
 import argparse
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from typing import Any
 
-import yaml
-
+# Inject the repo's src/ so we can import shared helpers.
+# This CI script lives three levels deep inside .github/workflows/scripts/,
+# so we walk up to the repo root and then into src/.
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+import yaml  # noqa: E402  (must import after sys.path insertion)
+
+from schema_common import (
+    MODELS_SCHEMA,
+    SCHEMA,
+    _validate_field,
+    _validate_hf_models,
+    _validate_models_flags,
+    _validate_models_schema,
+    _validate_schema,
+)
+from template_paths import _check_chat_template_paths, _resolve_chat_template_path
+from version import get_git_tag_version
+
 TAG_PREFIX = "v"
 
 
@@ -59,36 +74,6 @@ def _check(label: str, condition: bool, detail: str = "") -> bool:
 # ─── Version sources ────────────────────────────────────────────────────
 
 
-def get_git_tag_version() -> str | None:
-    """Return the version from the latest v* git tag on HEAD (without 'v' prefix).
-
-    Returns None if no tags exist (pre-release — version check is skipped).
-    """
-    try:
-        result = subprocess.run(
-            ["git", "tag", "--sort=-v:refname"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=5,
-        )
-        tags = [t.strip() for t in result.stdout.strip().splitlines() if t.strip()]
-        if not tags:
-            return None
-        # Return the first (highest) version, stripped of 'v' prefix
-        version = tags[0].lstrip(TAG_PREFIX)
-        return version
-    # fmt: off
-    except (
-        FileNotFoundError,
-        subprocess.CalledProcessError,
-        subprocess.TimeoutExpired,
-    ):
-        return None
-    # fmt: on
-
-
 def get_pyproject_version() -> str | None:
     """Read the version from pyproject.toml [project] version."""
     pyproject_path = REPO_ROOT / "pyproject.toml"
@@ -112,199 +97,6 @@ def get_seed_schema_version() -> str | None:
         return data.get("schema_version")
     except Exception:
         return None
-
-
-# ─── Seed config schema validation ──────────────────────────────────────
-
-# Required top-level keys with their expected types. Sub-keys are validated
-# recursively when the parent is present. ``None`` for the type means the value
-# can be any YAML type (used for ``egress.allow`` which has a heterogeneous dict).
-_SEED_SCHEMA = {
-    "resources": {
-        "type": dict,
-        "keys": {
-            "agent": {
-                "type": dict,
-                "keys": {
-                    "memory": {"type": (str, type(None))},
-                    "cpus": {"type": (int, type(None))},
-                },
-            },
-            "proxy": {
-                "type": dict,
-                "keys": {
-                    "memory": {"type": (str, type(None))},
-                    "cpus": {"type": (int, type(None))},
-                },
-            },
-        },
-    },
-    "llama": {
-        "type": dict,
-        "keys": {
-            "startup_timeout": {"type": int},
-            "startup_attempts": {"type": int},
-        },
-    },
-    "network": {
-        "type": dict,
-        "keys": {
-            "ipv6": {"type": (bool, str, int)},
-            "dns": {"type": str},
-        },
-    },
-    "proxy": {
-        "type": dict,
-        "keys": {
-            "expose_ui": {"type": str},
-        },
-    },
-    "agent": {
-        "type": dict,
-        "keys": {
-            "env": {"type": dict},
-            "mounts": {"type": list},
-        },
-    },
-    "tmpfs": {
-        "type": dict,
-        "keys": {
-            "paths": {"type": list},
-        },
-    },
-    "flow_export": {
-        "type": dict,
-        "keys": {
-            "enabled": {"type": (bool, str, int)},
-        },
-    },
-    "egress": {
-        "type": dict,
-        "keys": {
-            "allow": {"type": dict},
-        },
-    },
-}
-
-
-def _validate_field(value: Any, expected: type | tuple[type, ...], path: str) -> list[str]:
-    """Validate a single field's type. Returns a list of error messages."""
-    errors: list[str] = []
-    if not isinstance(value, expected):
-        errors.append(f"  {path}: expected {expected}, got {type(value).__name__} (value: {value!r})")
-    return errors
-
-
-def _validate_seed_config(data: dict, schema: dict | None = None) -> list[str]:
-    """Recursively validate the seed config against the schema."""
-    if schema is None:
-        schema = _SEED_SCHEMA
-    errors: list[str] = []
-    for key, spec in schema.items():
-        current_path = key
-        value = data.get(key)
-
-        if value is None:
-            errors.append(f"  {current_path}: required field missing")
-            continue
-
-        errors.extend(_validate_field(value, spec["type"], current_path))
-        if not isinstance(value, dict):
-            continue
-
-        sub_schema = spec.get("keys", {})
-        if sub_schema:
-            errors.extend(_validate_seed_config(value, sub_schema))
-
-    return errors
-
-
-# ─── Seed models.json schema validation ───────────────────────────────
-
-
-def _validate_seed_models(data: dict) -> list[str]:
-    """Validate seed models.json structure against the expected schema.
-
-    Checks:
-    - providers dict is present
-    - Each provider has serverCustomParameters with valid structure
-    - hfModels is non-null, non-empty, and has required fields
-    - flags array contains only valid types (str, int, float)
-    """
-    errors: list[str] = []
-
-    if "providers" not in data or not isinstance(data["providers"], dict):
-        errors.append("  providers: expected dict")
-        return errors
-
-    providers = data["providers"]
-    for provider_name, provider_cfg in providers.items():
-        if not isinstance(provider_cfg, dict):
-            errors.append(f"  providers.{provider_name}: expected dict")
-            continue
-
-        server_params = provider_cfg.get("serverCustomParameters")
-        if server_params is None:
-            errors.append(
-                f"  providers.{provider_name}.serverCustomParameters: required field missing"
-            )
-            continue
-
-        if not isinstance(server_params, dict):
-            errors.append(
-                f"  providers.{provider_name}.serverCustomParameters: expected dict"
-            )
-            continue
-
-        # Validate hfModels
-        hf_models = server_params.get("hfModels")
-        if hf_models is None:
-            errors.append(
-                f"  providers.{provider_name}.serverCustomParameters.hfModels: must not be null"
-            )
-        elif not isinstance(hf_models, dict):
-            errors.append(
-                f"  providers.{provider_name}.serverCustomParameters.hfModels: expected dict"
-            )
-        elif len(hf_models) == 0:
-            errors.append(
-                f"  providers.{provider_name}.serverCustomParameters.hfModels: must not be empty"
-            )
-        else:
-            required_hf_fields = ("fileFlag", "repo", "file", "dir")
-            for model_name, model_cfg in hf_models.items():
-                if not isinstance(model_cfg, dict):
-                    errors.append(
-                        f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}: expected dict"
-                    )
-                    continue
-
-                for field in required_hf_fields:
-                    value = model_cfg.get(field)
-                    if value is None:
-                        errors.append(
-                            f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}.{field}: must not be null"
-                        )
-                    elif not isinstance(value, str):
-                        errors.append(
-                            f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}.{field}: expected str, got {type(value).__name__}"
-                        )
-
-        # Validate flags array
-        flags = server_params.get("flags")
-        if flags is not None:
-            if not isinstance(flags, list):
-                errors.append(
-                    f"  providers.{provider_name}.serverCustomParameters.flags: expected list"
-                )
-            else:
-                for i, item in enumerate(flags):
-                    if not isinstance(item, (str, int, float)):
-                        errors.append(
-                            f"  providers.{provider_name}.serverCustomParameters.flags[{i}]: expected str/int/float, got {type(item).__name__}"
-                        )
-
-    return errors
 
 
 # ─── CLI ────────────────────────────────────────────────────────────────
@@ -343,7 +135,7 @@ def main() -> int:
     # ── Check 1: Git tag version (skipped when --new-version is given) ───
     git_version: str | None = None
     if new_version is None:
-        git_version = get_git_tag_version()
+        git_version = get_git_tag_version(REPO_ROOT)
         if git_version is None:
             print("  ⚠ No git tags found — skipping version consistency checks.")
             print("    (This is normal for forks or shallow clones without tags.)")
@@ -445,7 +237,7 @@ def main() -> int:
     if seed_data is not None:
         print()
         print("Validating seed config schema...")
-        schema_errors = _validate_seed_config(seed_data)
+        schema_errors = _validate_schema(seed_data, SCHEMA)
         if schema_errors:
             _error(f"Seed config schema has {len(schema_errors)} error(s):")
             for err in schema_errors:
@@ -463,8 +255,6 @@ def main() -> int:
         print()
         print("Validating seed directory completeness...")
 
-        # Expected directories and files that _ensure_project_config() seeds
-        # from pi-coding-agent/default/ into .pi-container/
         _EXPECTED_DIRS = ("agent", "chat-templates")
         _EXPECTED_FILES = (
             "config.yaml",
@@ -538,13 +328,7 @@ def main() -> int:
                             )
                             continue
 
-                        # Resolve path: .pi-container -> pi-coding-agent/default/
-                        if template_path.startswith(".pi-container/"):
-                            resolved = seed_dir / template_path[len(".pi-container/"):]
-                        elif template_path.startswith("pi-coding-agent/default/"):
-                            resolved = Path(template_path)
-                        else:
-                            resolved = seed_dir / template_path
+                        resolved = _resolve_chat_template_path(template_path, models_path)
 
                         if not resolved.exists():
                             template_path_errors.append(
@@ -564,7 +348,7 @@ def main() -> int:
     if models_data is not None:
         print()
         print("Validating seed models.json schema...")
-        models_schema_errors = _validate_seed_models(models_data)
+        models_schema_errors = _validate_models_schema(models_data, MODELS_SCHEMA)
         if models_schema_errors:
             _error(f"Seed models.json has {len(models_schema_errors)} error(s):")
             for err in models_schema_errors:

@@ -43,6 +43,7 @@ from runtimes import ContainerRuntime
 from server import Server
 from util import (
     EnvironmentError,
+    extract_ipv4_from_ip_addr,
     get_sanitized_git_config_json,
     handle_signal,
     validate_environment,
@@ -267,9 +268,8 @@ def main() -> None:
                         check=True,
                         timeout=5,
                     )
-                    match_ip = re.search(r"inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+", result_ip.stdout)
-                    if match_ip:
-                        proxy_isolated_ip = match_ip.group(1)
+                    proxy_isolated_ip = extract_ipv4_from_ip_addr(result_ip.stdout)
+                    if proxy_isolated_ip:
                         logger.info(f"Found proxy {RUNTIME.proxy_isolated_interface} IP address: {proxy_isolated_ip}")
                     if ipv6_enabled:
                         # Global-scope v6 address only (skip fe80:: link-local).
