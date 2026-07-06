@@ -8,6 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.9] - 2026-07-06
 
+### Refactored
+- Extracted shared schema validation logic into `src/schema_common.py`, deduplicating validators (`_validate_field`, `_validate_schema`, `_validate_models_schema`, `_validate_models_flags`, `_validate_hf_models`) between `config_schema.py` and CI's `validate_versions.py`.
+- Extracted chat template path resolution into `src/template_paths.py` (`_resolve_chat_template_path`, `_check_chat_template_paths`).
+- Extracted git tag version lookup into `src/version.py` (`get_git_tag_version`).
+- Moved `_find_free_port` from `network.py` to `util.py` as `get_free_port`.
+- Extracted IPv4 address parsing from `run.py` and `server.py` into `util.py` as `extract_ipv4_from_ip_addr`.
+
+### Changed
+- Bumped `pyyaml` to `>=6.0.3`.
+- Added `docs` dependency group with `mkdocs-material>=9.7.6`.
+- Updated dev dependencies: `pre-commit>=4.6.0`, `pytest>=9.1.1`, `pytest-cov>=7.1.0`, `ruff>=0.15.20`.
+- Added `override-dependencies` for `msgpack>=1.2.1` and `tornado>=6.5.6`.
+- Bumped schema_version and project version from `0.1.8` to `0.1.9`.
+
 ## [0.1.8] - 2026-07-05
 
 ### Added
