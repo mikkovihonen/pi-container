@@ -14,7 +14,7 @@ uv run ruff check src
 uv run ruff format src
 
 # Run the mitmproxy proxy-addon tests (heavy `mitmproxy` dep — opt-in group)
-uv run --group proxy-addons pytest pi-coding-agent-proxy/addons
+uv run --group proxy pytest pi-coding-agent-proxy/addons
 ```
 
 The Python sources run directly from `src/` (uv treats the project as a

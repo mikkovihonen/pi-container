@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-06
+
+### Changed
+- Bumped schema_version and project version from `0.1.9` to `0.2.0`.
+
 ## [0.1.9] - 2026-07-06
 
 ### Refactored

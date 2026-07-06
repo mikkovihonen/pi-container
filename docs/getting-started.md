@@ -56,7 +56,13 @@ To run this environment comfortably, especially when utilizing the full 128k con
 - **Container runtime**: The Apple `container` CLI is the default.
 - **Network**: The default bridge interface is `bridge100` and the proxy upstream network defaults to `default`. These per-runtime defaults are applied automatically; `BRIDGE_INTERFACE` / `PROXY_UPSTREAM_NETWORK` are only needed to override them.
 - **LLaMA backend**: Runs natively using Apple's Metal GPU acceleration.
-- **podman / docker on macOS**: These run containers inside a Linux VM (no `podman0`/`docker0` bridge exists on the host), so `socat` is not used — the proxy reaches host `llama-server` via `host.containers.internal` (gvproxy). The runtime abstraction ([`src/runtimes.py`](https://github.com/mikkovihonen/pi-container/blob/main/src/runtimes.py)) handles these differences; the isolated network is created with `--internal --disable-dns` and the proxy is attached to both networks with pinned `eth0`/`eth1` interface names.
+- **podman / docker on macOS**: These run containers inside a Linux VM (no `podman0`/`docker0` bridge exists on the host), so `socat` is not used — the proxy reaches host `llama-server` via `host.containers.internal` (gvproxy). The runtime abstraction ([`src/runtimes.py`](https://github.com/mikkovihonen/pi-container/blob/main/src/runtimes.py)) handles these differences. Each runtime configures the isolated network and proxy attachment differently:
+
+| Runtime | Network flags | Interface pinning |
+|---------|--------------|-------------------|
+| Apple `container` | `--internal --subnet-v6 <ula-subnet>` | None — uses default `eth0`/`eth1` |
+| Podman | `--internal --disable-dns` | `interface_name=eth0` / `interface_name=eth1` |
+| Docker | `--internal` | None — uses default `eth0`/`eth1` |
 
 ## Build and Run
 
@@ -94,7 +100,7 @@ alias pi="~/workspace/pi-container/run.sh"
 pi --session 1234abcd-ef56-78ab-cd90-1234abcd56ef
 ```
 
-The script reads `<project>/.pi-container/agent/models.json` (seeded from the `pi-coding-agent/default/` template on first run) to determine which LLM providers to start. Each entry defines a model (main, optional draft, and optional vision/mmproj files), download source, server flags, and OpenAI-compatible API configuration. Each workspace gets its own proxy container and isolated network (named by a hash of the project path); concurrent `pi` invocations **from the same workspace** share that workspace's proxy via a refcount.
+The script reads `<project>/.pi-container/agent/models.json` (seeded from the `pi-coding-agent/default/` template on first run) to determine which LLM providers to start. Each entry defines a model, download source, server flags, and OpenAI-compatible API configuration. Each workspace gets its own proxy container and isolated network (named by a hash of the project path); concurrent `pi` invocations **from the same workspace** share that workspace's proxy via a refcount.
 
 ### 4. Using the Agent
 

@@ -8,10 +8,6 @@ This mitmproxy addon records every HTTP/HTTPS flow that passes through the trans
 
 The files are written to a shared volume mount so `run.py` can read them on the host after the session ends.
 
-### Why partition by client IP
-
-A single proxy container is **shared across concurrent agent containers** (the proxy is ref-counted and reused). Each agent container has a distinct isolated-net IP, which the proxy sees as the client source address. Writing a single combined file could not tell one agent's traffic from another's; keying the file by client IP does. `run.py` looks up its own agent container's IP and reads the matching file.
-
 ### Why append per-flow instead of writing on shutdown
 
 Writing incrementally means the audit trail **survives an unclean exit**. mitmproxy's `done` shutdown hook only runs on a *clean* stop (SIGTERM/SIGINT); if the proxy container is `SIGKILL`'d, crashes, or its process tree never forwards the signal, a write-on-shutdown design loses the entire session. Appending on each flow's terminal hook guarantees that every flow seen up to the moment of death is already on disk.
