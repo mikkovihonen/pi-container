@@ -188,7 +188,7 @@ Some models need an explicit Jinja chat template. Place them under `.pi-containe
 
 ### Version control (.gitignore)
 
-A ready-to-copy [`.gitignore.example`](https://github.com/mikkovihonen/pi-container/blob/main/.gitignore.example) lists every entry a workspace needs. Copy the relevant lines into your project's `.gitignore`.
+A ready-to-copy [`.gitignore.example`](https://github.com/mikkovihonen/pi-container/blob/main/docs/assets/.gitignore.example) lists every entry a workspace needs. Copy the relevant lines into your project's `.gitignore`.
 
 Most of `.pi-container/` is project configuration you **should commit** so the environment is reproducible: `config.yaml`, `allowlist.yaml`, `token_replacer.yaml`, `chat-templates/`, and `dependencies/apt/packages.txt`. (`token_replacer.yaml` holds only `${ENV:VAR}` references, never resolved secrets — see [Token Replacer Secrets](#token-replacer-secrets).)
 

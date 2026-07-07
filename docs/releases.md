@@ -104,6 +104,42 @@ custom:
 Users with `schema_version: "0.1.0"` in their local config will see an error on
 next launch. They must `rm -rf .pi-container` and re-run to get the new field.
 
+## Release skill
+
+The [release skill](https://github.com/mikkovihonen/pi-container/blob/main/.pi/skills/release/SKILL.md)
+automates the version bump, changelog update, validation, and git tag steps
+described in the next section. It is designed for use by pi, the coding agent:
+
+```
+pi> Release 0.2.0
+```
+
+### How it works
+
+1. **Determine the version** — asks the user for the version number, or
+   suggests patch/minor/major based on the changes since the last tag.
+2. **Run `release.sh`** — bumps `pyproject.toml`, both `schema_version` fields,
+   regenerates `uv.lock`, and runs `validate_versions.py` + lint + tests.
+3. **Update `CHANGELOG.md`** — moves `[Unreleased]` entries into a new version
+   block with today's date, enforcing reverse chronological order.
+4. **Amend the release commit** — adds the changelog update to the existing
+   commit created by the script (never re-run the script, or versions get
+   double-bumped).
+5. **Tag and push** — creates `v<version>` and pushes to `origin`.
+
+CI triggers on the tag push and creates the GitHub Release automatically.
+
+### When to use the skill vs. manual steps
+
+| Scenario | Use |
+|----------|-----|
+| You're chatting with pi | Release skill |
+| You need to do a release from a different machine | Manual steps in the next section |
+| You need to inspect or customise each step | Manual steps |
+
+The skill performs the same operations as the manual steps — it is a
+convenience wrapper.
+
 ## Creating a release
 
 The version is authoritative from the latest git tag. Three places must always

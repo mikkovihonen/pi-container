@@ -22,13 +22,32 @@ This addon also works in reverse: in `block` mode, only blocked hosts/IPs are de
 > over it at runtime. Edit that host file to change the policy — you don't need
 > the manual steps below unless you're wiring the addon into a different proxy.
 
-Load the addon in mitmproxy/mitmweb (`-s` is the short form of `--set scripts=`, and can be repeated for multiple addons):
+### In this project
+
+The addon is loaded as part of the mitmproxy startup in the [entrypoint](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/entrypoint.sh), alongside the `token_replacer` and `flow_export` addons:
+
+```bash
+uv run mitmweb --mode transparent@8080 --mode dns@5353 --web-host 0.0.0.0 \
+    -s /home/mitmproxy/scripts/allowlist.py \
+    -s /home/mitmproxy/scripts/token_replacer.py \
+    -s /home/mitmproxy/scripts/flow_export.py \
+    --set web_password=$ADMIN_PASSWORD
+```
+
+The config file path is set via the `ALLOWLIST_CONFIG_PATH` environment
+variable, which points to the mounted host config at
+`/home/mitmproxy/config/allowlist.yaml`.
+
+### Standalone usage
+
+Load the addon in mitmproxy/mitmweb (`-s` is the short form of `--set scripts=`,
+and can be repeated for multiple addons):
 
 ```bash
 mitmweb -s allowlist.py
 ```
 
-Or in Docker (pi-coding-agent-proxy) — see the [Containerfile](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/Containerfile) and [entrypoint.sh](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/entrypoint.sh):
+Or in Docker — see the [Containerfile](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/Containerfile):
 
 ```dockerfile
 COPY addons/allowlist/allowlist.py /home/mitmproxy/scripts/allowlist.py
@@ -49,60 +68,85 @@ The addon reads from a YAML config file (`allowlist_config.yaml`) and supports r
 ### Config File Structure
 
 ```yaml
+# Only permit Python package servers (pypi.org / files.pythonhosted.org),
+# npm package registries, and Debian/Ubuntu apt infrastructure. All other
+# traffic is blocked by default.
 global:
-  mode: "allow"                    # "allow" or "block"
-  default_action: "block"          # what to do when no rule matches
-  status_code: 403                 # HTTP status for blocked requests (444 = close connection)
-  log_blocked: true                # log blocked requests
-  log_allowed: false               # log allowed requests (useful for auditing)
-  dry_run: false                   # log matches without blocking
-
-  # Flat allowlist (simple mode, no named rules needed)
-  hostnames:
-    - "api.example.com"
-    - "*.internal.local"
-  ip_ranges:
-    - "10.0.0.0/8"
-    - "192.168.0.0/16"
-    - "fd00::/8"                   # IPv6 ULA range
-
-  # Named rules (advanced mode)
+  mode: "allow"                                 # "allow" or "block"
+  default_action: "block"                       # what to do when no rule matches
+  status_code: 403                              # HTTP status for blocked requests (444 = close connection)
+  log_blocked: true                             # log blocked requests
+  log_allowed: false                            # log allowed requests (useful for auditing)
+  dry_run: false                                # log matches without blocking
+  # Named rules
   rules:
-    - name: "internal-api-allow"
+    - name: "pypi-org-allow"
       mode: "allow"
       hostnames:
-        - "api.internal.local"
-        - "*.internal.local"
+        - "pypi.org"
+        - "*.pypi.org"
       ip_ranges: []
 
-    - name: "monitoring-ip-allow"
+    - name: "pythonhosted-org-allow"
       mode: "allow"
-      hostnames: []
-      ip_ranges:
-        - "10.0.0.0/8"
-        - "192.168.0.0/16"
-
-    - name: "block-ads"
-      mode: "block"
       hostnames:
-        - "*.ads.example.com"
-        - "*.tracker.net"
+        - "files.pythonhosted.org"
+        - "*.files.pythonhosted.org"
       ip_ranges: []
 
-    - name: "block-bad-ips"
-      mode: "block"
-      hostnames: []
-      ip_ranges:
-        - "203.0.113.0/24"
+    - name: "npm-registry-allow"
+      mode: "allow"
+      hostnames:
+        - "registry.npmjs.org"
+        - "*.registry.npmjs.org"
+        - "*.npmjs.org"
+      ip_ranges: []
+
+    - name: "github-allow"
+      mode: "allow"
+      hostnames:
+        - "github.com"
+        - "api.github.com"
+        - "codeload.github.com"
+        - "objects.githubusercontent.com"
+        - "collector.github.com"
+        - "*.github.com"
+        - "*.githubassets.com"
+        - "*.githubusercontent.com"
+      ip_ranges: []
+
+    - name: "yarn-registry-allow"
+      mode: "allow"
+      hostnames:
+        - "registry.yarnpkg.com"
+        - "*.yarnpkg.com"
+      ip_ranges: []
+
+    - name: "debian-apt-allow"
+      mode: "allow"
+      hostnames:
+        - "debian.map.fastlydns.net"
+        - "deb.debian.org"
+        - "*.deb.debian.org"
+        - "security.debian.org"
+        - "*.security.debian.org"
+        - "packages.debian.org"
+        - "*.packages.debian.org"
+      ip_ranges: []
 ```
 
 ### Flat vs. Named Rules
 
-**Flat allowlist** (simple): Use `hostnames` and `ip_ranges` directly under `global:`. Creates a single allowlist rule automatically.
+The addon supports two mutually exclusive configuration styles, determined by what is present in the config:
 
-**Named rules** (advanced): Define multiple rules with different modes, names, and conditions. Rules are evaluated in order; the first match wins.
+| Style | Trigger | Behaviour |
+|-------|---------|-----------|
+| **Flat allowlist** | `global.rules` is absent or empty, and `global.hostnames`/`global.ip_ranges` are defined | A single implicit rule is created from the flat lists. |
+| **Named rules** | `global.rules` contains one or more rule objects | Each rule is evaluated in order; the first match wins. |
+| **Both present** | `global.rules` is non-empty **and** `global.hostnames`/`global.ip_ranges` are also defined | Named rules take full priority; the flat lists are silently ignored. |
 
-If both are present, named rules take priority.
+**Rule**: always define one style or the other — never both. Mixing them will
+cause the flat lists to be dropped without any warning.
 
 ## Pattern Syntax
 
@@ -168,8 +212,8 @@ Or use the command:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ 🚫 evil.com        GET /login     403  Blocked by allowlist  │
-│     api.example.com GET /api/data  200                        │
+│ 🚫 evil.com        GET /login     403  Blocked by allowlist. │
+│     api.example.com GET /api/data  200                       │
 │ 🚫 tracker.ads.com GET /pixel     403  Blocked by allowlist  │
 │     google.com     GET /search    200                        │
 └──────────────────────────────────────────────────────────────┘
@@ -226,22 +270,54 @@ global:
     - "192.168.0.0/16"
 ```
 
-### Example 2: Ad/tracker blocking
+### Example 2: Flat allowlist (production-style)
 
-Block known ad and tracking domains, allow everything else:
+A flat allowlist for a development environment that permits Python, npm, Debian
+apt, and GitHub traffic without named rules:
 
 ```yaml
 global:
-  mode: "block"
-  default_action: "allow"
-  rules:
-    - name: "block-ads"
-      mode: "block"
-      hostnames:
-        - "*.ads.example.com"
-        - "*.tracker.net"
-        - "^doubleclick\\..*\\.evil\\.com$"
+  mode: "allow"
+  default_action: "block"
+  status_code: 403
+  log_blocked: true
+  hostnames:
+    # Python packaging
+    - "pypi.org"
+    - "*.pypi.org"
+    - "files.pythonhosted.org"
+    - "*.files.pythonhosted.org"
+    - "registry.yarnpkg.com"
+    - "*.yarnpkg.com"
+    # npm
+    - "registry.npmjs.org"
+    - "*.registry.npmjs.org"
+    - "*.npmjs.org"
+    # Debian/Ubuntu
+    - "debian.map.fastlydns.net"
+    - "deb.debian.org"
+    - "*.deb.debian.org"
+    - "security.debian.org"
+    - "*.security.debian.org"
+    - "packages.debian.org"
+    - "*.packages.debian.org"
+    # GitHub
+    - "github.com"
+    - "api.github.com"
+    - "codeload.github.com"
+    - "objects.githubusercontent.com"
+    - "*.github.com"
+    - "*.githubassets.com"
+    - "*.githubusercontent.com"
+  ip_ranges:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
 ```
+
+This creates a single implicit allowlist rule covering all the listed hosts and
+IP ranges. Use flat style when you only need one rule; switch to named rules when
+you need per-rule modes, names, or selective blocking.
 
 ### Example 3: Kill connection instead of 403
 

@@ -1,11 +1,11 @@
-# Transparent proxy container
+# Pi Coding Agent Proxy container
 - Debian based router container that transparently intercepts the agent's HTTP/HTTPS/DNS traffic via mitmproxy
 - mitmproxy generates a self-signed certificate with its certificate authority the first time it's run
 - mitmweb provides a web UI (port 8081) for monitoring traffic
-- runs `allowlist` and `token_replacer` addons on the intercepted traffic (host filtering + secret redaction)
+- runs [`allowlist`](allowlist.md), [`token_replacer`](token-replacer.md), and [`flow_export`](flow-export.md) addons on the intercepted traffic (host filtering + secret redaction + session flow export)
 - forwards the isolated network's traffic to the Internet; non-HTTP protocols are denied by default (fail-closed, opt-in via `PROXY_ALLOW_*`)
 
-## Building transparent proxy container image
+## Building the proxy container image
 
 Proxy container is built by running `build.sh` in project root. It is built before other containers as they refer to it in their own build files.
 
@@ -25,8 +25,10 @@ To use the transparent proxy, the container must be run with additional capabili
 The [entrypoint](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/entrypoint.sh) uses `iptables` on the isolated-net interface
 (`eth1`) to transparently intercept the agent's traffic. HTTP, HTTPS and DNS are
 redirected into mitmproxy (running transparent + DNS modes); the local
-`llama-server` API is DNAT'd out to the host; everything else is denied by
-default:
+`llama-server` API is DNAT'd out to the host; a `POSTROUTING -j MASQUERADE`
+rule handles NAT on `eth0` for the egress interface. Everything else is denied
+by default on the `FORWARD` chain, but operators can opt in extra protocols via
+`PROXY_ALLOW_*` env vars (see [Egress policy](#egress-policy-default-deny)).
 
 ```bash
 # Redirect HTTP/HTTPS into mitmproxy (transparent proxy on 8080)
@@ -52,13 +54,14 @@ allowed this way is plain NAT and is NOT seen by mitmproxy or the allowlist.**
 
 ## Addons
 
-mitmproxy loads two addons (baked into the image, loaded via `-s` in the
+mitmproxy loads three addons (baked into the image, loaded via `-s` in the
 entrypoint) that operate on the intercepted HTTP/HTTPS traffic:
 
 | Addon | Purpose | Config (host → container) |
 |-------|---------|---------------------------|
 | [`allowlist`](allowlist.md) | Blocks requests to non-allowlisted hosts/IPs (default action `block`). | `.pi-container/allowlist.yaml` → `/home/mitmproxy/config/allowlist.yaml` |
 | [`token_replacer`](token-replacer.md) | Redacts secrets (API keys, Bearer tokens, cookies, JWTs) from requests/responses. | `.pi-container/token_replacer.yaml` → `/home/mitmproxy/config/token_replacer.yaml` |
+| [`flow_export`](flow-export.md) | Exports completed flows (JSON Lines) to per-client-IP files for post-session inspection. | N/A (baked in, writes to `/home/mitmproxy/exports/`) |
 
 The image bakes fail-closed default configs; `run.py` mounts the host configs
 from `.pi-container/` over them at runtime (and injects any `${ENV:VAR}` secrets

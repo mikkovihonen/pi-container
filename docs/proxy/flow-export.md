@@ -18,16 +18,16 @@ JSON Lines is the natural format for this: each line is a self-contained JSON ob
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    mitmproxy                                 │
+│                    mitmproxy                                │
 │                                                             │
-│  Flow → FlowExporter                                         │
+│  Flow → FlowExporter                                        │
 │    │                                                        │
-│    ├─► response(flow) ─┐                                    │
-│    ├─► error(flow) ────┴─► _append(flow)                    │
-│    │                        • dedupe by flow.id             │
+│    ├─► response(flow) ─┐                                     │
+│    ├─► error(flow) ────┴─► _append(flow)                      │
+│    │                        • dedupe by flow.id              │
 │    │                        • ip = client_conn.peername[0]  │
-│    │                        • path = flows-<ip>.jsonl       │
-│    │                        • truncate on first sight of ip │
+│    │                        • path = flows-<ip>.jsonl        │
+│    │                        • truncate on first sight of ip  │
 │    │                        • append json line thereafter   │
 │    │                                                        │
 │    └─► done()  → log summary only (not required for export) │

@@ -33,10 +33,10 @@ def fix_links(content: str) -> str:
     # Convert ../src/... to GitHub URLs
     content = re.sub(r"\.\./src/", f"{REPO_URL}/src/", content)
 
-    # Convert ../.gitignore.example to GitHub URL
+    # Convert ../docs/assets/.gitignore.example to GitHub URL
     content = re.sub(
-        r"\.\./\.gitignore\.example",
-        f"{REPO_URL}/.gitignore.example",
+        r"\.\./docs/assets/\.gitignore\.example",
+        f"{REPO_URL}/docs/assets/.gitignore.example",
         content,
     )
 
