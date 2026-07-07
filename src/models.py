@@ -123,7 +123,6 @@ class Model:
                     repo_id=self.config.repo,
                     filename=self.config.file,
                     local_dir=str(self.models_dir / self.config.directory),
-                    local_dir_use_symlinks=False,
                 )
                 logger.info(f"[Model: {self.label}] Download complete.")
 
