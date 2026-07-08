@@ -19,7 +19,7 @@ RUN timeout 3s mitmweb || [ $? -eq 124 ]
 
 ## Running the container
 
-To use the transparent proxy, the container must be run with additional capabilities to allow it to manage network interfaces and routing tables:
+To use the transparent proxy, the container runs with additional capabilities to allow it to manage network interfaces and routing tables:
 - `CAP_NET_ADMIN`
 
 The [entrypoint](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/entrypoint.sh) uses `iptables` on the isolated-net interface

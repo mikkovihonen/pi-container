@@ -39,6 +39,175 @@ When launched, pi-container looks for workspace-specific overrides in `./.pi-con
 
 Orchestration settings live in a single **`config.yaml`**; the proxy addon configs (`allowlist.yaml`, `token_replacer.yaml`) stay in their own files because they're mounted into and parsed by the proxy container.
 
+### The `models.json` file and `serverCustomParameters`
+
+The LLM models that pi-container serves are configured in `.pi-container/agent/models.json`, which is pi-coding-agent's own `models.json` format with an extended `serverCustomParameters` block per provider. This block is the bridge between the pi-container orchestration layer and llama-server — it tells pi-container which model files to download, where they live on disk, and which `llama-server` command-line flags to pass when launching the model.
+
+The file structure looks like this:
+
+```json
+// .pi-container/agent/models.json
+{
+  "providers": {
+    "local-ornith": {
+      "baseUrl": "http://llama:9999/v1",
+      "api": "openai-completions",
+      "apiKey": "not-required",
+      "compat": { ... },
+      "models": [ ... ],
+      "serverCustomParameters": {
+        "hfModels": { ... },
+        "flags": [ ... ]
+      }
+    }
+  }
+}
+```
+
+Not all of pi-coding-agent's `models.json` fields are consumed by pi-container — only a subset is read, since most model metadata (IDs, context windows, tool-calling flags, etc.) is pi-coding-agent's concern, not llama-server's. At startup, `run.py` iterates `providers` and for each entry that has `serverCustomParameters` it extracts:
+
+| Field | Used by pi-container? | Notes |
+|-------|----------------------|-------|
+| `providers.<name>` (key) | **Yes** — as `server_id` | Becomes the llama-server `--alias` and the sharing key. Must be unique per provider. |
+| `baseUrl` | **Yes** — port only | `run.py` parses `http://llama:9999/v1` and extracts the port (`9999`) so the agent container knows which llama-server port to target. The scheme/host/path are not validated. |
+| `serverCustomParameters.hfModels` | **Yes** | Model file download config + per-model additional flags. |
+| `serverCustomParameters.flags` | **Yes** | llama-server CLI flags, passed verbatim. |
+| `api`, `apiKey` | No | pi-coding-agent uses these for API negotiation; pi-container ignores them. |
+| `compat` | No | pi-coding-agent compatibility flags; pi-container ignores them. |
+| `models[].id`, `models[].name`, `models[].contextWindow`, `models[].toolCalling`, `models[].vision`, `models[].reasoning`, `models[].options`, etc. | No | pi-coding-agent model metadata. pi-container does not read these. |
+
+In short, pi-container only needs `baseUrl` (for the port), the provider name, and `serverCustomParameters` — the rest of the `models.json` structure is for pi-coding-agent's model registry and is passed through untouched.
+
+The `serverCustomParameters` object has two fields:
+
+#### `hfModels` — model files
+
+`hfModels` is a dictionary mapping **labels** (arbitrary short names) to per-model download and flag configuration. Each entry tells pi-container how to fetch a model file from Hugging Face and how to pass it to llama-server:
+
+```json
+"hfModels": {
+  "main": {
+    "fileFlag": "--model",
+    "repo": "deepreinforce-ai/Ornith-1.0-35B-GGUF",
+    "file": "ornith-1.0-35b-Q6_K.gguf",
+    "dir": "Ornith-1.0-35B-GGUF",
+    "additionalServerFlags": [],
+    "sha256": "<optional hex digest>"
+  },
+  "draft": {
+    "fileFlag": "--model-draft",
+    "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+    "file": "mtp-gemma-4-26B-A4B-it.gguf",
+    "dir": "gemma-4-26B-A4B-it-qat-GGUF",
+    "additionalServerFlags": [
+      "--spec-type", "draft-mtp",
+      "--spec-draft-n-min", 1,
+      "--spec-draft-n-max", 4
+    ]
+  },
+  "mmproj": {
+    "fileFlag": "--mmproj",
+    "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+    "file": "mmproj-F16.gguf",
+    "dir": "gemma-4-26B-A4B-it-qat-GGUF",
+    "additionalServerFlags": []
+  }
+}
+```
+
+Each `hfModels` entry requires:
+
+| Field | Description |
+|-------|-------------|
+| `fileFlag` | The llama-server flag name (e.g. `--model`, `--model-draft`, `--mmproj`). This flag is emitted with the model's resolved path when launching llama-server. |
+| `repo` | Hugging Face repository slug (e.g. `unsloth/gemma-4-26B-A4B-it-qat-GGUF`). |
+| `file` | Filename within the repository (e.g. `ornith-1.0-35b-Q6_K.gguf`). |
+| `dir` | Subdirectory under `llama-server/models/` where the file is cached. Files from different repos use different dirs to avoid collisions. |
+| `additionalServerFlags` | Extra flags appended after this model's `fileFlag` + path on the llama-server command line. Useful for per-model options like speculative decoding settings (`--spec-type`, `--spec-draft-n-max`). |
+| `sha256` | *(optional)* SHA-256 hex digest of the model file. If set, pi-container verifies the downloaded file before starting llama-server; a mismatch aborts startup. Without a checksum, downloads proceed without integrity verification. |
+
+The `hfModels` entries are processed in sorted label order, but each entry's `additionalServerFlags` preserve their specified order — and the overall `flags` list is passed to llama-server verbatim, in the order defined.
+
+Multiple labels are common: `main` for the base model, `draft` for a speculative decoding draft model, `mmproj` for a multi-modal projection head, or additional labels for LoRA adapters and other llama-server features. A provider **must** have at least one entry (the "main" model), and at minimum the `main` label should point to the primary model file.
+
+#### `flags` — llama-server command-line flags
+
+`flags` is an array of strings and numbers passed directly to llama-server. This is where you tune inference behavior:
+
+```json
+"flags": [
+  "--no-mmap",
+  "--mlock",
+  "--kv-offload",
+  "--threads", 10,
+  "--threads-batch", 8,
+  "--parallel", 1,
+  "--batch-size", 4096,
+  "--ubatch-size", 512,
+  "--flash-attn", "on",
+  "--ctx-size", 131072,
+  "--ctx-checkpoints", 32,
+  "--checkpoint-min-step", 256,
+  "--repeat-penalty", 1.0,
+  "--top_p", 0.95,
+  "--top_k", 64,
+  "--prio", 2,
+  "--cache-ram", 4096,
+  "--jinja",
+  "--chat-template-file", ".pi-container/chat-templates/Ornith-1.0-35B-FP8/chat_template.jinja",
+  "--chat-template-kwargs", "{\"enable_thinking\":true}",
+  "--n-gpu-layers", 999
+]
+```
+
+Each item is a single CLI token — strings are flag names or values, numbers are emitted as their numeric string. The list is passed to llama-server in order; flag ordering matters for some llama-server options.
+
+Common categories:
+
+- **Memory**: `--no-mmap`, `--mlock`, `--cache-ram`, `--kv-offload`
+- **Performance**: `--threads`, `--threads-batch`, `--parallel`, `--batch-size`, `--ubatch-size`, `--flash-attn`
+- **Context**: `--ctx-size`, `--ctx-checkpoints`, `--checkpoint-min-step`
+- **Sampling**: `--top_p`, `--top_k`, `--repeat-penalty`
+- **GPU**: `--n-gpu-layers` (999 = offload all layers to GPU)
+- **Chat template**: `--jinja`, `--chat-template-file`, `--chat-template-kwargs`
+
+The `--chat-template-file` path is resolved relative to the workspace directory (since llama-server runs on the host from the workspace), so `.pi-container/chat-templates/<model>/chat_template.jinja` is the typical pattern.
+
+#### Server sharing and fingerprints
+
+A llama-server process is a **host-wide shared resource**, keyed by provider name plus a stable fingerprint of its `serverCustomParameters`. Two projects with the same provider name and identical `serverCustomParameters` (model files, flags) share one llama-server process — saving RAM by avoiding double-loading a model. A same-named provider with different parameters gets its own server, ensuring a project never silently attaches to a llama-server running the wrong model.
+
+This means:
+- Identical `serverCustomParameters` across projects → one process (efficient).
+- Divergent `serverCustomParameters` (even different flag values) → separate processes.
+- Changing `serverCustomParameters` mid-session restarts the server.
+
+#### Validation
+
+`run.py` validates `models.json` at startup. Missing `hfModels` entries, empty dicts, or non-string required fields produce clear errors:
+
+```
+Models configuration invalid:
+  providers.local-ornith.serverCustomParameters.hfModels: must not be null
+  providers.local-ornith.serverCustomParameters.hfModels.main.repo: must not be null
+
+Fix: update .pi-container/agent/models.json to match the expected schema.
+```
+
+It also checks that any `--chat-template-file` paths referenced in `flags` exist on disk, resolving `.pi-container/...` paths relative to the workspace.
+
+#### Ready-made setups
+
+Example configurations for popular models are shipped under `docs/setups/`:
+
+| Setup | Model | Repo |
+|-------|-------|------|
+| [Qwen3.6-35B-A3B-UD-Q6_K_XL](setups/Qwen3.6-35B-A3B-UD-Q6_K_XL/) | Qwen3.6 35B-A3B (MTP + vision) | `unsloth/Qwen3.6-35B-A3B-MTP-GGUF` |
+| [gemma-4-26b-a4b-it-qat-GGUF](setups/gemma-4-26b-a4b-it-qat-GGUF/) | Gemma 4 26B-A4B (MTP + vision) | `unsloth/gemma-4-26B-A4B-it-qat-GGUF` |
+| [ornith-1.0-35b-Q6_K](setups/ornith-1.0-35b-Q6_K/) | Ornith 1.0 35B (vision) | `deepreinforce-ai/Ornith-1.0-35B-GGUF` |
+
+Each setup directory contains a `models.json` you can drop into `.pi-container/agent/`, plus any required chat templates under `chat-templates/`. See each setup's `README.md` for notes and caveats.
+
 ### The `config.yaml` file
 
 `.pi-container/config.yaml` is the single source of truth for this workspace's orchestration knobs:
