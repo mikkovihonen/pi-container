@@ -9,6 +9,7 @@ theme:
   name: material
   logo: assets/pi-container-logo.svg
   favicon: assets/png/pi-container-32.png
+  custom_dir: docs/overrides
   features:
     - navigation.instant
     - navigation.tracking
