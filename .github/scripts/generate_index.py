@@ -10,7 +10,8 @@ INDEX_PATH = Path("docs/index.md")
 
 FRONTMATTER = """---
 title: pi-container
-description: A containerized environment for running the pi-coding-agent with local LLM inference and full auditability
+description: Containerized environment for running pi-coding-agent with auditability on macOS and Linux
+keywords: docker, sandbox, isolation, mitmproxy, containerization, audit-trail, podman, mitmproxy-addons, agentic-ai, agentic-coding, apple-container, pi-coding-agent
 ---
 
 """
