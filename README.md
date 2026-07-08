@@ -4,7 +4,7 @@
   <img src="docs/assets/pi-container-logo.svg" alt="pi-container" width="360">
 </p>
 
-A containerized environment for running the `pi-coding-agent` with local LLM inference and full auditability. A transparent proxy container based on `mitmproxy` intercepts all HTTP/HTTPS/DNS traffic from the agent container, enforcing allowlisting and injecting secrets as needed. Supports macOS, Linux, and WSL2.
+A containerized environment for running the [`pi-coding-agent`](https://pi.dev) with local LLM inference and full auditability. A transparent proxy container based on [`mitmproxy`](https://mitmproxy.org) intercepts all HTTP/HTTPS/DNS traffic from the agent container, enforcing allowlisting and injecting secrets as needed. Supports macOS, Linux, and WSL2.
 
 [![CI](https://github.com/mikkovihonen/pi-container/actions/workflows/ci.yml/badge.svg)](https://github.com/mikkovihonen/pi-container/actions/workflows/ci.yml)
 [![Coverage](docs/assets/coverage.svg)](docs/development.md#coverage)
@@ -17,7 +17,7 @@ A containerized environment for running the `pi-coding-agent` with local LLM inf
 
 - **Sandboxed agent** — the agent container reaches the internet **only** through the proxy, on an `--internal` network with no gateway; every other protocol is denied by default.
 - **Auditable traffic** — all HTTP/HTTPS/DNS is intercepted by `mitmproxy`, with a hostname **allowlist** and a **token redactor**, and captured to a per-project flow export.
-- **Local inference** — `llama.cpp`'s `llama-server` runs natively on the host (Metal / CUDA / ROCm), shared across projects by config fingerprint.
+- **Local inference** — [`llama.cpp`](https://llama.app)'s `llama-server` runs natively on the host (Metal / CUDA / ROCm), shared across projects by config fingerprint.
 - **Per-workspace isolation** — each workspace gets its own proxy, isolated network, mitmweb port, and config, seeded on first run.
 - **Runtime-agnostic** — works with Apple `container`, `podman`, and `docker`.
 

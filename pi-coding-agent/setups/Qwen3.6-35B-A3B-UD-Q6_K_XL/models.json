@@ -44,7 +44,10 @@
                     "repo": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
                     "file": "Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf",
                     "dir":"Qwen3.6-35B-A3B-MTP-GGUF",
-                    "additionalServerFlags": [],
+                    "additionalServerFlags": [
+                        "--spec-type", "draft-mtp",
+                        "--spec-draft-n-max", 2
+                    ],
                     "sha256": ""
                 },
                 "mmproj": {
@@ -55,7 +58,6 @@
                     "additionalServerFlags": [],
                     "sha256": ""
                 }
-
             },
             "flags":[
                 "--no-mmap",
@@ -76,7 +78,7 @@
                 "--prio", 2,
                 "--cache-ram", 4096,
                 "--jinja",
-                "--chat-template-file", ".pi-container/chat-templates/Ornith-1.0-35B-FP8/chat_template.jinja",
+                "--chat-template-file", ".pi-container/chat-templates/Qwen3.6-35B-A3B-UD-Q6_K-XL/chat_template.jinja",
                 "--chat-template-kwargs", "{\"enable_thinking\":true}",
                 "--n-gpu-layers", 999
             ]

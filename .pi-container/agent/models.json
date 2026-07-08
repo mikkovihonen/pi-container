@@ -1,6 +1,6 @@
 {
   "providers": {
-    "local-qwen": {
+    "local-ornith": {
         "baseUrl": "http://llama:9999/v1",
         "api": "openai-completions",
         "apiKey": "not-required",
@@ -15,11 +15,11 @@
         },
         "models": [
             {
-                "id": "Qwen3.6-35B-A3B-UD-Q6_K_XL",
-                "name": "Qwen3.6-35B-A3B-UD-Q6_K_XL",
-                "contextWindow": 256144,
-                "compactionThreshold": 128072,
-                "maxTokens": 8192,
+                "id": "ornith-1.0-35b-Q6_K",
+                "name": "ornith-1.0-35b-Q6_K",
+                "contextWindow": 131072,
+                "compactionThreshold": 128000,
+                "maxTokens": 4096,
                 "streaming": true,
                 "toolCalling": true,
                 "vision": true,
@@ -41,21 +41,12 @@
             "hfModels": {
                 "main": {
                     "fileFlag": "--model",
-                    "repo": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
-                    "file": "Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf",
-                    "dir":"Qwen3.6-35B-A3B-MTP-GGUF",
+                    "repo": "deepreinforce-ai/Ornith-1.0-35B-GGUF",
+                    "file": "ornith-1.0-35b-Q6_K.gguf",
+                    "dir":"Ornith-1.0-35B-GGUF",
                     "additionalServerFlags": [],
-                    "sha256": ""
-                },
-                "mmproj": {
-                    "fileFlag": "--mmproj",
-                    "repo": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
-                    "file": "mmproj-F16.gguf",
-                    "dir":"Qwen3.6-35B-A3B-MTP-GGUF",
-                    "additionalServerFlags": [],
-                    "sha256": ""
+                    "sha256": ""  
                 }
-
             },
             "flags":[
                 "--no-mmap",
@@ -64,10 +55,10 @@
                 "--threads", 10,
                 "--threads-batch", 8,
                 "--parallel", 1,
-                "--batch-size", 8192,
+                "--batch-size", 4096,
                 "--ubatch-size", 512,
                 "--flash-attn", "on",
-                "--ctx-size", 256144,
+                "--ctx-size", 131072,
                 "--ctx-checkpoints", 32,
                 "--checkpoint-min-step", 256,
                 "--repeat-penalty", 1.0,
@@ -75,10 +66,8 @@
                 "--top_k", 64,
                 "--prio", 2,
                 "--cache-ram", 4096,
-                "--spec-type", "draft-mtp",
-                "--spec-draft-n-max", 2,
                 "--jinja",
-                "--chat-template-file", ".pi-container/chat-templates/Qwen3.6-35B-A3B-UD-Q6_K-XL/chat_template.jinja",
+                "--chat-template-file", ".pi-container/chat-templates/Ornith-1.0-35B-FP8/chat_template.jinja",
                 "--chat-template-kwargs", "{\"enable_thinking\":true}",
                 "--n-gpu-layers", 999
             ]

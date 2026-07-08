@@ -16,24 +16,47 @@ JSON Lines is the natural format for this: each line is a self-contained JSON ob
 
 ### Architecture
 
+```mermaid
+flowchart TB
+    subgraph mitmproxy["<b>mitmproxy Container</b>"]
+        direction TB
+        FE["FlowExporter Addon"]
+
+        subgraph hooks["Terminal Hooks (one per flow)"]
+            R["response(flow)\nallowed + synth 403"]
+            E["error(flow)\nerrored + killed 444"]
+        end
+
+        APPEND["_append(flow)\n• dedupe by flow.id\n• ip = client_conn.peername[0]\n• path = flows-<ip>.jsonl\n• truncate on first sight of ip\n• append JSON line thereafter"]
+
+        D["done()\nlog summary only\n(not required for export)"]
+
+        R --> APPEND
+        E --> APPEND
+    end
+
+    subgraph host["<b>Host (run.py)</b>"]
+        DISCOVER["Discover agent\ncontainer IPs\n(isolated-net)"]
+        READ["Read flows-<ip>.jsonl\nfiles from bind mount"]
+        MERGE["Concatenate\n(date-bucketed)\n→ .pi-container/exports/flows/"]
+        CLEANUP["Remove raw\nflows-<ip>.jsonl\nfiles"]
+
+        subgraph export_dir["<b>.pi-container/exports/</b>\n(bind-mounted from\n/home/mitmproxy/exports)"]
+            RAW["flows-<ip>.jsonl\n(raw per-IP JSON Lines)"]
+            SNAPSHOT["flows/<YYYY-MM-DD>/\n<timestamp>_<session-id>.jsonl\n(date-bucketed snapshot)"]
+        end
+    end
+
+    mitmproxy -->|FLOW_EXPORT_DIR bind mount| export_dir
+    DISCOVER --> READ
+    READ --> RAW
+    RAW --> MERGE
+    MERGE --> SNAPSHOT
+    MERGE --> CLEANUP
+    CLEANUP -.->|remove raw| RAW
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    mitmproxy                                │
-│                                                             │
-│  Flow → FlowExporter                                        │
-│    │                                                        │
-│    ├─► response(flow) ─┐                                     │
-│    ├─► error(flow) ────┴─► _append(flow)                      │
-│    │                        • dedupe by flow.id              │
-│    │                        • ip = client_conn.peername[0]  │
-│    │                        • path = flows-<ip>.jsonl        │
-│    │                        • truncate on first sight of ip  │
-│    │                        • append json line thereafter   │
-│    │                                                        │
-│    └─► done()  → log summary only (not required for export) │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
+
+The addon writes each flow incrementally to a bind-mounted directory, so the host-side `run.py` can read and merge the raw per-IP JSON Lines files into a date-bucketed snapshot after the agent session ends (then deletes the raw files to avoid double-storage).
 
 ### Components
 

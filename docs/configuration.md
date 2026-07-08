@@ -112,6 +112,12 @@ Example:
 curl
 ```
 
+### Custom startup script
+
+pi-container will run `.pi-container/agent/entrypoint.sh` at startup, after the APT dependencies are installed and before the agent begins. Use this script for any additional setup the container user needs — one-time configuration, environment setup, or workspace initialization. The script runs as the `pi` user inside the agent container.
+
+If the file does not exist, it is silently skipped.
+
 ### Allowlist
 
 The `allowlist.yaml` config in the project's `.pi-container/` defines hostname rules for the [allowlist addon](proxy/allowlist.md) running on that project's mitmproxy transparent proxy. It is **per-project** — each workspace's proxy mounts its own allowlist (seeded from a generic pypi/npm/github/apt template on first run; edit it per project). Traffic from the agent container to non-allowlisted hosts is **blocked with HTTP 403**. If the file is missing entirely, the image's fail-closed default blocks all hosts.
