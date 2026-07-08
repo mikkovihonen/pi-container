@@ -1,0 +1,6 @@
+# Allow all search engines to crawl and index the entire site
+User-agent: *
+Allow: /
+
+# Explicitly link your sitemap to help bots find your documentation pages instantly
+Sitemap: https://github.io
