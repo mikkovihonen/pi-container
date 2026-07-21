@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-21
+
 ### Breaking Changes
 - Replaced `packages.txt` with two definition files: `.pi-container/dependencies/root/commands.sh` (runs at build time) and `.pi-container/dependencies/pi/commands.sh` (runs at runtime)
 - Removed bind-mounted `.pi-container/agent/entrypoint.sh` hook — replaced by baked-in script execution

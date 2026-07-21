@@ -282,3 +282,98 @@ class TestResolveAgentImage:
         tag, _ = run._resolve_agent_image(repo)
         # Tag should be pi-coding-agent-<hash>.local
         assert re.fullmatch(r"pi-coding-agent-[0-9a-f]{16}\.local", tag)
+
+
+class TestGetImageLabel:
+    """Tests for _get_image_label()."""
+
+    def test_returns_none_when_command_fails(self, monkeypatch):
+        """When the inspect command fails, returns None."""
+
+        def mock_run(args, **kwargs):
+            import subprocess
+
+            raise subprocess.TimeoutExpired(args, 5)
+
+        monkeypatch.setattr(run.subprocess, "run", mock_run)
+        result = run._get_image_label("nonexistent-image:latest", "pi-container.hash")
+        assert result is None
+
+    def test_returns_value_when_label_exists(self, monkeypatch):
+        """When the label exists, returns its value."""
+        from unittest.mock import MagicMock
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "abc123def456\n"
+        mock_result.stderr = ""
+
+        monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
+        # Set CONTAINER_RUNTIME so the function doesn't raise NameError
+        run.CONTAINER_RUNTIME = "docker"
+        result = run._get_image_label("test-image:latest", "pi-container.hash")
+        assert result == "abc123def456"
+
+
+class TestImageIsCurrent:
+    """Tests for _image_is_current()."""
+
+    def test_returns_true_when_label_matches(self, monkeypatch, tmp_path):
+        """When the label matches the current hash, returns True."""
+
+        def mock_get_label(image_tag, label_key):
+            return "abc123"
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+        # Create minimal files so _compute_image_hash doesn't return None
+        deps = tmp_path / ".pi-container" / "dependencies"
+        deps.parent.mkdir(parents=True, exist_ok=True)
+        deps.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
+        pi_agent = tmp_path / "pi-coding-agent"
+        pi_agent.mkdir(parents=True, exist_ok=True)
+        (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
+        (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+        result = run._image_is_current(project_dir=tmp_path, image_tag="test:latest", current_hash="abc123")
+        assert result is True
+
+    def test_returns_false_when_label_missing(self, monkeypatch, tmp_path):
+        """When the label is missing, returns False."""
+
+        def mock_get_label(image_tag, label_key):
+            return None
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+        # Create minimal files so _compute_image_hash doesn't return None
+        deps = tmp_path / ".pi-container" / "dependencies"
+        deps.parent.mkdir(parents=True, exist_ok=True)
+        deps.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
+        pi_agent = tmp_path / "pi-coding-agent"
+        pi_agent.mkdir(parents=True, exist_ok=True)
+        (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
+        (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+        result = run._image_is_current(project_dir=tmp_path, image_tag="test:latest", current_hash="abc123")
+        assert result is False
+
+    def test_returns_false_when_label_mismatch(self, monkeypatch, tmp_path):
+        """When the label doesn't match, returns False."""
+
+        def mock_get_label(image_tag, label_key):
+            return "different-hash"
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+        # Create minimal files so _compute_image_hash doesn't return None
+        deps = tmp_path / ".pi-container" / "dependencies"
+        deps.parent.mkdir(parents=True, exist_ok=True)
+        deps.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
+        pi_agent = tmp_path / "pi-coding-agent"
+        pi_agent.mkdir(parents=True, exist_ok=True)
+        (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
+        (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+        result = run._image_is_current(project_dir=tmp_path, image_tag="test:latest", current_hash="abc123")
+        assert result is False
