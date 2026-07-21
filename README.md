@@ -16,10 +16,10 @@ A containerized environment for running the [`pi-coding-agent`](https://pi.dev) 
 ## Highlights
 
 - **Sandboxed agent** — the agent container reaches the internet **only** through the proxy, on an `--internal` network with no gateway; every other protocol is denied by default.
-- **Auditable traffic** — all HTTP/HTTPS/DNS is intercepted by `mitmproxy`, with a hostname **allowlist** and a **token redactor**, and captured to a per-project flow export.
+- **Auditable traffic** — all HTTP/HTTPS/DNS is intercepted by [`mitmproxy`](https://mitmproxy.org), with a hostname **allowlist** and a **token injector**, and captured to a per-project flow export.
 - **Local inference** — [`llama.cpp`](https://llama.app)'s `llama-server` runs natively on the host (Metal / CUDA / ROCm), shared across projects by config fingerprint.
-- **Per-workspace isolation** — each workspace gets its own proxy, isolated network, mitmweb port, and config, seeded on first run.
-- **Runtime-agnostic** — works with Apple `container`, `podman`, and `docker`.
+- **Per-workspace isolation** — each workspace gets its own pi-container container image, proxy, isolated network, mitmweb port, and config, seeded on first run.
+- **Runtime-agnostic** — works with [`podman`](https://podman.io), and [`docker`](https://www.docker.com).
 
 ## Quick start
 
