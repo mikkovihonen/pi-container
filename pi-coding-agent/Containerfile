@@ -1,8 +1,5 @@
 FROM node:26.3.1-trixie-slim AS runner
 
-# ─── Shared base apt packages ───────────────────────────────────────────────
-# These are essential to pi coding agent and installed in the shared base image.
-# See docs/project-specific-containers.md for the full list and rationale.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     build-essential \
@@ -75,7 +72,6 @@ ARG LABEL_HASH
 
 COPY --from=root_commands_path ${ROOT_COMMANDS_PATH} /root/commands.sh
 
-# Execute root commands at build time (system-wide setup)
 RUN chmod +x /root/commands.sh && /root/commands.sh
 
 WORKDIR /workspace

@@ -206,18 +206,21 @@ def read_proxy_ui_expose(config_dir: Path | None = None) -> str:
 
 
 def read_agent_extras(config_dir: Path | None = None) -> dict:
-    """Extra agent-container env vars and bind mounts from config.yaml ``agent``.
+    """Extra agent-container env vars, bind mounts, capabilities, and devices from config.yaml ``agent``.
 
-    Returns ``{"env": {NAME: value, ...}, "mounts": ["host:container[:ro]", ...]}``
-    — passed through verbatim as ``--env``/``--volume`` flags. Use absolute host
-    paths for mounts. Empty when the section is absent.
+    Returns ``{"env": {NAME: value, ...}, "mounts": ["host:container[:ro]", ...], "capabilities": ["CAP_NAME", ...], "devices": ["host:container[:mode]", ...]}``
+    — passed through verbatim as ``--env``/``--volume``/``--cap-add``/``--device`` flags. Use absolute host paths for mounts and devices. Empty when the section is absent.
     """
     section = load_project_config(config_dir).get("agent") or {}
     env = section.get("env") or {}
     mounts = section.get("mounts") or []
+    capabilities = section.get("capabilities") or []
+    devices = section.get("devices") or []
     return {
         "env": {str(k): str(v) for k, v in dict(env).items()},
         "mounts": [str(m) for m in mounts],
+        "capabilities": [str(c) for c in capabilities],
+        "devices": [str(d) for d in devices],
     }
 
 

@@ -7,7 +7,7 @@
 # schema_version: Bumped whenever the template changes (new fields, changed types,
 # removed fields, new files in default/). The launch fails if this does not match
 # the pi-container version (the latest git tag). Delete .pi-container to re-seed.
-schema_version: "0.3.0"
+schema_version: "0.3.1"
 
 # Container resource limits. A null/omitted value means "no limit" (the flag is
 # not passed). Applies to the containers this workspace launches.
@@ -50,6 +50,25 @@ agent:
   #   mounts:
   #     - /Users/me/.cache/pip:/home/pi/.cache/pip
   mounts: []
+  # Linux capabilities to add to the agent container. Use the full name
+  # (e.g., "SYS_PTRACE") or short form (e.g., "CAP_SYS_PTRACE"). Common options:
+  #   SYS_PTRACE     - debug processes
+  #   SYS_ADMIN      - mount filesystems, some kernel operations
+  #   DAC_OVERRIDE   - bypass file read/write/execute permission checks
+  #   NET_RAW        - use raw and packet sockets
+  #   MKNOD          - create special files
+  #   SYS_RESOURCE   - override resource limits
+  # See `man 7 capabilities` for the full list.
+  #   capabilities:
+  #     - SYS_PTRACE
+  capabilities: []
+  # Device passthroughs to the agent container. Format: "host:container[:mode]".
+  # Example: "/dev/video0:/dev/video0" or "/dev/bus/usb:/dev/bus/usb:rw"
+  # Useful for GPU access (/dev/nvidia*), USB devices, serial ports, etc.
+  #   devices:
+  #     - /dev/video0:/dev/video0
+  #     - /dev/bus/usb:/dev/bus/usb
+  devices: []
 
 # Transient tmpfs mounts inside the agent container. Each path (under /workspace)
 # is a volatile RAM disk — data is lost when the container stops. Use it for build

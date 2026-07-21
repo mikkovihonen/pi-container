@@ -569,7 +569,7 @@ class TestReadAgentExtras:
     def test_defaults_empty(self, tmp_path):
         from network import read_agent_extras
 
-        assert read_agent_extras(tmp_path) == {"env": {}, "mounts": []}
+        assert read_agent_extras(tmp_path) == {"env": {}, "mounts": [], "capabilities": [], "devices": []}
 
     def test_env_and_mounts(self, tmp_path):
         from network import read_agent_extras
@@ -578,3 +578,16 @@ class TestReadAgentExtras:
         extras = read_agent_extras(tmp_path)
         assert extras["env"] == {"FOO": "bar", "N": "3"}
         assert extras["mounts"] == ["/a:/b:ro"]
+        assert extras["capabilities"] == []
+        assert extras["devices"] == []
+
+    def test_capabilities_and_devices(self, tmp_path):
+        from network import read_agent_extras
+
+        self._write(
+            tmp_path,
+            "agent:\n  capabilities:\n    - SYS_PTRACE\n    - NET_RAW\n  devices:\n    - /dev/video0:/dev/video0\n    - /dev/bus/usb:/dev/bus/usb:rw\n",
+        )
+        extras = read_agent_extras(tmp_path)
+        assert extras["capabilities"] == ["SYS_PTRACE", "NET_RAW"]
+        assert extras["devices"] == ["/dev/video0:/dev/video0", "/dev/bus/usb:/dev/bus/usb:rw"]
