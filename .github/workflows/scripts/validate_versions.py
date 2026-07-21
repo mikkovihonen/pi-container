@@ -255,12 +255,13 @@ def main() -> int:
         print()
         print("Validating seed directory completeness...")
 
-        _EXPECTED_DIRS = ("agent", "chat-templates")
+        _EXPECTED_DIRS = ("agent", "chat-templates", "dependencies")
         _EXPECTED_FILES = (
             "config.yaml",
             "allowlist.yaml",
             "token_replacer.yaml",
-            "entrypoint.sh",
+            "dependencies/root/commands.sh",
+            "dependencies/pi/commands.sh",
         )
 
         missing: list[str] = []
