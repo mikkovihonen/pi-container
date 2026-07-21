@@ -5,7 +5,6 @@ Run with:
     python -m pytest src/tests/test_server.py -v
 """
 
-import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -22,61 +21,10 @@ from server import Server
 # ---------------------------------------------------------------------------
 
 
-class TestServerGetBridgeIp:
-    def _make_server(self, tmp_path):
-        sc = ServerConfig.from_dict({"hfModels": {}, "flags": []})
-        lock_dir = tmp_path / "locks"
-        lock_dir.mkdir(parents=True, exist_ok=True)
-        s = Server(
-            config=sc,
-            models_dir=tmp_path / "models",
-            llama_bin="/usr/bin/llama-server",
-            bridge_interface="bridge100",
-            lock_dir=lock_dir,
-            repo_root=tmp_path,
-            server_id="test",
-        )
-        return s
-
-    def test_parses_ip_from_ip_addr(self, tmp_path):
-        s = self._make_server(tmp_path)
-        ip_output = "2: bridge100: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n    inet 192.168.50.1/24 brd 192.168.50.255 scope global bridge100\n"
-        with patch("server.subprocess.check_output", return_value=ip_output):
-            result = s._get_bridge_ip()
-        assert result == "192.168.50.1"
-
-    def test_falls_back_to_ifconfig(self, tmp_path):
-        s = self._make_server(tmp_path)
-        ifconfig_output = "bridge100: flags=... mtu 1500\n    inet 10.0.0.1 netmask 0xffffff00\n"
-        with patch(
-            "server.subprocess.check_output",
-            side_effect=[
-                subprocess.CalledProcessError(1, "ip"),
-                ifconfig_output,
-            ],
-        ):
-            result = s._get_bridge_ip()
-        assert result == "10.0.0.1"
-
-    def test_returns_none_when_no_match(self, tmp_path):
-        s = self._make_server(tmp_path)
-        with patch("server.subprocess.check_output", return_value="no ip here\n"):
-            result = s._get_bridge_ip()
-        assert result is None
-
-    def test_returns_none_on_command_failure(self, tmp_path):
-        s = self._make_server(tmp_path)
-        with patch("server.subprocess.check_output", side_effect=FileNotFoundError):
-            result = s._get_bridge_ip()
-        assert result is None
-
-
-# ---------------------------------------------------------------------------
-# ServerGetServerFlags
-# ---------------------------------------------------------------------------
-
-
 class TestServerGetServerFlags:
+    # ---------------------------------------------------------------------------
+    # ServerGetServerFlags
+    # ---------------------------------------------------------------------------
     def _make_server(self, tmp_path):
         mc = ModelConfig.from_dict(
             {
@@ -98,7 +46,6 @@ class TestServerGetServerFlags:
             config=sc,
             models_dir=tmp_path / "models",
             llama_bin="/usr/bin/llama-server",
-            bridge_interface="bridge100",
             lock_dir=lock_dir,
             repo_root=tmp_path,
             server_id="test-server",
@@ -138,7 +85,6 @@ class TestServerGetServerFlags:
             config=sc,
             models_dir=tmp_path / "models",
             llama_bin="/usr/bin/llama-server",
-            bridge_interface="bridge100",
             lock_dir=lock_dir,
             repo_root=tmp_path,
             server_id="test",
@@ -159,7 +105,6 @@ class TestServerRefCount:
             config=sc,
             models_dir=tmp_path / "models",
             llama_bin="/usr/bin/llama-server",
-            bridge_interface="bridge100",
             lock_dir=tmp_path / "locks",
             repo_root=tmp_path,
             server_id="test-server",
@@ -194,7 +139,6 @@ class TestServerIsExistingServerHealthy:
             config=sc,
             models_dir=tmp_path / "models",
             llama_bin="/usr/bin/llama-server",
-            bridge_interface="bridge100",
             lock_dir=tmp_path / "locks",
             repo_root=tmp_path,
             server_id="test",
@@ -279,7 +223,6 @@ class TestServerStartNewProcess:
             config=sc,
             models_dir=tmp_path / "models",
             llama_bin="/usr/bin/llama-server",
-            bridge_interface="bridge100",
             lock_dir=tmp_path / "locks",
             repo_root=tmp_path,
             server_id="test",
@@ -343,7 +286,6 @@ class TestServerStop:
             config=sc,
             models_dir=tmp_path / "models",
             llama_bin="/usr/bin/llama-server",
-            bridge_interface="bridge100",
             lock_dir=tmp_path / "locks",
             repo_root=tmp_path,
             server_id="test",
@@ -379,67 +321,6 @@ class TestServerStop:
 
 
 # ---------------------------------------------------------------------------
-# ServerSocatCleanup
-# ---------------------------------------------------------------------------
-
-
-class TestServerSocatCleanup:
-    def _make_server(self, tmp_path):
-        sc = ServerConfig.from_dict({"hfModels": {}, "flags": []})
-        s = Server(
-            config=sc,
-            models_dir=tmp_path / "models",
-            llama_bin="/usr/bin/llama-server",
-            bridge_interface="bridge100",
-            lock_dir=tmp_path / "locks",
-            repo_root=tmp_path,
-            server_id="test",
-        )
-        s.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
-        return s
-
-    def test_read_socat_pid_three_line_file(self, tmp_path):
-        s = self._make_server(tmp_path)
-        s.paths["pid_file"].write_text("111\n8080\n222\n")
-        assert s._read_socat_pid() == 222
-
-    def test_read_socat_pid_legacy_two_line_file(self, tmp_path):
-        """Old pid files (no socat line) must parse as no socat, not crash."""
-        s = self._make_server(tmp_path)
-        s.paths["pid_file"].write_text("111\n8080\n")
-        assert s._read_socat_pid() is None
-
-    def test_read_socat_pid_blank_socat_line(self, tmp_path):
-        """podman writes a blank socat line (no socat started)."""
-        s = self._make_server(tmp_path)
-        s.paths["pid_file"].write_text("111\n8080\n\n")
-        assert s._read_socat_pid() is None
-
-    def test_cleanup_kills_socat_from_pid_file_without_handle(self, tmp_path):
-        """Shared-server case: the process doing final cleanup never owned the
-        socat, so it must be reaped via the pid recorded in the file."""
-        s = self._make_server(tmp_path)
-        s.paths["pid_file"].write_text("111\n8080\n222\n")
-        assert s.socat_process is None  # this instance never started socat
-
-        with patch("server.stop_process_group") as mock_stop:
-            s._cleanup(full_cleanup=True)
-
-        # socat pid 222 must have been reaped
-        assert any(call.args[0] == 222 for call in mock_stop.call_args_list)
-
-    def test_cleanup_no_socat_when_pid_file_has_none(self, tmp_path):
-        s = self._make_server(tmp_path)
-        s.paths["pid_file"].write_text("111\n8080\n\n")
-
-        with patch("server.stop_process_group") as mock_stop:
-            s._cleanup(full_cleanup=True)
-
-        # only llama (if any) — never a socat pid 222-style reap for a blank line
-        assert all(call.args[0] != "" for call in mock_stop.call_args_list)
-
-
-# ---------------------------------------------------------------------------
 # ConfigFingerprint (same-name / different-serverCustomParameters isolation)
 # ---------------------------------------------------------------------------
 
@@ -450,7 +331,6 @@ class TestConfigFingerprint:
             config=sc,
             models_dir=tmp_path / "models",
             llama_bin="/usr/bin/llama-server",
-            bridge_interface="bridge100",
             lock_dir=tmp_path / "locks",
             repo_root=tmp_path,
             server_id=server_id,
@@ -511,7 +391,6 @@ class TestServerStartupTuning:
             config=sc,
             models_dir=tmp_path / "models",
             llama_bin="/usr/bin/llama-server",
-            bridge_interface="bridge100",
             lock_dir=tmp_path / "locks",
             repo_root=tmp_path,
             server_id="test",
@@ -527,7 +406,6 @@ class TestServerStartupTuning:
             config=sc,
             models_dir=tmp_path / "models",
             llama_bin="/usr/bin/llama-server",
-            bridge_interface="bridge100",
             lock_dir=tmp_path / "locks",
             repo_root=tmp_path,
             server_id="test",

@@ -13,7 +13,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from runtimes import (
-    AppleContainerRuntime,
     ContainerRuntime,
     DockerRuntime,
     PodmanRuntime,
@@ -26,7 +25,6 @@ from runtimes import (
 
 class TestCreate:
     def test_creates_each_runtime(self):
-        assert isinstance(ContainerRuntime.create("container"), AppleContainerRuntime)
         assert isinstance(ContainerRuntime.create("podman"), PodmanRuntime)
         assert isinstance(ContainerRuntime.create("docker"), DockerRuntime)
 
@@ -35,8 +33,6 @@ class TestCreate:
             ContainerRuntime.create("nerdctl")
 
     def test_defaults_per_runtime(self):
-        assert ContainerRuntime.create("container").bridge_interface == "bridge100"
-        assert ContainerRuntime.create("container").upstream_network == "default"
         assert ContainerRuntime.create("podman").upstream_network == "podman"
         assert ContainerRuntime.create("docker").upstream_network == "bridge"
 
@@ -52,14 +48,14 @@ class TestCreate:
 
 
 class TestIsolatedNetworkCreate:
-    @pytest.mark.parametrize("name", ["container", "docker"])
+    @pytest.mark.parametrize("name", ["docker"])
     def test_internal_flag_used(self, name):
         argv = ContainerRuntime.create(name).create_isolated_network_argv("isolated-net")
         assert argv == ["network", "create", "--internal", "isolated-net"]
 
-    @pytest.mark.parametrize("name", ["container", "podman", "docker"])
+    @pytest.mark.parametrize("name", ["podman", "docker"])
     def test_delete_uses_rm(self, name):
-        """`rm` works for podman/docker and is an alias for `delete` on Apple container."""
+        """`rm` works for podman/docker."""
         argv = ContainerRuntime.create(name).delete_isolated_network_argv("isolated-net")
         assert argv == ["network", "rm", "isolated-net"]
 
@@ -73,17 +69,11 @@ class TestIsolatedNetworkCreate:
         argv = DockerRuntime().create_isolated_network_argv("isolated-net", ipv6=True)
         assert argv == ["network", "create", "--internal", "--ipv6", "isolated-net"]
 
-    def test_apple_container_ipv6_uses_subnet_v6(self):
-        """Apple `container` rejects --ipv6; it needs an explicit --subnet-v6."""
-        rt = AppleContainerRuntime()
-        argv = rt.create_isolated_network_argv("isolated-net", ipv6=True)
-        assert argv == ["network", "create", "--internal", "--subnet-v6", rt.ipv6_ula_subnet, "isolated-net"]
-
     def test_podman_ipv6_flag_appended(self):
         argv = PodmanRuntime().create_isolated_network_argv("isolated-net", ipv6=True)
         assert argv == ["network", "create", "--internal", "--disable-dns", "--ipv6", "isolated-net"]
 
-    @pytest.mark.parametrize("name", ["container", "podman", "docker"])
+    @pytest.mark.parametrize("name", ["podman", "docker"])
     def test_ipv6_default_is_v4_only(self, name):
         """Default (ipv6=False) must not append --ipv6 for any runtime."""
         argv = ContainerRuntime.create(name).create_isolated_network_argv("isolated-net")
@@ -96,15 +86,6 @@ class TestIsolatedNetworkCreate:
 
 
 class TestProxyNetworkArgs:
-    def test_container_attaches_two_networks_in_order(self):
-        rt = AppleContainerRuntime()
-        assert rt.proxy_network_args("isolated-net") == [
-            "--network",
-            "default",
-            "--network",
-            "isolated-net",
-        ]
-
     def test_podman_pins_interface_names(self):
         """Regression: podman must attach BOTH networks and pin eth0/eth1."""
         rt = PodmanRuntime()
@@ -126,7 +107,6 @@ class TestProxyNetworkArgs:
         ]
 
     def test_non_docker_has_no_secondary_connect(self):
-        assert AppleContainerRuntime().proxy_secondary_connect_argv("proxy", "isolated-net") is None
         assert PodmanRuntime().proxy_secondary_connect_argv("proxy", "isolated-net") is None
 
 
@@ -136,7 +116,7 @@ class TestProxyNetworkArgs:
 
 
 class TestAgentNetworkArgs:
-    @pytest.mark.parametrize("name", ["container", "podman", "docker"])
+    @pytest.mark.parametrize("name", ["podman", "docker"])
     def test_agent_routed_through_proxy_for_all_runtimes(self, name):
         """The internal network has no gateway, so every runtime must inject
         DEFAULT_ROUTE + NET_ADMIN and point DNS at the proxy."""
@@ -154,8 +134,7 @@ class TestAgentNetworkArgs:
 
 
 class TestTmpfsArgs:
-    def test_container_and_docker_use_tmpfs_flag(self):
-        assert AppleContainerRuntime().tmpfs_args("/home/pi/") == ["--tmpfs", "/home/pi/"]
+    def test_docker_uses_tmpfs_flag(self):
         assert DockerRuntime().tmpfs_args("/home/pi/") == ["--tmpfs", "/home/pi/"]
 
     def test_podman_uses_mount_syntax(self):
@@ -171,23 +150,18 @@ class TestTmpfsArgs:
 
 
 class TestLlamaHostReachability:
-    def test_container_uses_socat_and_gateway_fallback(self):
-        rt = AppleContainerRuntime()
-        assert rt.needs_host_socat() is True
-        assert rt.llama_host_addr() is None  # proxy resolves its own gateway
-
     def test_podman_uses_host_internal_no_socat(self):
         rt = PodmanRuntime()
-        assert rt.needs_host_socat() is False
+        # needs_host_socat() was removed when Apple container support was dropped
         assert rt.llama_host_addr() == "host.containers.internal"
 
     def test_docker_uses_host_internal_no_socat(self):
         rt = DockerRuntime()
-        assert rt.needs_host_socat() is False
+        # needs_host_socat() was removed when Apple container support was dropped
         assert rt.llama_host_addr() == "host.docker.internal"
 
     def test_isolated_interface_is_eth1(self):
-        for name in ("container", "podman", "docker"):
+        for name in ("podman", "docker"):
             assert ContainerRuntime.create(name).proxy_isolated_interface == "eth1"
 
     def test_podman_resolves_host_addr_via_probe(self):
@@ -205,20 +179,8 @@ class TestLlamaHostReachability:
         with patch("runtimes.subprocess.run", side_effect=Exception("boom")):
             assert rt.resolve_llama_host_addr("proxy:latest") == PodmanRuntime.HOST_INTERNAL_FALLBACK_IP
 
-    def test_container_resolve_returns_none(self):
-        assert AppleContainerRuntime().resolve_llama_host_addr("proxy:latest") is None
-
-
-# ---------------------------------------------------------------------------
-# Proxy extra run args (ip_forward sysctl for VM runtimes)
-# ---------------------------------------------------------------------------
-
-
-class TestProxyExtraRunArgs:
-    def test_container_has_no_extra_args(self):
-        assert AppleContainerRuntime().proxy_extra_run_args() == []
-
-    def test_podman_and_docker_set_ip_forward(self):
+    def test_vm_runtimes_set_ip_forwarding(self):
+        """Podman/Docker set net.ipv4.ip_forward=1 for proxy NAT."""
         assert PodmanRuntime().proxy_extra_run_args() == ["--sysctl", "net.ipv4.ip_forward=1"]
         assert DockerRuntime().proxy_extra_run_args() == ["--sysctl", "net.ipv4.ip_forward=1"]
 
@@ -229,13 +191,6 @@ class TestProxyExtraRunArgs:
 
 
 class TestIpv6RunArgs:
-    def test_apple_container_defers_to_entrypoint(self):
-        """Apple container can write net.ipv6.* from the entrypoint, so no
-        run-time --sysctl flags are emitted in any mode."""
-        rt = AppleContainerRuntime()
-        assert rt.ipv6_run_args(enabled=False) == []
-        assert rt.ipv6_run_args(enabled=True, forwarding=True) == []
-
     @pytest.mark.parametrize("name", ["podman", "docker"])
     def test_vm_disables_ipv6_when_off(self, name):
         rt = ContainerRuntime.create(name)
@@ -252,16 +207,6 @@ class TestIpv6RunArgs:
         the default is IPv6-on, no-forwarding — exactly right."""
         rt = ContainerRuntime.create(name)
         assert rt.ipv6_run_args(enabled=True, forwarding=False) == []
-
-
-class TestIpv6UpstreamEgress:
-    def test_apple_container_has_no_ipv6_egress(self):
-        """Apple container's vmnet NATs IPv4 only (verified empirically)."""
-        assert AppleContainerRuntime().ipv6_upstream_egress is False
-
-    @pytest.mark.parametrize("name", ["podman", "docker"])
-    def test_vm_runtimes_assume_egress(self, name):
-        assert ContainerRuntime.create(name).ipv6_upstream_egress is True
 
 
 # ---------------------------------------------------------------------------
@@ -293,9 +238,11 @@ class TestUpstreamNetworkHasIpv6:
         assert PodmanRuntime()._network_entry_has_ipv6(entry) is False
 
     def test_base_returns_unknown(self):
-        """Apple container inherits the base (None) — it's short-circuited by the
-        static ipv6_upstream_egress=False gate, so parsing is never reached."""
-        assert AppleContainerRuntime()._network_entry_has_ipv6({"anything": True}) is None
+        """Base class returns None (unknown); runtimes override when their JSON format is known."""
+        # Use DockerRuntime as a concrete example (base class is now abstract)
+        rt = DockerRuntime()
+        # DockerRuntime returns False for unknown formats (no EnableIPv6 or v6 subnet)
+        assert rt._network_entry_has_ipv6({"anything": True}) is False
 
     def test_inspect_command_failure_returns_none(self):
         from unittest.mock import MagicMock, patch

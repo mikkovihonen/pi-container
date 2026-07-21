@@ -141,7 +141,8 @@ class TestValidateEnvironment:
             with pytest.raises(EnvironmentError, match="hf not found"):
                 validate_environment("/usr/bin/llama-server")
 
-    def test_socat_not_found_raises(self):
+    def test_socat_not_found_does_not_raise(self):
+        """socat is no longer required (removed when Apple container support was dropped)."""
         with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
@@ -152,8 +153,9 @@ class TestValidateEnvironment:
                 "docker": "/usr/bin/docker",
             }.get(cmd)
 
-            with pytest.raises(EnvironmentError, match="socat not found"):
-                validate_environment("/usr/bin/llama-server")
+            # Should succeed - socat is no longer required
+            result = validate_environment("/usr/bin/llama-server")
+            assert result == "docker"
 
     def test_no_container_runtime_raises(self):
         with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
@@ -169,8 +171,8 @@ class TestValidateEnvironment:
             with pytest.raises(EnvironmentError, match="No supported container runtime"):
                 validate_environment("/usr/bin/llama-server")
 
-    def test_returns_container_first(self):
-        """container should be preferred over docker and podman."""
+    def test_returns_docker_first(self):
+        """docker should be preferred over podman (container runtime removed)."""
         with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
@@ -178,13 +180,11 @@ class TestValidateEnvironment:
 
             mock_shutil.which.side_effect = lambda cmd: {
                 "hf": "/usr/bin/hf",
-                "socat": "/usr/bin/socat",
-                "container": "/usr/bin/container",
                 "docker": "/usr/bin/docker",
                 "podman": "/usr/bin/podman",
             }.get(cmd)
 
-            assert validate_environment("/usr/bin/llama-server") == "container"
+            assert validate_environment("/usr/bin/llama-server") == "docker"
 
     def test_returns_docker_when_only_docker(self):
         with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:

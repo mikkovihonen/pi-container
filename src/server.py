@@ -10,14 +10,13 @@ import hashlib
 import json
 import logging
 import os
-import re
 import subprocess
 import time
 import urllib.request
 from typing import TYPE_CHECKING, Any
 
 from models import Model, ServerConfig
-from util import extract_ipv4_from_ip_addr, get_free_port, stop_process_group
+from util import get_free_port, stop_process_group
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -60,12 +59,10 @@ class Server:
         config: ServerConfig,
         models_dir: Path,
         llama_bin: str | None,
-        bridge_interface: str,
         lock_dir: Path,
         repo_root: Path,
         server_id: str,
         container_port: int | None = None,
-        use_host_socat: bool = True,
         startup_timeout: int = 180,
         startup_attempts: int = 2,
     ) -> None:
@@ -73,11 +70,6 @@ class Server:
         self.server_id: str = server_id
         self.models_dir: Path = models_dir
         self.llama_bin: str = llama_bin or ""
-        self.bridge_interface: str = bridge_interface
-        # Only runtimes that share an L2 bridge with the host (Apple container)
-        # need llama-server re-exposed on the bridge via socat. podman/docker
-        # reach the host loopback through host.containers.internal instead.
-        self.use_host_socat: bool = use_host_socat
         self.lock_dir: Path = lock_dir
         self.repo_root: Path = repo_root
         # llama-server startup tuning (config.yaml llama.*). Large models load
@@ -88,7 +80,6 @@ class Server:
         self.port: int | None = None
         self.container_port: int | None = container_port
         self.server_pid: int | None = None
-        self.socat_process: subprocess.Popen | None = None
         self.models: dict[str, Model] = {}
 
         # Sharing identity: provider name + a fingerprint of its config. Same
@@ -132,28 +123,6 @@ class Server:
             flags.extend([str(flag) for flag in model.config.additional_server_flags])
         return flags
 
-    def _get_bridge_ip(self) -> str | None:
-        # Try 'ip addr' first (Linux)
-        with contextlib.suppress(subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-            result = subprocess.check_output(
-                ["ip", "addr", "show", self.bridge_interface], text=True, stderr=subprocess.DEVNULL, timeout=5
-            )
-            ip_addr = extract_ipv4_from_ip_addr(result)
-            if ip_addr:
-                return ip_addr
-
-        # Fallback to 'ifconfig' (macOS / older Linux)
-        with contextlib.suppress(subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-            result = subprocess.check_output(
-                ["ifconfig", self.bridge_interface], text=True, stderr=subprocess.DEVNULL, timeout=5
-            )
-            # If the /cidr form didn't match, try without cidr (ifconfig doesn't include it)
-            match = re.search(r"inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", result)
-            if match:
-                return match.group(1)
-
-        return None
-
     def _cleanup(self, pid_to_kill: int | None = None, full_cleanup: bool = False) -> None:
         """Stops processes and cleans up local files for this server instance."""
         try:
@@ -167,21 +136,6 @@ class Server:
                 )
                 if target_pid == self.server_pid:
                     self.server_pid = None
-
-            # Stop socat robustly. Prefer this instance's live handle, but fall
-            # back to the pid recorded in the pid file — this covers the
-            # shared-server case (the process doing the final cleanup attached to
-            # an existing server and never owned the socat) and stale socats left
-            # behind by a crashed run.py.
-            socat_pid: int | None = None
-            if self.socat_process and self.socat_process.poll() is None:
-                socat_pid = self.socat_process.pid
-            if socat_pid is None:
-                socat_pid = self._read_socat_pid()
-            if socat_pid:
-                logger.info(f"[Server: {self.server_id}] Stopping socat process (pid {socat_pid})...")
-                stop_process_group(socat_pid, f"socat {self.server_id}", logger=logger)
-            self.socat_process = None
 
         finally:
             self.paths["pid_file"].unlink(missing_ok=True)
@@ -273,18 +227,6 @@ class Server:
                 return 0
         return 0
 
-    def _read_socat_pid(self) -> int | None:
-        """Read the socat pid recorded on the 3rd line of the pid file, if any."""
-        if not self.paths["pid_file"].exists():
-            return None
-        try:
-            lines = self.paths["pid_file"].read_text().splitlines()
-            if len(lines) >= 3 and lines[2].strip():
-                return int(lines[2])
-        except ValueError, IndexError, OSError:
-            return None
-        return None
-
     def _is_existing_server_healthy(self) -> tuple[bool, int | None, int | None]:
         if not self.paths["pid_file"].exists():
             return False, None, None
@@ -339,23 +281,8 @@ class Server:
                 if process.poll() is not None:
                     raise Exception("llama-server died immediately")
 
-                bridge_ip = self._get_bridge_ip() if self.use_host_socat else None
-                if bridge_ip:
-                    socat_cmd = ["socat", f"TCP-LISTEN:{port},fork,reuseaddr,bind={bridge_ip}", f"TCP:127.0.0.1:{port}"]
-                    try:
-                        # start_new_session gives socat its own process group so
-                        # it (and its per-connection forked children) can be
-                        # reaped via killpg without touching run.py, and by a
-                        # different run.py process reading the pid file.
-                        self.socat_process = subprocess.Popen(
-                            socat_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
-                        )
-                    except Exception as e:
-                        raise Exception(f"Failed to start socat: {e}") from None
-
-                # pid file: llama pid, port, and socat pid (blank if no socat).
-                socat_pid = self.socat_process.pid if self.socat_process else ""
-                self.paths["pid_file"].write_text(f"{process.pid}\n{port}\n{socat_pid}\n")
+                # pid file: llama pid and port.
+                self.paths["pid_file"].write_text(f"{process.pid}\n{port}\n")
 
                 if self.wait_for_server():
                     self.paths["ref_count_file"].write_text("1")

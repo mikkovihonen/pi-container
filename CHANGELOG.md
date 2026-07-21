@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Breaking Changes
+- Replaced `packages.txt` with two definition files: `.pi-container/dependencies/root/commands.sh` (runs at build time) and `.pi-container/dependencies/pi/commands.sh` (runs at runtime)
+- Removed bind-mounted `.pi-container/agent/entrypoint.sh` hook — replaced by baked-in script execution
+- Removed runtime `apt-get update && apt-get install` from `entrypoint.sh` — moved to build time
+- **Dropped Apple `container` support** — `--build-context` flag not supported by Apple `container`, requires `docker` or `podman`
+- Migration: move apt installs from `packages.txt` to `root/commands.sh` using `apt-get update && apt-get install -y <package>` syntax
+
+### Added
+- Project-specific agent images with content-addressed tags (`<project>-pi-agent-<sha256>.local`)
+- Image label storage for cache invalidation (stores content hash in `pi-container.hash` label)
+- Shared base image with common packages (bash, git, ripgrep, node, npm, pi, mitmproxy CA cert)
+- Dependency definition file seeding from `pi-coding-agent/default/dependencies/` templates
+- Build-time root commands execution (`root/commands.sh` for system-wide setup)
+- Runtime pi commands execution (`pi/commands.sh` for workspace-local setup)
+- Cross-workspace image sharing: identical definition files reuse the same image
+
+### Changed
+- Updated `Containerfile` to use `--build-context` for copying definition files
+- Updated `build.py` to pass definition file paths and content hash to container builds
+- Updated `run.py` to resolve project-specific image tags and check cache via image labels
+- Updated `entrypoint.sh` to run pi commands at runtime if baked into the image
+- Removed `pi/commands.sh` from image hash calculation (runs at entrypoint, not baked into image)
+- Removed Apple `container` runtime support: dropped `AppleContainerRuntime` class, removed socat code (only needed for Apple container), updated tests, cleaned up references
+- Updated documentation: `configuration.md`, `getting-started.md`, `AGENTS.md`, `project-specific-containers.md`
+
+### Performance
+- Eliminated redundant `apt-get update` and package installation at every container startup
+- Cached project-specific images: subsequent runs skip build entirely (save 30-120 seconds)
+- Rebuild only when definition files, Containerfile, or entrypoint.sh changes
+
 ## [0.2.1] - 2026-07-08
 
 Documentation updates and uv dependency management.

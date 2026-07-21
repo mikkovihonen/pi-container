@@ -351,7 +351,7 @@ class ContainerNetworkManager:
 
         Layered, cheapest first:
           1. Static per-runtime capability (``ipv6_upstream_egress``) — short-
-             circuit for runtimes known to NAT IPv4 only (e.g. Apple container).
+             circuit for runtimes known to NAT IPv4 only.
           2. Inspect the upstream network's config for IPv6 enablement.
         The definitive check against the proxy's real ``eth0`` happens after the
         proxy starts (in run.py).

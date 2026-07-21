@@ -54,6 +54,39 @@ def build_agent(runtime: str) -> None:
     )
 
 
+def build_project_image(
+    runtime: str, root_commands_path: str, pi_commands_path: str, image_tag: str, label_hash: str
+) -> None:
+    """Build a project-specific agent image with baked-in command scripts.
+
+    Args:
+        runtime: Container runtime (docker or podman).
+        root_commands_path: Absolute path to root/commands.sh on the host.
+        pi_commands_path: Absolute path to pi/commands.sh on the host.
+        image_tag: Image tag for the project-specific image (e.g., "pi-coding-agent-<hash>.local").
+        label_hash: Content hash to store in the image label for cache invalidation.
+    """
+    print(f"Building project-specific agent image ({runtime}): {image_tag}")
+    subprocess.run(
+        [
+            runtime,
+            "build",
+            "--build-context",
+            f"root_commands_path={Path(root_commands_path).parent}",
+            "--build-arg",
+            f"ROOT_COMMANDS_PATH={Path(root_commands_path).name}",
+            "--build-arg",
+            f"LABEL_HASH={label_hash}",
+            "--tag",
+            image_tag,
+            "--file",
+            str(REPO_ROOT / "pi-coding-agent" / "Containerfile"),
+            str(REPO_ROOT),
+        ],
+        check=True,
+    )
+
+
 def main() -> None:
     try:
         runtime = validate_environment(LLAMA_BIN)

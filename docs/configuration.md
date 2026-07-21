@@ -25,7 +25,9 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 | `PROXY_UPSTREAM_NETWORK` | The upstream network the proxy connects to for internet access | Per-runtime: `default` / `podman` / `bridge` |
 | `LOG_LEVEL` | Log level | `INFO` |
 | `ADMIN_PASSWORD` | Password for mitmproxy Web UI | `CHANGEME` |
-| `CONTAINER_RUNTIME` | Container CLI to use (`container`, `docker`, or `podman`) | Auto-detected (prefers `container` > `docker` > `podman`) |
+| `CONTAINER_RUNTIME` | Container CLI to use (`docker` or `podman`) | Auto-detected (prefers `docker` > `podman`) |
+
+> **Note**: Apple `container` is no longer supported (does not support `--build-context` needed for project-specific image builds).
 
 `BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` are derived from `CONTAINER_RUNTIME` and rarely need setting; provide them only to override the per-runtime default for your host.
 
@@ -269,23 +271,75 @@ agent:
     - /Users/me/.cache/pip:/home/pi/.cache/pip:ro
 ```
 
-### APT dependencies
+### Dependency definition files
 
-The agent container installs system packages listed in `.pi-container/dependencies/apt/packages.txt` at startup (via `entrypoint.sh`). Each line is a package name passed to `apt-get install -y`. The file is read from the mounted `/workspace` — changes take effect on the next `run.sh` invocation.
+Project-specific setup is defined in two files under `.pi-container/dependencies/`. These are **baked into the project-specific image at build time**, not installed at runtime. This eliminates redundant `apt-get update` and `apt-get install` calls at container startup.
 
-If the agent encounters an unmet system dependency during operation, it should append the package name to this file and inform the user that a container restart is needed.
+| File | Privilege | Runs | Purpose |
+|------|-----------|------|---------|
+| `.pi-container/dependencies/root/commands.sh` | root | **Build time** | Install system packages (`apt-get`), npm globals, system config — baked into image |
+| `.pi-container/dependencies/pi/commands.sh` | pi | **Runtime** (via entrypoint) | Init venvs, clone repos, workspace setup — runs against bind-mounted workspace |
 
-Example:
-```text
-# .pi-container/dependencies/apt/packages.txt
-curl
+**Example `root/commands.sh`:**
+```bash
+#!/bin/bash
+set -e
+# Install system packages
+apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libavcodec-extra
+
+# Install npm globals
+npm install -g typescript
 ```
 
-### Custom startup script
+**Example `pi/commands.sh`:**
+```bash
+#!/bin/bash
+set -e
+# Initialize Python venv
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
 
-pi-container will run `.pi-container/agent/entrypoint.sh` at startup, after the APT dependencies are installed and before the agent begins. Use this script for any additional setup the container user needs — one-time configuration, environment setup, or workspace initialization. The script runs as the `pi` user inside the agent container.
+# Clone a repo
+git clone https://github.com/example/repo.git
+```
 
-If the file does not exist, it is silently skipped.
+**How it works:**
+
+1. On first run, pi-container seeds both files from templates in `pi-coding-agent/default/dependencies/`.
+2. When definition files exist and are non-empty, pi-container computes a content hash and builds a project-specific image with the scripts baked in. The hash is stored as a label (`pi-container.hash`) on the image for cache invalidation.
+3. At **build time**, `root/commands.sh` executes (system-wide setup: apt, npm globals). At **runtime**, `pi/commands.sh` executes via the entrypoint (workspace-local setup: venvs, cloned repos).
+4. If definition files are empty or absent, the workspace uses the shared base image (no project-specific build).
+
+**Why two execution times?**
+
+- `root/commands.sh` runs at **build time** because it installs system-wide packages (apt, npm globals) that should be baked into the image. These persist across container runs.
+- `pi/commands.sh` runs at **runtime** because it creates workspace-local artifacts (venvs, cloned repos) in the bind-mounted workspace. If these were created at build time, they would be hidden by the bind mount at runtime.
+
+**Image caching:**
+
+Project-specific images are cached and reused across runs. pi-container computes a content hash of:
+- `.pi-container/dependencies/root/commands.sh` (if it exists and is non-empty)
+- `.pi-container/dependencies/pi/commands.sh` (if it exists and is non-empty)
+- `pi-coding-agent/Containerfile` (always)
+- `pi-coding-agent/entrypoint.sh` (always)
+
+The hash is stored as a label (`pi-container.hash`) on the image. On each run, pi-container reads this label and compares it to the current hash. If they match, the cached image is used (no rebuild). If they differ (or the label is missing), a new image is built.
+
+This enables:
+- **Cross-workspace sharing**: Two workspaces with identical definition files compute the same hash and share one image.
+- **Automatic invalidation**: Editing a definition file, the Containerfile, or the entrypoint triggers a rebuild on the next run.
+- **Migration**: Images built before this feature (no label) are treated as stale and rebuilt with the label.
+
+**Note on workspace-local artifacts:** Venvs, cloned repos, and other workspace-local artifacts created by `pi/commands.sh` are NOT cached across container runs. The image cache only applies to system-wide setup from `root/commands.sh` and the image definition itself.
+
+**Key principles:**
+
+- The shared base image contains only packages essential to pi itself (see [Shared Base apt Packages](project-specific-containers.md#shared-base-apt-packages)).
+- Any additional packages must be installed via `root/commands.sh`.
+- Both files are optional — if absent, the workspace uses the shared image.
+- Changes to definition files trigger a rebuild on the next `run.sh` invocation (detected via image label comparison).
 
 ### Allowlist
 
@@ -365,7 +419,7 @@ Some models need an explicit Jinja chat template. Place them under `.pi-containe
 
 A ready-to-copy [`.gitignore.example`](https://github.com/mikkovihonen/pi-container/blob/main/docs/assets/.gitignore.example) lists every entry a workspace needs. Copy the relevant lines into your project's `.gitignore`.
 
-Most of `.pi-container/` is project configuration you **should commit** so the environment is reproducible: `config.yaml`, `allowlist.yaml`, `token_replacer.yaml`, `chat-templates/`, and `dependencies/apt/packages.txt`. (`token_replacer.yaml` holds only `${ENV:VAR}` references, never resolved secrets — see [Token Replacer Secrets](#token-replacer-secrets).)
+Most of `.pi-container/` is project configuration you **should commit** so the environment is reproducible: `config.yaml`, `allowlist.yaml`, `token_replacer.yaml`, `chat-templates/`, and `dependencies/` (root/commands.sh and pi/commands.sh — see [Dependency definition files](#dependency-definition-files)). (`token_replacer.yaml` holds only `${ENV:VAR}` references, never resolved secrets — see [Token Replacer Secrets](#token-replacer-secrets).)
 
 The one directory you **must ignore** is the flow-export output:
 

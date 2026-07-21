@@ -6,16 +6,16 @@ sys.dont_write_bytecode = True
 
 ``run.py`` orchestrates four moving parts — the host ``llama-server``, the
 ``pi-coding-agent`` container, the ``pi-coding-agent-proxy`` container and the
-container network that isolates them. The three supported runtimes (Apple
-``container``, ``podman`` and ``docker``) differ in CLI flags and networking
-semantics. Every one of those differences is encapsulated in a
-:class:`ContainerRuntime` subclass so ``run.py`` stays runtime-agnostic.
+container network that isolates them. The two supported runtimes (``podman`` and
+``docker``) differ in CLI flags and networking semantics. Every one of those
+differences is encapsulated in a :class:`ContainerRuntime` subclass so
+``run.py`` stays runtime-agnostic.
 
 Shared network model (identical across all runtimes)
 ----------------------------------------------------
 * The isolated network is created ``--internal`` (no external gateway). A
   container attached only to it therefore has **no default route** — verified
-  on both Apple ``container`` and ``podman``.
+  on ``podman`` and ``docker``.
 * The **proxy** attaches to two networks: the upstream network (``eth0`` →
   internet, NAT/MASQUERADE) and the isolated network (``eth1`` → agent).
 * The **agent** attaches only to the isolated network and has its default route
@@ -31,11 +31,10 @@ Per-runtime differences (what the subclasses own)
 * how the proxy attaches to a second network (multiple ``--network`` flags vs.
   post-run ``network connect``) and how the isolated interface is named ``eth1``
 * tmpfs mount flag syntax
-* how the proxy reaches the host ``llama-server`` (``LLAMA_HOST_ADDR``): Apple
-  ``container`` shares an L2 bridge with the host and uses a host-side ``socat``
-  bound to the bridge IP; ``podman``/``docker`` run inside a VM on macOS and
-  reach the host loopback through ``host.containers.internal`` /
-  ``host.docker.internal`` (gvproxy), so no socat is needed.
+* how the proxy reaches the host ``llama-server`` (``LLAMA_HOST_ADDR``):
+  ``podman``/``docker`` run inside a VM on macOS and reach the host loopback
+  through ``host.containers.internal`` / ``host.docker.internal`` (gvproxy),
+  so no socat is needed.
 """
 
 import json
@@ -81,14 +80,6 @@ class ContainerRuntime(ABC):
     default_upstream_network: str = ""
     #: Interface name the isolated network gets *inside* the proxy container.
     proxy_isolated_interface: str = "eth1"
-    #: ULA IPv6 subnet for the isolated network when IPv6 is enabled. Runtimes
-    #: that auto-assign a subnet from ``--ipv6`` (podman/docker) ignore it; Apple
-    #: ``container`` needs it passed explicitly via ``--subnet-v6``.
-    ipv6_ula_subnet: str = "fd00:c0de:cafe::/64"
-    #: Whether this runtime actually provides IPv6 egress to the internet on the
-    #: upstream network. ``False`` means IPv6 can be plumbed on the isolated side
-    #: but the proxy has no v6 route out, so enabling it cannot work end-to-end.
-    ipv6_upstream_egress: bool = True
 
     def __init__(
         self,
@@ -108,7 +99,6 @@ class ContainerRuntime(ABC):
         upstream_network: str | None = None,
     ) -> ContainerRuntime:
         registry: dict[str, type[ContainerRuntime]] = {
-            "container": AppleContainerRuntime,
             "podman": PodmanRuntime,
             "docker": DockerRuntime,
         }
@@ -124,9 +114,7 @@ class ContainerRuntime(ABC):
     def _ipv6_network_flags(self) -> list[str]:
         """``network create`` flags that give the isolated net an IPv6 subnet.
 
-        podman/docker accept ``--ipv6`` and auto-assign a ULA subnet. Apple
-        ``container`` rejects ``--ipv6`` and instead requires an explicit
-        ``--subnet-v6 <subnet>`` (see :class:`AppleContainerRuntime`).
+        podman/docker accept ``--ipv6`` and auto-assign a ULA subnet.
         """
         return ["--ipv6"]
 
@@ -181,15 +169,14 @@ class ContainerRuntime(ABC):
 
         Base returns ``None`` (unknown); runtimes whose JSON format is known
         override this. Only called for runtimes assumed to have egress
-        (:attr:`ipv6_upstream_egress`), so Apple ``container`` need not implement it.
+        (:attr:`ipv6_upstream_egress`).
         """
         return None
 
     def delete_isolated_network_argv(self, network_name: str) -> list[str] | None:
         """Argv that removes the isolated network on shutdown (``None`` to skip).
 
-        ``network rm`` is understood by podman and docker, and accepted by Apple
-        ``container`` as an alias for ``delete``.
+        ``network rm`` is understood by podman and docker.
         """
         return ["network", "rm", network_name]
 
@@ -213,11 +200,10 @@ class ContainerRuntime(ABC):
     def ipv6_run_args(self, enabled: bool, forwarding: bool = False) -> list[str]:
         """``run`` flags that enforce the IPv6 policy for a container.
 
-        The base (Apple ``container``) returns nothing: its containers can write
-        ``net.ipv6.*`` sysctls directly from the entrypoint, so the policy is
-        applied there. VM runtimes (podman/docker) override this because their
-        rootless network namespaces forbid writing ``net.*`` sysctls from inside
-        the container, so the toggle must be set at ``run`` time via ``--sysctl``.
+        The base class returns nothing: VM runtimes (podman/docker) override
+        this because their rootless network namespaces forbid writing ``net.*``
+        sysctls from inside the container, so the toggle must be set at ``run``
+        time via ``--sysctl``.
 
         ``forwarding`` is only meaningful for the proxy (which routes traffic);
         endpoint containers like the agent leave it False.
@@ -248,61 +234,10 @@ class ContainerRuntime(ABC):
         """Flags mounting a writable tmpfs at ``destination``."""
         return ["--tmpfs", destination]
 
-    # ── Host llama-server reachability ───────────────────────────────────
-    def llama_host_addr(self) -> str | None:
-        """Static hint for the address the proxy should DNAT llama traffic to.
-
-        ``None`` means "let the proxy resolve its own default gateway" (the
-        Apple ``container`` case, where the gateway is the host bridge IP that
-        socat listens on).
-        """
-        return None
-
-    def resolve_llama_host_addr(self, probe_image: str | None = None) -> str | None:
-        """Concrete value to inject as the proxy's ``LLAMA_HOST_ADDR``.
-
-        Defaults to the static :meth:`llama_host_addr`. Runtimes whose host
-        hostname is not reliably resolvable inside the proxy override this to
-        return a numeric IP instead. ``probe_image`` is a container image the
-        implementation may run to perform the lookup.
-        """
-        return self.llama_host_addr()
-
-    def needs_host_socat(self) -> bool:
-        """Whether ``llama-server`` must be re-exposed on the host bridge via socat."""
-        return False
-
-
-class AppleContainerRuntime(ContainerRuntime):
-    """Apple's ``container`` CLI (macOS default).
-
-    Containers share the host ``bridge100`` L2 network, so the host reaches them
-    directly and ``llama-server`` is re-exposed on the bridge IP via socat. The
-    proxy resolves that bridge IP as its own default gateway, so no explicit
-    ``LLAMA_HOST_ADDR`` is injected.
-
-    IPv6 note: the ``vmnet`` upstream network only NATs IPv4 — a container on it
-    gets no global IPv6 address and no v6 default route (verified), so IPv6
-    cannot work end-to-end here even though the isolated side can be given a v6
-    subnet. Hence ``ipv6_upstream_egress = False``. The CLI also rejects
-    ``--ipv6``; it takes an explicit ``--subnet-v6 <subnet>`` instead.
-    """
-
-    name = "container"
-    default_bridge_interface = "bridge100"
-    default_upstream_network = "default"
-    ipv6_upstream_egress = False
-
-    def _ipv6_network_flags(self) -> list[str]:
-        # Apple `container` rejects --ipv6; give it an explicit v6 subnet.
-        return ["--subnet-v6", self.ipv6_ula_subnet]
-
-    def proxy_network_args(self, isolated_network: str) -> list[str]:
-        # First --network becomes eth0, second becomes eth1.
-        return ["--network", self.upstream_network, "--network", isolated_network]
-
-    def needs_host_socat(self) -> bool:
-        return True
+    # ── Host llama-server reachability (podman/docker only) ─────────────
+    # These are overridden by PodmanRuntime and DockerRuntime to return the
+    # hostname that resolves the host loopback (gvproxy on macOS).
+    # The proxy uses this as LLAMA_HOST_ADDR for DNAT.
 
 
 class PodmanRuntime(ContainerRuntime):
@@ -351,7 +286,7 @@ class PodmanRuntime(ContainerRuntime):
     def tmpfs_args(self, destination: str) -> list[str]:
         # notmpcopyup: leave the tmpfs empty rather than copying up the content
         # of the underlying directory (image layer or, for a nested mount, the
-        # bind volume beneath it). Matches Apple `container`, whose tmpfs always
+        # bind volume beneath it). The tmpfs always
         # starts empty, so a mount like /workspace/.venv is a clean scratch dir
         # on both runtimes instead of a copy of the host's (macOS) .venv.
         return ["--mount", f"type=tmpfs,tmpfs-mode=1777,notmpcopyup,destination={destination}"]

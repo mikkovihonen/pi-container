@@ -24,7 +24,7 @@ Before running, ensure you have the following installed on your host machine:
   - On Linux (Debian/Ubuntu): `sudo apt install llama.cpp`
   - On Linux (other): [build from source](https://github.com/ggerganov/llama.cpp)
   - On WSL2: `sudo apt install llama.cpp`
-- **socat** (Apple `container` runtime only — used to expose the host `llama-server` on the container bridge; not needed for podman/docker):
+- **socat** (used to expose the host `llama-server` on the container bridge; not needed for podman/docker):
   - On macOS: `brew install socat`
 
 Python dependencies (`huggingface_hub[cli]`, `pyyaml`) are declared in
@@ -53,14 +53,13 @@ To run this environment comfortably, especially when utilizing the full 128k con
 
 ### macOS
 
-- **Container runtime**: The Apple `container` CLI is the default.
-- **Network**: The default bridge interface is `bridge100` and the proxy upstream network defaults to `default`. These per-runtime defaults are applied automatically; `BRIDGE_INTERFACE` / `PROXY_UPSTREAM_NETWORK` are only needed to override them.
+- **Container runtime**: The default is `docker` (or `podman`).
+- **Network**: These per-runtime defaults are applied automatically; `BRIDGE_INTERFACE` / `PROXY_UPSTREAM_NETWORK` are only needed to override them.
 - **LLaMA backend**: Runs natively using Apple's Metal GPU acceleration.
 - **podman / docker on macOS**: These run containers inside a Linux VM (no `podman0`/`docker0` bridge exists on the host), so `socat` is not used — the proxy reaches host `llama-server` via `host.containers.internal` (gvproxy). The runtime abstraction ([`src/runtimes.py`](https://github.com/mikkovihonen/pi-container/blob/main/src/runtimes.py)) handles these differences. Each runtime configures the isolated network and proxy attachment differently:
 
 | Runtime | Network flags | Interface pinning |
 |---------|--------------|-------------------|
-| Apple `container` | `--internal --subnet-v6 <ula-subnet>` | None — uses default `eth0`/`eth1` |
 | Podman | `--internal --disable-dns` | `interface_name=eth0` / `interface_name=eth1` |
 | Docker | `--internal` | None — uses default `eth0`/`eth1` |
 
@@ -106,7 +105,7 @@ The script reads `<project>/.pi-container/agent/models.json` (seeded from the `p
 
 Once the server is ready, you can interact with the agent through the terminal. The current directory is mounted to `/workspace` inside the container, allowing the agent to read and write files in your project.
 
-The agent's entrypoint automatically installs apt packages listed in `.pi-container/dependencies/apt/packages.txt` if present in the mounted workspace, points the container's default route and DNS at the proxy, and applies the host's git config. Reaching the host `llama-server` is handled by the proxy (via a host-side `socat` bridge for Apple `container`, or `host.containers.internal` for podman/docker) — see [Architecture](architecture.md).
+The agent's entrypoint runs project-specific setup scripts (baked into the image at build time), points the container's default route and DNS at the proxy, and applies the host's git config. Reaching the host `llama-server` is handled by the proxy (via a host-side `socat` bridge for Apple `container`, or `host.containers.internal` for podman/docker) — see [Architecture](architecture.md) and [Dependency definition files](configuration.md#dependency-definition-files).
 
 ### 5. Using the Proxy
 

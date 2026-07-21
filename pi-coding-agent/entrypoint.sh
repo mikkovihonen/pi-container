@@ -34,15 +34,6 @@ else
     printf 'Acquire::ForceIPv4 "true";\n' > /etc/apt/apt.conf.d/99force-ipv4
 fi
 
-if [ -f /workspace/.pi-container/dependencies/apt/packages.txt ]; then
-    echo "dependencies/apt/packages.txt exists in workdir. Installing apt dependencies from workspace."
-    {
-        apt-get update
-        cat /workspace/.pi-container/dependencies/apt/packages.txt | xargs -r apt-get install -y
-        rm -rf /var/lib/apt/lists/*
-    } >/dev/null 2>&1
-fi
-
 if [ -n "$HOST_GIT_CONFIG" ]; then
     while IFS=$'\t' read -r key value; do
         if [[ -n "$key" ]]; then
@@ -52,6 +43,11 @@ if [ -n "$HOST_GIT_CONFIG" ]; then
 fi
 
 exec gosu pi bash -c '
-    /home/pi/.pi/agent/entrypoint.sh
+    set -a; source /etc/environment; set +a;
+
+    if [ -x .pi-container/dependencies/pi/commands.sh ]; then
+        .pi-container/dependencies/pi/commands.sh
+    fi
+
     exec pi "$@"
 ' -- "$@"

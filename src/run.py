@@ -15,6 +15,7 @@ from contextlib import ExitStack
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
+from build import build_project_image
 from config import (
     ADMIN_PASSWORD,
     BRIDGE_INTERFACE_ENV,
@@ -155,7 +156,179 @@ def _ensure_project_config() -> Path:
         logger.info(f"Seeding {ep_dst} from {ep_src}.")
         shutil.copy2(ep_src, ep_dst)
 
+    # Seed dependency definition files (root/commands.sh and pi/commands.sh) into
+    # {PROJECT_DIR}/.pi-container/dependencies/. These define project-specific setup
+    # that gets baked into the project-specific image at build time. Both files are
+    # optional — if absent or empty, the workspace uses the shared base image.
+    deps_template_root = template_root / "dependencies"
+    deps_project_root = project_root / "dependencies"
+    if deps_template_root.is_dir():
+        for cmd_dir in ("root", "pi"):
+            src_dir = deps_template_root / cmd_dir
+            dst_dir = deps_project_root / cmd_dir
+            if src_dir.is_dir() and not dst_dir.exists():
+                logger.info(f"Seeding {dst_dir} from {src_dir}.")
+                shutil.copytree(src_dir, dst_dir)
+
     return project_root / "agent"
+
+
+# ─── Project-specific image resolution ─────────────────────────────────────
+
+
+def _compute_image_hash(project_dir: Path) -> str | None:
+    """Compute a content hash of all files that affect the project-specific image.
+
+    Returns a hex digest of the concatenated SHA-256 hashes of:
+    - `.pi-container/dependencies/root/commands.sh` (if it exists and is non-empty)
+    - `pi-coding-agent/Containerfile` (always, to detect image definition changes)
+    - `pi-coding-agent/entrypoint.sh` (always, to detect entrypoint changes)
+
+    Note: `pi/commands.sh` is NOT included — it runs at container entrypoint
+    (runtime) and is not baked into the image.
+
+    Returns None if no definition files exist (root/commands.sh is absent or
+    empty).
+    """
+    deps_root = project_dir / ".pi-container" / "dependencies"
+    agent_dir = project_dir / "pi-coding-agent"
+    files_to_hash = []
+
+    # root/commands.sh (optional — skip if absent or empty)
+    root_cmd_path = deps_root / "root/commands.sh"
+    if root_cmd_path.exists() and root_cmd_path.stat().st_size > 0:
+        files_to_hash.append("root/commands.sh")
+
+    # Image definition files (always included — their changes require a rebuild)
+    for img_file in ("Containerfile", "entrypoint.sh"):
+        img_path = agent_dir / img_file
+        if img_path.exists():
+            files_to_hash.append(img_file)
+
+    if not files_to_hash:
+        return None
+
+    # Sort for deterministic ordering
+    files_to_hash.sort()
+
+    # Concatenate SHA-256 hashes of each file
+    combined_hash = hashlib.sha256()
+    for cmd_file in files_to_hash:
+        file_path = agent_dir / cmd_file if cmd_file in ("Containerfile", "entrypoint.sh") else deps_root / cmd_file
+        file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+        combined_hash.update(file_hash.encode())
+
+    return combined_hash.hexdigest()[:16]  # Truncate to 16 hex chars
+
+
+def _has_dependency_files(project_dir: Path) -> bool:
+    """Check if the project has non-empty dependency definition files.
+
+    Returns True if root/commands.sh or pi/commands.sh exists and is non-empty.
+    """
+    deps_root = project_dir / ".pi-container" / "dependencies"
+    for cmd_file in ("root/commands.sh", "pi/commands.sh"):
+        cmd_path = deps_root / cmd_file
+        if cmd_path.exists() and cmd_path.stat().st_size > 0:
+            return True
+    return False
+
+
+def _resolve_agent_image(project_dir: Path) -> tuple[str, bool]:
+    """Resolve the agent image tag for this workspace.
+
+    If dependency files exist and are non-empty, returns a project-specific image
+    tag (e.g., "pi-coding-agent-<hash>.local"). Otherwise, returns the shared
+    image tag (IMAGE_TAG).
+
+    The hash includes Containerfile and entrypoint.sh to detect image definition
+    changes, but the decision to use a project-specific image is based only on
+    whether dependency files exist.
+
+    Returns:
+        Tuple of (image_tag, is_project_specific).
+    """
+    if not _has_dependency_files(project_dir):
+        return IMAGE_TAG, False
+
+    image_hash = _compute_image_hash(project_dir)
+    project_image_tag = f"pi-coding-agent-{image_hash}.local"
+    return project_image_tag, True
+
+
+def _get_image_label(image_tag: str, label_key: str) -> str | None:
+    """Read a label from a container image.
+
+    Args:
+        image_tag: Image tag to inspect.
+        label_key: Label key to read (e.g., "pi-container.hash").
+
+    Returns:
+        The label value as a string, or None if the image/label doesn't exist.
+    """
+    try:
+        # Try format string first (works for docker and podman)
+        result = subprocess.run(
+            [
+                CONTAINER_RUNTIME,
+                "image",
+                "inspect",
+                image_tag,
+                "--format",
+                f'{{{{index .Config.Labels "{label_key}"}}}}',
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+
+        # Fall back to JSON output and parse
+        result = subprocess.run(
+            [CONTAINER_RUNTIME, "image", "inspect", image_tag],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            import json
+
+            data = json.loads(result.stdout)
+            if data and isinstance(data, list) and len(data) > 0:
+                labels = data[0].get("Config", {}).get("Labels", {})
+                if labels and label_key in labels:
+                    return labels[label_key]
+    except Exception:
+        pass
+
+    return None
+
+
+def _image_is_current(project_dir: Path, image_tag: str, current_hash: str) -> bool:
+    """Check if the project-specific image is up-to-date by comparing labels.
+
+    For project-specific images, compares the stored `pi-container.hash` label
+    with the current content hash of the definition files.
+
+    For the shared image, always returns True (it's rebuilt via build.sh).
+
+    Returns:
+        True if the image is current, False otherwise.
+    """
+    _, is_project_specific = _resolve_agent_image(project_dir)
+    if not is_project_specific:
+        return True  # Shared image — trust the tag
+
+    # Check if the image exists
+    stored_hash = _get_image_label(image_tag, "pi-container.hash")
+    if stored_hash is None:
+        return False  # Image doesn't exist or has no label — need to build
+
+    # Compare hashes
+    return stored_hash == current_hash
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────
@@ -219,12 +392,10 @@ def main() -> None:
                     config=item["config"],
                     models_dir=MODELS_DIR,
                     llama_bin=LLAMA_BIN,
-                    bridge_interface=BRIDGE_INTERFACE,
                     lock_dir=LLAMA_SERVER_LOCK_DIR,
                     repo_root=REPO_ROOT,
                     server_id=item["name"],
                     container_port=container_port,
-                    use_host_socat=RUNTIME.needs_host_socat(),
                     startup_timeout=llama_cfg["startup_timeout"],
                     startup_attempts=llama_cfg["startup_attempts"],
                 )
@@ -296,6 +467,31 @@ def main() -> None:
                 if ipv6_enabled:
                     netmgr.warn_if_proxy_lacks_ipv6_egress()
 
+                # ─── Resolve agent image (shared vs. project-specific) ──────
+                # If definition files exist and are non-empty, build a
+                # project-specific image with baked-in command scripts.
+                # Otherwise, use the shared IMAGE_TAG.
+                agent_image_tag, is_project_specific = _resolve_agent_image(PROJECT_DIR)
+                if is_project_specific:
+                    label_hash = _compute_image_hash(PROJECT_DIR)
+                    if not _image_is_current(PROJECT_DIR, agent_image_tag, label_hash):
+                        logger.info(f"Building project-specific agent image: {agent_image_tag}")
+                        root_commands_path = str(
+                            PROJECT_DIR / ".pi-container" / "dependencies" / "root" / "commands.sh"
+                        )
+                        pi_commands_path = str(PROJECT_DIR / ".pi-container" / "dependencies" / "pi" / "commands.sh")
+                        build_project_image(
+                            CONTAINER_RUNTIME,
+                            root_commands_path,
+                            pi_commands_path,
+                            agent_image_tag,
+                            label_hash,
+                        )
+                    else:
+                        logger.info(f"Using cached project-specific image: {agent_image_tag}")
+                else:
+                    logger.info(f"Using shared image: {agent_image_tag}")
+
                 # Transient tmpfs paths (config.yaml tmpfs.paths) — all under
                 # /workspace (the mounted PROJECT_DIR), so the config that declares
                 # them is per-project. Reading the repo's list for a foreign
@@ -339,7 +535,7 @@ def main() -> None:
                     *[flag for m in agent_extras["mounts"] for flag in ("--volume", m)],
                     # Resource limits for this project's agent (config.yaml resources.agent).
                     *resource_limit_args(read_resource_limits(pi_container_dir, "agent")),
-                    IMAGE_TAG,
+                    agent_image_tag,
                     *sys.argv[1:],
                 ]
 

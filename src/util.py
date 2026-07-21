@@ -92,12 +92,9 @@ def validate_environment(llama_bin: str | None) -> str:
     if shutil.which("hf") is None:
         raise EnvironmentError("hf not found. Install via: pip install huggingface_hub[cli]")
 
-    if shutil.which("socat") is None:
-        raise EnvironmentError("socat not found. Install via: brew install socat (macOS) or apt install socat (Linux)")
-
     # Check for explicit CONTAINER_RUNTIME from .env first
     explicit_runtime = os.environ.get("CONTAINER_RUNTIME", "").strip()
-    supported_runtimes = ("container", "docker", "podman")
+    supported_runtimes = ("docker", "podman")
 
     if explicit_runtime:
         if explicit_runtime not in supported_runtimes:
@@ -115,7 +112,7 @@ def validate_environment(llama_bin: str | None) -> str:
             break
 
     if runtime is None:
-        raise EnvironmentError("No supported container runtime found (container, docker or podman).")
+        raise EnvironmentError("No supported container runtime found (docker or podman).")
 
     return runtime
 
