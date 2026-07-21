@@ -530,9 +530,11 @@ def main() -> None:
                     f"LLAMA_PORTS={portconfig}",
                     "--env",
                     f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",
-                    # Extra agent env vars + bind mounts (config.yaml agent.env/agent.mounts).
+                    # Extra agent env vars + bind mounts + capabilities + devices (config.yaml agent.env/mounts/capabilities/devices).
                     *[flag for k, v in agent_extras["env"].items() for flag in ("--env", f"{k}={v}")],
                     *[flag for m in agent_extras["mounts"] for flag in ("--volume", m)],
+                    *[flag for c in agent_extras["capabilities"] for flag in ("--cap-add", c)],
+                    *[flag for d in agent_extras["devices"] for flag in ("--device", d)],
                     # Resource limits for this project's agent (config.yaml resources.agent).
                     *resource_limit_args(read_resource_limits(pi_container_dir, "agent")),
                     agent_image_tag,

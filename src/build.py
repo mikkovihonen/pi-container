@@ -1,13 +1,16 @@
-import sys
-
-sys.dont_write_bytecode = True
-
+import logging
 import os
 import shutil
 import subprocess
+import sys
+import threading
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+
 from util import EnvironmentError, load_dotenv, validate_environment
+
+logger = logging.getLogger(__name__)
 
 # ─── Paths ───────────────────────────────────────────────────────────────────
 
@@ -22,9 +25,38 @@ PI_IMAGE_TAG = os.environ.get("PI_IMAGE_TAG", "pi-coding-agent:local")
 PROXY_IMAGE_TAG = os.environ.get("PROXY_IMAGE_TAG", "pi-coding-agent-proxy:local")
 
 
+def _run_command_with_logging(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+    """Run a subprocess, logging each stdout/stderr line via logger.info.
+
+    Merges stderr into stdout so both streams appear together in log output.
+    Raises ``subprocess.CalledProcessError`` on non-zero exit.
+    """
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        **kwargs,
+    )
+
+    def _log_stream() -> None:
+        for line in process.stdout:  # type: ignore[union-attr]
+            logger.info(line.rstrip())
+
+    thread = threading.Thread(target=_log_stream, daemon=True)
+    thread.start()
+    returncode = process.wait()
+    thread.join()
+
+    result = subprocess.CompletedProcess(cmd, returncode)
+    if returncode != 0:
+        raise subprocess.CalledProcessError(returncode, cmd)
+    return result
+
+
 def build_proxy(runtime: str) -> None:
-    print(f"Building proxy image ({runtime}): {PROXY_IMAGE_TAG}")
-    subprocess.run(
+    logger.info(f"Building proxy image ({runtime}): {PROXY_IMAGE_TAG}")
+    _run_command_with_logging(
         [
             runtime,
             "build",
@@ -34,13 +66,12 @@ def build_proxy(runtime: str) -> None:
             str(REPO_ROOT / "pi-coding-agent-proxy" / "Containerfile"),
             str(REPO_ROOT),
         ],
-        check=True,
     )
 
 
 def build_agent(runtime: str) -> None:
-    print(f"Building agent image ({runtime}): {PI_IMAGE_TAG}")
-    subprocess.run(
+    logger.info(f"Building agent image ({runtime}): {PI_IMAGE_TAG}")
+    _run_command_with_logging(
         [
             runtime,
             "build",
@@ -50,7 +81,6 @@ def build_agent(runtime: str) -> None:
             str(REPO_ROOT / "pi-coding-agent" / "Containerfile"),
             str(REPO_ROOT),
         ],
-        check=True,
     )
 
 
@@ -66,8 +96,8 @@ def build_project_image(
         image_tag: Image tag for the project-specific image (e.g., "pi-coding-agent-<hash>.local").
         label_hash: Content hash to store in the image label for cache invalidation.
     """
-    print(f"Building project-specific agent image ({runtime}): {image_tag}")
-    subprocess.run(
+    logger.info(f"Building project-specific agent image ({runtime}): {image_tag}")
+    _run_command_with_logging(
         [
             runtime,
             "build",
@@ -83,7 +113,6 @@ def build_project_image(
             str(REPO_ROOT / "pi-coding-agent" / "Containerfile"),
             str(REPO_ROOT),
         ],
-        check=True,
     )
 
 
@@ -91,17 +120,19 @@ def main() -> None:
     try:
         runtime = validate_environment(LLAMA_BIN)
     except EnvironmentError as e:
-        print(f"Environment Error: {e}", file=sys.stderr)
+        logger.error(f"Environment Error: {e}")
         sys.exit(1)
 
     try:
         build_proxy(runtime)
         build_agent(runtime)
     except subprocess.CalledProcessError as e:
-        print(f"Build failed: {e}")
+        logger.error(f"Build failed: {e}")
         sys.exit(1)
     except FileNotFoundError:
-        print(f"Error: '{runtime}' command not found. Please ensure the container CLI is installed and in your PATH.")
+        logger.error(
+            f"Error: '{runtime}' command not found. Please ensure the container CLI is installed and in your PATH."
+        )
         sys.exit(1)
 
 

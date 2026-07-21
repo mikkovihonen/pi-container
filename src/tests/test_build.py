@@ -7,7 +7,7 @@ Run with:
 
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -28,12 +28,19 @@ from build import (
 
 
 class TestBuildProxy:
+    def _mock_popen(self):
+        """Return a mock Popen that completes successfully with no output."""
+        mock_process = MagicMock()
+        mock_process.stdout = iter([])
+        mock_process.wait.return_value = 0
+        return mock_process
+
     def test_calls_runtime_build(self):
         """build_proxy should invoke the container runtime with correct args."""
-        with patch("build.subprocess.run") as mock_run:
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
             build_proxy("docker")
-            mock_run.assert_called_once()
-            cmd = mock_run.call_args[0][0]
+            mock_popen.assert_called_once()
+            cmd = mock_popen.call_args[0][0]
             assert cmd[0] == "docker"
             assert cmd[1] == "build"
             assert "--tag" in cmd
@@ -44,18 +51,18 @@ class TestBuildProxy:
             assert str(REPO_ROOT) in cmd
 
     def test_uses_passed_tag(self):
-        with patch("build.subprocess.run") as mock_run:
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
             build_proxy("podman")
-            cmd = mock_run.call_args[0][0]
+            cmd = mock_popen.call_args[0][0]
             tag_idx = cmd.index("--tag")
             assert cmd[tag_idx + 1] == PROXY_IMAGE_TAG
 
     def test_build_agent_calls_runtime(self):
         """build_agent should invoke the container runtime with correct args."""
-        with patch("build.subprocess.run") as mock_run:
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
             build_agent("docker")
-            mock_run.assert_called_once()
-            cmd = mock_run.call_args[0][0]
+            mock_popen.assert_called_once()
+            cmd = mock_popen.call_args[0][0]
             assert cmd[0] == "docker"
             assert cmd[1] == "build"
             assert "pi-coding-agent:local" in cmd

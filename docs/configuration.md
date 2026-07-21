@@ -228,6 +228,8 @@ proxy:
 agent:
   env: {}                     # extra --env vars for the agent container
   mounts: []                  # extra bind mounts (absolute host paths)
+  capabilities: []            # Linux capabilities to add (e.g., SYS_PTRACE)
+  devices: []                 # device passthroughs (e.g., /dev/video0:/dev/video0)
 tmpfs:
   paths: []
 flow_export:
@@ -268,6 +270,48 @@ agent:
   mounts:
     - /Users/me/.cache/pip:/home/pi/.cache/pip:ro
 ```
+
+### Capabilities
+
+`agent.capabilities` (a list of capability names) adds Linux capabilities to the agent container via `--cap-add`. Useful when the agent needs elevated privileges for specific operations:
+
+```yaml
+agent:
+  capabilities:
+    - SYS_PTRACE      # debug processes
+    - SYS_ADMIN       # mount filesystems, some kernel operations
+    - DAC_OVERRIDE    # bypass file permission checks
+    - NET_RAW         # use raw and packet sockets
+```
+
+Common capabilities:
+
+| Capability | Description |
+|------------|-------------|
+| `SYS_PTRACE` | Trace processes (debuggers, profilers) |
+| `SYS_ADMIN` | Mount filesystems, some kernel operations |
+| `DAC_OVERRIDE` | Bypass file read/write/execute permission checks |
+| `NET_RAW` | Use raw and packet sockets |
+| `MKNOD` | Create special files |
+| `SYS_RESOURCE` | Override resource limits |
+| `SYS_NICE` | Set process nice value, set CPU affinity |
+
+See `man 7 capabilities` for the full list.
+
+### Device passthroughs
+
+`agent.devices` (a list of `host:container[:mode]` specs) passes host devices into the agent container via `--device`. Useful for GPU access, USB devices, serial ports, etc:
+
+```yaml
+agent:
+  devices:
+    - /dev/video0:/dev/video0              # Camera
+    - /dev/bus/usb:/dev/bus/usb            # USB devices
+    - /dev/nvidia0:/dev/nvidia0            # NVIDIA GPU
+    - /dev/ttyUSB0:/dev/ttyUSB0            # Serial port
+```
+
+Device entries support the optional `mode` suffix (`r` for read-only, `w` for write-only, `rw` for read-write; default is `rw` if omitted).
 
 ### Dependency definition files
 

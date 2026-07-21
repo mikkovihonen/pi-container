@@ -22,7 +22,7 @@ else
     # Disable IPv6 so no tool silently tries an AAAA record and dead-ends (the
     # proxy stack is IPv4-only). podman/docker already set this at run time via
     # --sysctl — rootless namespaces mount /proc/sys/net read-only, so the write
-    # below fails there (harmlessly); Apple `container` relies on this write.
+    # below fails there (harmlessly);
     # Only warn if IPv6 is STILL enabled afterwards, so the redundant failed
     # write on podman/docker isn't misreported as a problem.
     sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
