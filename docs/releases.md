@@ -227,7 +227,7 @@ git push origin v0.2.0
 ### After the release
 
 Users clone the repo, check out the tag, and run `build.sh` to build the Docker
-images for their local runtime (Apple `container`, `podman`, or `docker`).
+images for their local runtime (`podman` or `docker`).
 
 If a workspace's `.pi-container/config.yaml` is outdated (e.g. a user skipped
 step 5 above), the launch fails with:

@@ -7,7 +7,7 @@ The system consists of three components running as containers or processes:
 
 2. **`pi-coding-agent-proxy`** (container): A transparent proxy container based on Debian with [mitmproxy](https://mitmproxy.org/). It intercepts the pi container's HTTP/HTTPS/DNS traffic; a self-signed CA certificate is installed into the pi container image so HTTPS can be decrypted. Each workspace gets its **own** proxy (and its own isolated network), named by a hash of the project path; its mitmweb web UI is published on an **auto-assigned host port, logged at startup**. Two [addons](proxy/overview.md#addons) run on the intercepted traffic: an **allowlist** (blocks non-allowlisted hosts) and a **token_replacer** (redacts API keys, bearer tokens, cookies, JWTs). Non-HTTP protocols are **denied by default** — the agent cannot reach the internet except through the proxy, and only over protocols that are either inspected (HTTP/HTTPS/DNS) or explicitly opted in (see [Proxy egress policy](#proxy-egress-policy)).
 
-3. **`pi-coding-agent`** (container): The main agent container. It runs on a multi-stage build from `node:26.3.1-trixie-slim`, with Python 3.14.6 compiled from source and `uv` for dependency management. The agent connects **only** to an internal `isolated-net` network, with its default route and DNS pointed at the proxy so all traffic is forced through it. How it reaches the host `llama-server` depends on the runtime: with Apple `container` (which shares an L2 bridge with the host) a host-side `socat` re-exposes llama-server on the bridge; with `podman`/`docker` (which run in a VM on macOS) the proxy reaches the host loopback via `host.containers.internal` — no socat needed.
+3. **`pi-coding-agent`** (container): The main agent container. It runs on a multi-stage build from `node:26.3.1-trixie-slim`, with Python 3.14.6 compiled from source and `uv` for dependency management. The agent connects **only** to an internal `isolated-net` network, with its default route and DNS pointed at the proxy so all traffic is forced through it. The proxy reaches the host `llama-server` via `host.containers.internal` (podman/docker on macOS) or directly on Linux — no socat needed.
 
 ## Network topology
 
@@ -51,7 +51,6 @@ flowchart TB
 
     subgraph llama_net["llama-server reachability(per-runtime network component)"]
         direction TB
-        socat["Apple container<br/>host bridge + socat"]
         podman_net["podman<br/>host.containers.internal<br/>(gvproxy)"]
         docker_net["docker<br/>host.docker.internal<br/>(gvproxy)"]
     end
@@ -62,7 +61,7 @@ flowchart TB
 
 The proxy's iptables rules enforce a **default-deny** forward policy — HTTP, HTTPS, and DNS from the agent are intercepted by mitmproxy (via `REDIRECT` to ports 8080/5353, bypassing the `FORWARD` chain entirely). Every other protocol is **denied by default**; opt-in forwarding (per-project `.pi-container/config.yaml` under `egress.allow` — ssh/smtp/git/ntp + custom TCP/UDP ports) uses plain NAT and is **not inspected** by mitmproxy. The `isolated-net` is created with `--internal` (no external gateway), so the agent has no route to the internet except the default route and DNS pointed at the proxy.
 
-By default the whole stack is **IPv4-only**: the isolated network has no IPv6 subnet and both containers disable IPv6 (via sysctl) so no agent traffic can escape the transparent-proxy REDIRECT over v6. Set `network.ipv6: true` in the project's `.pi-container/config.yaml` to create the network with an IPv6 subnet (`--ipv6` for podman/docker, `--subnet-v6` for Apple `container`), mirror the proxy's REDIRECT/NAT/FORWARD rules in `ip6tables`, and give the agent an IPv6 default route through the proxy. This requires the container runtime **and** host to actually have IPv6 egress. Apple `container`'s `vmnet` networking NATs IPv4 only — a container gets no global IPv6 address or v6 route (verified) — so enabling it there logs a warning and v6 connections still fail. It is intended for **Linux hosts running podman/docker with working host IPv6**; leave it `false` on macOS.
+By default the whole stack is **IPv4-only**: the isolated network has no IPv6 subnet and both containers disable IPv6 (via sysctl) so no agent traffic can escape the transparent-proxy REDIRECT over v6. Set `network.ipv6: true` in the project's `.pi-container/config.yaml` to create the network with an IPv6 subnet (`--ipv6` for podman/docker), mirror the proxy's REDIRECT/NAT/FORWARD rules in `ip6tables`, and give the agent an IPv6 default route through the proxy. This requires the container runtime **and** host to actually have IPv6 egress. It is intended for **Linux hosts running podman/docker with working host IPv6**; leave it `false` on macOS.
 
 <a name="proxy-egress-policy"></a>
 ## Proxy egress policy
@@ -107,7 +106,7 @@ that project's proxy container, whose entrypoint opens the matching FORWARD rule
 │   ├── build.py                      # Builds proxy and agent container images
 │   ├── run.py                        # Orchestration entrypoint: validation + main() lifecycle
 │   ├── config.py                     # Shared constants (paths, env, logging) — no side effects
-│   ├── runtimes.py                   # ContainerRuntime classes (Apple container / podman / docker)
+│   ├── runtimes.py                   # ContainerRuntime classes (podman / docker)
 │   ├── models.py                     # Model + ServerConfig/ModelConfig (download, checksum)
 │   ├── server.py                     # Server: llama-server lifecycle (refcount, socat bridge)
 │   ├── network.py                    # ContainerNetworkManager: proxy + isolated network lifecycle

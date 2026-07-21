@@ -9,13 +9,10 @@ Before running, ensure you have the following installed on your host machine:
   - Other platforms: `curl -LsSf https://astral.sh/uv/install.sh | sh`
   - `build.sh` and `run.sh` invoke `uv run`, which creates `.venv` and installs the declared dependencies (including the `hf` CLI and `huggingface_hub`) automatically on first use. No manual `pip install` is needed.
 
-- **Container Runtime**:
-
-  The project supports three container runtimes. Set `CONTAINER_RUNTIME` or pass it via the build/run scripts:
+- **Container Runtime**: Set `CONTAINER_RUNTIME` or pass it via the build/run scripts.
 
   | Runtime | Platform | Installation |
   |---------|----------|--------------|
-  | `container` | macOS | Download the [macOS installer (.pkg)](https://github.com/apple/container/releases/download/1.0.0/container-1.0.0-installer-signed.pkg) |
   | `docker` | macOS / Linux / WSL2 | [Install Docker](https://docs.docker.com/get-docker/) |
   | `podman` | macOS / Linux / WSL2 | `brew install podman` (macOS) or `sudo apt install podman` (Debian/Ubuntu) or your distro's package manager |
 
@@ -24,8 +21,6 @@ Before running, ensure you have the following installed on your host machine:
   - On Linux (Debian/Ubuntu): `sudo apt install llama.cpp`
   - On Linux (other): [build from source](https://github.com/ggerganov/llama.cpp)
   - On WSL2: `sudo apt install llama.cpp`
-- **socat** (used to expose the host `llama-server` on the container bridge; not needed for podman/docker):
-  - On macOS: `brew install socat`
 
 Python dependencies (`huggingface_hub[cli]`, `pyyaml`) are declared in
 `pyproject.toml` and installed by `uv` — you do not install them manually.
@@ -105,7 +100,7 @@ The script reads `<project>/.pi-container/agent/models.json` (seeded from the `p
 
 Once the server is ready, you can interact with the agent through the terminal. The current directory is mounted to `/workspace` inside the container, allowing the agent to read and write files in your project.
 
-The agent's entrypoint runs project-specific setup scripts (baked into the image at build time), points the container's default route and DNS at the proxy, and applies the host's git config. Reaching the host `llama-server` is handled by the proxy (via a host-side `socat` bridge for Apple `container`, or `host.containers.internal` for podman/docker) — see [Architecture](architecture.md) and [Dependency definition files](configuration.md#dependency-definition-files).
+The agent's entrypoint runs project-specific setup scripts (baked into the image at build time), points the container's default route and DNS at the proxy, and applies the host's git config. Reaching the host `llama-server` is handled by the proxy (via `host.containers.internal` on macOS or directly on Linux) — see [Architecture](architecture.md) and [Dependency definition files](configuration.md#dependency-definition-files).
 
 ### 5. Using the Proxy
 

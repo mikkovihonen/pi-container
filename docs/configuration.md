@@ -21,13 +21,11 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 | `PI_IMAGE_TAG` | The tag of the pi container image to run | `pi-coding-agent:local` |
 | `PROXY_IMAGE_TAG` | The tag of the proxy container image to run | `pi-coding-agent-proxy:local` |
 | `LLAMA_BIN` | Path to the `llama-server` executable | `llama-server` or `/opt/homebrew/bin/llama-server` |
-| `BRIDGE_INTERFACE` | Host bridge interface for the `socat` bridge (Apple `container` only) | Per-runtime: `bridge100` / `podman0` / `docker0` |
+| `BRIDGE_INTERFACE` | Host bridge interface for container networking | Per-runtime: `podman0` / `docker0` |
 | `PROXY_UPSTREAM_NETWORK` | The upstream network the proxy connects to for internet access | Per-runtime: `default` / `podman` / `bridge` |
 | `LOG_LEVEL` | Log level | `INFO` |
 | `ADMIN_PASSWORD` | Password for mitmproxy Web UI | `CHANGEME` |
 | `CONTAINER_RUNTIME` | Container CLI to use (`docker` or `podman`) | Auto-detected (prefers `docker` > `podman`) |
-
-> **Note**: Apple `container` is no longer supported (does not support `--build-context` needed for project-specific image builds).
 
 `BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` are derived from `CONTAINER_RUNTIME` and rarely need setting; provide them only to override the per-runtime default for your host.
 
@@ -250,7 +248,7 @@ Any missing section falls back to a safe default (values above; egress → deny-
 
 ### Network
 
-`network.ipv6` toggles IPv6 for this project's isolated network + proxy (only works if the runtime **and** host route IPv6 — leave `false` on macOS/Apple `container`; see [Network topology](architecture.md#network-topology)). `network.dns` is the upstream resolver the proxy uses for the agent's DNS lookups (default `1.1.1.1`) — set it to a corporate/internal resolver when needed.
+`network.ipv6` toggles IPv6 for this project's isolated network + proxy (only works if the runtime **and** host route IPv6 — leave `false` on macOS; see [Network topology](architecture.md#network-topology)). `network.dns` is the upstream resolver the proxy uses for the agent's DNS lookups (default `1.1.1.1`) — set it to a corporate/internal resolver when needed.
 
 ### Proxy UI exposure
 
@@ -373,7 +371,7 @@ tmpfs:
     - /workspace/node_modules/.cache
 ```
 
-Each path is mounted at the same absolute location inside the container. On podman/docker, mounts use the `notmpcopyup` flag so they start empty (matching Apple `container` behavior) rather than copying the host's bind-mounted content into the tmpfs. Paths are deduplicated and sorted for deterministic output.
+Each path is mounted at the same absolute location inside the container. On podman/docker, mounts use the `notmpcopyup` flag so they start empty rather than copying the host's bind-mounted content into the tmpfs. Paths are deduplicated and sorted for deterministic output.
 
 ### Flow export
 
