@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-03
+
+### Added
+- Project-specific image cleanup: images are tagged with `pi-container-project-<project-hash>-<image-hash>.local` and carry labels (`pi-container.hash`, `pi-container.project.hash`, `pi-container.project.path`, `pi-container.build.time`, `pi-container.type`) for discovery and lifecycle management.
+- Orphan detection: on every run, images whose `pi-container.project.path` label points to a missing directory (or have no path label at all) are automatically removed, preventing disk-space leaks from deleted or moved workspaces.
+- Pre-build stale image cleanup: before building a new project-specific image, old images for the same project with mismatched content hashes are removed.
+
+### Changed
+- Image tag format: `pi-coding-agent-<hash>.local` → `pi-container-project-<project-hash>-<image-hash>.local` (distinct prefix prevents accidental pruning).
+- `build_project_image()` accepts `project_hash`, `project_path`, and `build_timestamp` parameters for label injection.
+- `Containerfile` sets `pi-container.project.path`, `pi-container.project.hash`, `pi-container.build.time`, and `pi-container.type` labels.
+
 ### Fixed
 - Fixed OOM errors when building project-specific agent containers with podman's default 2GB RAM limit (`e166a05`).
 

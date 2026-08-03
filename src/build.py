@@ -104,7 +104,14 @@ def build_agent(runtime: str) -> None:
 
 
 def build_project_image(
-    runtime: str, root_commands_path: str, pi_commands_path: str, image_tag: str, label_hash: str
+    runtime: str,
+    root_commands_path: str,
+    pi_commands_path: str,
+    image_tag: str,
+    label_hash: str,
+    project_hash: str = "",
+    project_path: str = "",
+    build_timestamp: str = "",
 ) -> None:
     """Build a project-specific agent image with baked-in command scripts.
 
@@ -112,27 +119,40 @@ def build_project_image(
         runtime: Container runtime (docker or podman).
         root_commands_path: Absolute path to root/commands.sh on the host.
         pi_commands_path: Absolute path to pi/commands.sh on the host.
-        image_tag: Image tag for the project-specific image (e.g., "pi-coding-agent-<hash>.local").
+        image_tag: Image tag for the project-specific image
+            (e.g., "pi-container-project-<hash>-<hash>.local").
         label_hash: Content hash to store in the image label for cache invalidation.
+        project_hash: Project identity hash → set as pi-container.project.hash label.
+        project_path: Absolute project directory path → set as pi-container.project.path label.
+        build_timestamp: ISO 8601 timestamp → set as pi-container.build.time label.
     """
     logger.info(f"Building project-specific agent image ({runtime}): {image_tag}")
-    _run_command_with_logging(
-        [
-            runtime,
-            "build",
-            "--build-context",
-            f"root_commands_path={Path(root_commands_path).parent}",
-            "--build-arg",
-            f"ROOT_COMMANDS_PATH={Path(root_commands_path).name}",
-            "--build-arg",
-            f"LABEL_HASH={label_hash}",
-            "--tag",
-            image_tag,
-            "--file",
-            str(REPO_ROOT / "pi-coding-agent" / "Containerfile"),
-            str(REPO_ROOT),
-        ],
-    )
+    cmd = [
+        runtime,
+        "build",
+        "--build-context",
+        f"root_commands_path={Path(root_commands_path).parent}",
+        "--build-arg",
+        f"ROOT_COMMANDS_PATH={Path(root_commands_path).name}",
+        "--build-arg",
+        f"LABEL_HASH={label_hash}",
+    ]
+    if project_hash:
+        cmd += ["--build-arg", f"PROJECT_HASH={project_hash}"]
+    if project_path:
+        cmd += ["--build-arg", f"PROJECT_PATH={project_path}"]
+    if build_timestamp:
+        cmd += ["--build-arg", f"BUILD_TIMESTAMP={build_timestamp}"]
+    cmd += [
+        "--label",
+        "pi-container.type=project",
+        "--tag",
+        image_tag,
+        "--file",
+        str(REPO_ROOT / "pi-coding-agent" / "Containerfile"),
+        str(REPO_ROOT),
+    ]
+    _run_command_with_logging(cmd)
 
 
 def main() -> None:

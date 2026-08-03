@@ -18,6 +18,7 @@ from build import (
     PROXY_IMAGE_TAG,
     REPO_ROOT,
     build_agent,
+    build_project_image,
     build_proxy,
     main,
 )
@@ -130,3 +131,104 @@ class TestMain:
         ):
             main()
             mock_exit.assert_called_once_with(1)
+
+
+# ---------------------------------------------------------------------------
+# build_project_image
+# ---------------------------------------------------------------------------
+
+
+class TestBuildProjectImage:
+    def _mock_popen(self):
+        """Return a mock Popen that completes successfully with no output."""
+        mock_process = MagicMock()
+        mock_process.stdout = iter([])
+        mock_process.wait.return_value = 0
+        return mock_process
+
+    def test_build_project_image_calls_runtime(self):
+        """build_project_image should invoke the container runtime with correct args."""
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
+            build_project_image(
+                "docker",
+                "/path/to/root/commands.sh",
+                "/path/to/pi/commands.sh",
+                "pi-coding-agent-test.local",
+                "abc123",
+            )
+            mock_popen.assert_called_once()
+            cmd = mock_popen.call_args[0][0]
+            assert cmd[0] == "docker"
+            assert cmd[1] == "build"
+            assert "--tag" in cmd
+            assert "pi-coding-agent-test.local" in cmd
+            assert "LABEL_HASH=abc123" in cmd
+            # Should include the Containerfile path
+            assert any("Containerfile" in str(c) for c in cmd)
+
+    def test_build_project_image_includes_project_hash(self):
+        """When project_hash is provided, it should be passed as a build arg."""
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
+            build_project_image(
+                "docker",
+                "/path/to/root/commands.sh",
+                "/path/to/pi/commands.sh",
+                "pi-container-project-a1b2c-d4e5f.local",
+                "abc123",
+                project_hash="a1b2c",
+                build_timestamp="2025-01-01T00:00:00Z",
+            )
+            cmd = mock_popen.call_args[0][0]
+            assert "--build-arg" in cmd
+            cmd.index("--build-arg")
+            # PROJECT_HASH should appear after LABEL_HASH
+            label_idx = cmd.index("LABEL_HASH=abc123")
+            project_idx = cmd.index("PROJECT_HASH=a1b2c")
+            assert project_idx > label_idx
+
+    def test_build_project_image_includes_build_timestamp(self):
+        """When build_timestamp is provided, it should be passed as a build arg."""
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
+            build_project_image(
+                "docker",
+                "/path/to/root/commands.sh",
+                "/path/to/pi/commands.sh",
+                "pi-container-project-a1b2c-d4e5f.local",
+                "abc123",
+                project_hash="a1b2c",
+                build_timestamp="2025-01-01T00:00:00Z",
+            )
+            cmd = mock_popen.call_args[0][0]
+            assert "BUILD_TIMESTAMP=2025-01-01T00:00:00Z" in cmd
+
+    def test_build_project_image_includes_type_label(self):
+        """build_project_image should always set pi-container.type=project label."""
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
+            build_project_image(
+                "docker",
+                "/path/to/root/commands.sh",
+                "/path/to/pi/commands.sh",
+                "test.local",
+                "abc123",
+            )
+            cmd = mock_popen.call_args[0][0]
+            assert "--label" in cmd
+            label_idx = cmd.index("--label")
+            assert cmd[label_idx + 1] == "pi-container.type=project"
+
+    def test_build_project_image_without_optional_args(self):
+        """build_project_image should work without project_hash or build_timestamp."""
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
+            build_project_image(
+                "docker",
+                "/path/to/root/commands.sh",
+                "/path/to/pi/commands.sh",
+                "test.local",
+                "abc123",
+            )
+            cmd = mock_popen.call_args[0][0]
+            # No PROJECT_HASH or BUILD_TIMESTAMP build args should be present
+            for i, part in enumerate(cmd):
+                if part == "--build-arg":
+                    assert cmd[i + 1] != "PROJECT_HASH="
+                    assert cmd[i + 1] != "BUILD_TIMESTAMP="

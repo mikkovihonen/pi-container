@@ -222,6 +222,53 @@ class TestExportMitmwebFlows:
 
         assert a.exists() and b.exists()  # nothing attributed → nothing removed
 
+    def test_default_sessions_dir_when_none(self, tmp_path, monkeypatch):
+        """When sessions_dir=None, uses PROJECT_DIR/.pi-container/agent/sessions."""
+        monkeypatch.setattr(flow_export, "PROJECT_DIR", tmp_path)
+        sessions = tmp_path / ".pi-container" / "agent" / "sessions"
+        exports = tmp_path / ".pi-container" / "exports"
+        sessions.mkdir(parents=True, exist_ok=True)
+        exports.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions, "sid-from-default")
+        (exports / "flows-10.0.0.5.jsonl").write_text('{"id": "v4"}\n')
+
+        out = flow_export.export_mitmweb_flows(exports_dir=exports, client_ips=["10.0.0.5"])
+        assert out is not None
+        assert json.loads(out.read_text())["id"] == "v4"
+
+    def test_invalid_session_id_returns_none(self, tmp_path):
+        """A session file with invalid JSON returns None."""
+        sessions = tmp_path / "sessions"
+        exports = tmp_path / "exports"
+        sessions.mkdir()
+        exports.mkdir()
+        # Write a valid session then overwrite with invalid JSON
+        session_file = sessions / "workspace" / "session.jsonl"
+        session_file.parent.mkdir(parents=True)
+        session_file.write_text('{"type": "session", "id": "valid"}\n')
+        session_file.write_text("not valid json {{{")
+        (exports / "flows-10.0.0.5.jsonl").write_text('{"id": "v4"}\n')
+
+        out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
+        assert out is None
+
+    def test_unlink_failure_logged_but_does_not_raise(self, tmp_path, monkeypatch):
+        """A failed raw file removal after successful export is logged but doesn't raise."""
+        sessions = tmp_path / "sessions"
+        exports = tmp_path / "exports"
+        sessions.mkdir()
+        exports.mkdir()
+        _make_session(sessions, "sid")
+        raw = exports / "flows-10.0.0.5.jsonl"
+        raw.write_text('{"id": "a"}\n')
+
+        with patch("pathlib.Path.unlink", side_effect=OSError("perm denied")):
+            out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
+
+        # Export still succeeds; raw file is kept because unlink failed
+        assert out is not None
+        assert raw.exists()
+
     def test_concatenation_adds_newline_between_files(self, tmp_path):
         """When two files are concatenated, a newline is inserted between them so
         line boundaries don't merge across files."""
@@ -302,3 +349,26 @@ class TestLoadFlowsFromMount:
     def test_empty_file_returns_empty_list(self, tmp_path):
         (tmp_path / "flows.jsonl").write_text("")
         assert flow_export._load_flows_from_mount(exports_dir=tmp_path) == []
+
+    def test_default_exports_dir_when_none(self, tmp_path, monkeypatch):
+        """When exports_dir=None, uses PROJECT_DIR/.pi-container/exports."""
+        monkeypatch.setattr(flow_export, "PROJECT_DIR", tmp_path)
+        exports = tmp_path / ".pi-container" / "exports"
+        exports.mkdir(parents=True, exist_ok=True)
+        (exports / "flows.jsonl").write_text('{"id": "default-path"}\n')
+        flows = flow_export._load_flows_from_mount(exports_dir=None)
+        assert [f["id"] for f in flows] == ["default-path"]
+
+    def test_oserror_on_read_returns_none(self, tmp_path, monkeypatch):
+        """OSError when reading flows file returns None."""
+        import os
+
+        # Create file then make it unreadable
+        flows_file = tmp_path / "flows.jsonl"
+        flows_file.write_text('{"id": "f1"}\n')
+        os.chmod(flows_file, 0o000)
+        try:
+            result = flow_export._load_flows_from_mount(exports_dir=tmp_path)
+            assert result is None
+        finally:
+            os.chmod(flows_file, 0o644)

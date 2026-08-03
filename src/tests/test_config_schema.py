@@ -360,6 +360,46 @@ class TestValidateModels:
         assert is_valid is False
         assert any("no following path" in e for e in errors)
 
+    def test_chat_template_path_with_seed_dir(self, tmp_path: Path):
+        """With seed_dir, .pi-container/ paths resolve relative to seed_dir."""
+        from template_paths import _resolve_chat_template_path
+
+        seed = tmp_path / "seed"
+        seed.mkdir()
+        resolved = _resolve_chat_template_path(
+            ".pi-container/chat-templates/foo/chat_template.jinja",
+            tmp_path / "models.json",
+            seed_dir=seed,
+        )
+        assert resolved == seed / "chat-templates/foo/chat_template.jinja"
+
+    def test_chat_template_path_with_pi_coding_agent_prefix(self, tmp_path: Path):
+        """Seed templates with pi-coding-agent/default/ prefix resolve under seed_dir."""
+        from template_paths import _resolve_chat_template_path
+
+        seed = tmp_path / "repo"
+        seed.mkdir()
+        # Include pi-coding-agent in the path so the seed-template branch fires
+        models = seed / "pi-coding-agent" / "default" / "agent" / "models.json"
+        models.parent.mkdir(parents=True, exist_ok=True)
+        resolved = _resolve_chat_template_path(
+            ".pi-container/chat-templates/foo/chat_template.jinja",
+            models,
+        )
+        assert resolved == seed / "pi-coding-agent" / "default" / "chat-templates/foo/chat_template.jinja"
+
+    def test_chat_template_path_other_prefix(self, tmp_path: Path):
+        """Other paths resolve relative to models.json parent."""
+        from template_paths import _resolve_chat_template_path
+
+        models = tmp_path / "agent" / "models.json"
+        models.parent.mkdir(parents=True, exist_ok=True)
+        resolved = _resolve_chat_template_path(
+            "relative/template.jinja",
+            models,
+        )
+        assert resolved == tmp_path / "agent" / "relative" / "template.jinja"
+
     def test_chat_template_path_with_existing_file(self, tmp_path: Path):
         """When --chat-template-file points to an existing file, validation passes."""
         import json
@@ -412,6 +452,53 @@ class TestValidateModels:
         is_valid, errors = validate_models(models_path)
         assert is_valid is True
         assert errors == []
+
+    def test_flags_not_a_list_skipped(self, tmp_path: Path):
+        """When flags is not a list, the provider is skipped (no error)."""
+        from template_paths import _check_chat_template_paths
+
+        errors: list[str] = []
+        data = {
+            "providers": {
+                "local-test": {
+                    "serverCustomParameters": {
+                        "flags": "not-a-list",
+                    },
+                },
+            },
+        }
+        _check_chat_template_paths(data, tmp_path / "models.json", errors)
+        assert errors == []
+
+    def test_chat_template_path_non_string_flag(self, tmp_path: Path):
+        """When --chat-template-file's value is not a string, validation fails."""
+        import json
+
+        from config_schema import validate_models
+
+        pi_container = tmp_path / ".pi-container"
+        agent_dir = pi_container / "agent"
+        agent_dir.mkdir(parents=True)
+        models_path = agent_dir / "models.json"
+        models_path.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "local-test": {
+                            "serverCustomParameters": {
+                                "flags": [
+                                    "--chat-template-file",
+                                    42,  # not a string
+                                ],
+                            },
+                        },
+                    },
+                },
+            )
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("path is not a string" in e for e in errors)
 
     def test_hf_models_null(self, tmp_path: Path):
         """When hfModels is null, validation fails."""
@@ -506,3 +593,155 @@ class TestValidateModels:
         is_valid, errors = validate_models(models_path)
         assert is_valid is False
         assert any("fileFlag" in e and "must not be null" in e for e in errors)
+
+    def test_hf_models_not_a_dict(self, tmp_path: Path):
+        """When hfModels is not a dict, validation fails."""
+        import json
+
+        from config_schema import validate_models
+
+        pi_container = tmp_path / ".pi-container"
+        agent_dir = pi_container / "agent"
+        agent_dir.mkdir(parents=True)
+        models_path = agent_dir / "models.json"
+        models_path.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "local-test": {
+                            "serverCustomParameters": {
+                                "flags": [],
+                                "hfModels": "not-a-dict",
+                            },
+                        },
+                    },
+                },
+            )
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("expected dict, got str" in e for e in errors)
+
+    def test_hf_models_invalid_field_type(self, tmp_path: Path):
+        """When a required hfModels field has wrong type, validation fails."""
+        import json
+
+        from config_schema import validate_models
+
+        pi_container = tmp_path / ".pi-container"
+        agent_dir = pi_container / "agent"
+        agent_dir.mkdir(parents=True)
+        models_path = agent_dir / "models.json"
+        models_path.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "local-test": {
+                            "serverCustomParameters": {
+                                "flags": [],
+                                "hfModels": {
+                                    "main": {
+                                        "fileFlag": "--model",
+                                        "repo": "test/repo",
+                                        "file": 42,  # should be string
+                                        "dir": "model-dir",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            )
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("expected str, got int" in e for e in errors)
+
+    def test_hf_models_model_config_not_dict(self, tmp_path: Path):
+        """When a model config is not a dict, validation reports error."""
+        import json
+
+        from config_schema import validate_models
+
+        pi_container = tmp_path / ".pi-container"
+        agent_dir = pi_container / "agent"
+        agent_dir.mkdir(parents=True)
+        models_path = agent_dir / "models.json"
+        models_path.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "local-test": {
+                            "serverCustomParameters": {
+                                "flags": [],
+                                "hfModels": {
+                                    "main": "not-a-dict",
+                                },
+                            },
+                        },
+                    },
+                },
+            )
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("expected dict, got str" in e for e in errors)
+
+    def test_flags_with_non_string_item(self, tmp_path: Path):
+        """When flags contain non-str/int/float items, validation fails."""
+        import json
+
+        from config_schema import validate_models
+
+        pi_container = tmp_path / ".pi-container"
+        agent_dir = pi_container / "agent"
+        agent_dir.mkdir(parents=True)
+        models_path = agent_dir / "models.json"
+        models_path.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "local-test": {
+                            "serverCustomParameters": {
+                                "flags": [
+                                    "--ctx-size",
+                                    4096,
+                                    None,  # invalid
+                                ],
+                            },
+                        },
+                    },
+                },
+            )
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("expected str/int/float, got NoneType" in e for e in errors)
+
+
+class TestSchemaCommonDirect:
+    """Direct tests for schema_common helpers (bypassing validate_models)."""
+
+    def test_validate_models_flags_with_invalid_item(self):
+        """When flags contain non-str/int/float items, validation fails."""
+        from schema_common import _validate_models_flags
+
+        errors = _validate_models_flags(["--ctx-size", 4096, None], "test.flags")
+        assert len(errors) == 1
+        assert "expected str/int/float, got NoneType" in errors[0]
+
+    def test_validate_hf_models_with_non_dict(self):
+        """When hfModels is not a dict, validation fails."""
+        from schema_common import _validate_hf_models
+
+        errors = _validate_hf_models("not-a-dict", "test-provider")
+        assert len(errors) == 1
+        assert "expected dict, got str" in errors[0]
+
+    def test_validate_hf_models_with_none(self):
+        """When hfModels is None, validation fails."""
+        from schema_common import _validate_hf_models
+
+        errors = _validate_hf_models(None, "test-provider")
+        assert len(errors) == 1
+        assert "must not be null" in errors[0]

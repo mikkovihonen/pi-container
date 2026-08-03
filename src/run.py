@@ -12,7 +12,8 @@ import subprocess
 import threading
 import uuid
 from contextlib import ExitStack
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import urlparse
 
 from build import build_project_image
@@ -49,9 +50,6 @@ from util import (
     handle_signal,
     validate_environment,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -238,12 +236,16 @@ def _resolve_agent_image(project_dir: Path) -> tuple[str, bool]:
     """Resolve the agent image tag for this workspace.
 
     If dependency files exist and are non-empty, returns a project-specific image
-    tag (e.g., "pi-coding-agent-<hash>.local"). Otherwise, returns the shared
-    image tag (IMAGE_TAG).
+    tag (e.g., "pi-container-project-<hash>-<hash>.local"). Otherwise, returns
+    the shared image tag (IMAGE_TAG).
 
     The hash includes Containerfile and entrypoint.sh to detect image definition
     changes, but the decision to use a project-specific image is based only on
     whether dependency files exist.
+
+    The tag includes the project's identity hash so images for different
+    workspaces never collide, and so stale images can be discovered and removed
+    per-project.
 
     Returns:
         Tuple of (image_tag, is_project_specific).
@@ -251,8 +253,11 @@ def _resolve_agent_image(project_dir: Path) -> tuple[str, bool]:
     if not _has_dependency_files(project_dir):
         return IMAGE_TAG, False
 
+    project_hash, _ = _project_scope(project_dir)
+    # _project_scope returns "pi-proxy-<key>" — extract just the 10-char key.
+    key = project_hash.split("pi-proxy-")[1]
     image_hash = _compute_image_hash(project_dir)
-    project_image_tag = f"pi-coding-agent-{image_hash}.local"
+    project_image_tag = f"pi-container-project-{key}-{image_hash}.local"
     return project_image_tag, True
 
 
@@ -329,6 +334,184 @@ def _image_is_current(project_dir: Path, image_tag: str, current_hash: str) -> b
 
     # Compare hashes
     return stored_hash == current_hash
+
+
+# ─── Image lifecycle helpers ──────────────────────────────────────────────
+
+
+def now_iso() -> str:
+    """Return the current UTC time as an ISO 8601 string."""
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _remove_image(runtime: str, image_tag: str) -> bool:
+    """Remove a container image by tag.
+
+    Returns True on success, False if the image could not be removed.
+    """
+    try:
+        result = subprocess.run(
+            [runtime, "image", "rm", image_tag],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            logger.info(f"Removed image: {image_tag}")
+            return True
+        else:
+            logger.warning(f"Could not remove image {image_tag}: {result.stderr.strip()}")
+            return False
+    except Exception as e:
+        logger.warning(f"Could not remove image {image_tag}: {e}")
+        return False
+
+
+def _list_project_images(
+    runtime: str,
+    project_hash: str,
+) -> list[tuple[str, str]]:
+    """List all project-specific images for a given project hash.
+
+    Returns a list of ``(tag, content_hash)`` tuples. Images whose
+    ``pi-container.project.hash`` label doesn't match ``project_hash`` are
+    excluded. Images without labels are returned with an empty content_hash.
+
+    Raises warnings (but does not raise exceptions) if the container runtime
+    is unavailable.
+    """
+    images: list[tuple[str, str]] = []
+    try:
+        result = subprocess.run(
+            [
+                runtime,
+                "image",
+                "ls",
+                "--format",
+                "{{.Repository}}:{{.Tag}}",
+                "--filter",
+                "label=pi-container.type=project",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        logger.warning(f"Could not list project images: {e}")
+        return images
+
+    for tag in result.stdout.strip().splitlines():
+        tag = tag.strip()
+        if not tag:
+            continue
+        label_hash = _get_image_label(tag, "pi-container.hash") or ""
+        images.append((tag, label_hash))
+    return images
+
+
+def _cleanup_stale_project_images(
+    runtime: str,
+    project_dir: Path,
+    project_hash: str,
+    new_hash: str,
+) -> list[str]:
+    """Find and remove project-specific images that are stale for this project.
+
+    Strategy:
+      1. Enumerate all images with label ``pi-container.type=project``.
+      2. Filter to those whose ``pi-container.project.hash`` label matches
+         ``project_hash`` (the current project).
+      3. Among those, remove any whose ``pi-container.hash`` != ``new_hash``
+         (the new content hash).
+      4. If an image already matches ``new_hash``, no build is needed (cache
+         hit — caller checks this separately).
+
+    Returns the list of removed image tags.
+
+    Images belonging to *other* projects (different ``project_hash``) are
+    never touched.
+    """
+    removed: list[str] = []
+    try:
+        all_images = _list_project_images(runtime, project_hash)
+    except Exception as e:
+        logger.warning(f"Failed to list project images during cleanup: {e}")
+        return removed
+
+    for tag, stored_hash in all_images:
+        # Skip images that already match the new hash (cache hit).
+        if stored_hash == new_hash:
+            continue
+        # Skip images that don't have a pi-container.project.hash label
+        # (they may be from a previous version — leave them for a future
+        # migration pass).
+        stored_project_hash = _get_image_label(tag, "pi-container.project.hash")
+        if stored_project_hash is None:
+            continue
+        if stored_project_hash != project_hash:
+            continue
+        # This image is stale — remove it.
+        if _remove_image(runtime, tag):
+            removed.append(tag)
+    return removed
+
+
+def _cleanup_orphaned_project_images(runtime: str) -> list[str]:
+    """Remove project images whose source project no longer exists.
+
+    An image is considered orphaned if:
+    - It has no `pi-container.project.path` label (older images, unverifiable), OR
+    - Its `pi-container.project.path` label points to a path that doesn't exist.
+
+    Only images with a path label pointing to an **existing** directory are kept.
+
+    Returns the list of removed image tags.
+    """
+    removed: list[str] = []
+    try:
+        # List ALL project-specific images (regardless of project hash).
+        result = subprocess.run(
+            [
+                runtime,
+                "image",
+                "ls",
+                "--format",
+                "{{.Repository}}:{{.Tag}}",
+                "--filter",
+                "label=pi-container.type=project",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        logger.warning(f"Could not list project images for orphan cleanup: {e}")
+        return removed
+
+    for tag in result.stdout.strip().splitlines():
+        tag = tag.strip()
+        if not tag:
+            continue
+
+        stored_path = _get_image_label(tag, "pi-container.project.path")
+
+        if stored_path is None:
+            # No path label — cannot verify this image belongs to an active project.
+            logger.info(f"Orphaned project image (no path label): {tag}")
+            if _remove_image(runtime, tag):
+                removed.append(tag)
+            continue
+
+        # If the stored path no longer exists, the image is orphaned.
+        if not Path(stored_path).exists():
+            logger.info(f"Orphaned project image (path gone): {tag} ({stored_path})")
+            if _remove_image(runtime, tag):
+                removed.append(tag)
+
+    return removed
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────
@@ -474,6 +657,28 @@ def main() -> None:
                 agent_image_tag, is_project_specific = _resolve_agent_image(PROJECT_DIR)
                 if is_project_specific:
                     label_hash = _compute_image_hash(PROJECT_DIR)
+                    project_hash, _ = _project_scope(PROJECT_DIR)
+                    project_path = str(PROJECT_DIR.resolve())
+
+                    # 1. Cleanup orphaned images from deleted projects.
+                    #    Reads pi-container.project.path from each image;
+                    #    removes images whose stored path no longer exists.
+                    orphaned = _cleanup_orphaned_project_images(CONTAINER_RUNTIME)
+                    if orphaned:
+                        logger.info(f"Removed {len(orphaned)} orphaned project image(s): {', '.join(orphaned)}")
+
+                    # 2. Cleanup stale images for this project BEFORE deciding to build.
+                    #    This removes old project-specific images whose content hash
+                    #    no longer matches the current definition files, preventing
+                    #    disk-space leaks from orphaned images.
+                    removed = _cleanup_stale_project_images(
+                        CONTAINER_RUNTIME,
+                        PROJECT_DIR,
+                        project_hash,
+                        label_hash,
+                    )
+                    if removed:
+                        logger.info(f"Removed {len(removed)} stale project image(s): {', '.join(removed)}")
                     if not _image_is_current(PROJECT_DIR, agent_image_tag, label_hash):
                         logger.info(f"Building project-specific agent image: {agent_image_tag}")
                         root_commands_path = str(
@@ -486,6 +691,9 @@ def main() -> None:
                             pi_commands_path,
                             agent_image_tag,
                             label_hash,
+                            project_hash=project_hash,
+                            project_path=project_path,
+                            build_timestamp=now_iso(),
                         )
                     else:
                         logger.info(f"Using cached project-specific image: {agent_image_tag}")

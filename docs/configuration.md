@@ -350,7 +350,7 @@ git clone https://github.com/example/repo.git
 **How it works:**
 
 1. On first run, pi-container seeds both files from templates in `pi-coding-agent/default/dependencies/`.
-2. When definition files exist and are non-empty, pi-container computes a content hash and builds a project-specific image with the scripts baked in. The hash is stored as a label (`pi-container.hash`) on the image for cache invalidation.
+2. When definition files exist and are non-empty, pi-container computes a content hash and builds a **project-specific image** with the scripts baked in. The image is tagged `pi-container-project-<project-hash>-<image-hash>.local` and carries labels (`pi-container.hash`, `pi-container.project.hash`, `pi-container.build.time`, `pi-container.type`) for cache invalidation and discovery.
 3. At **build time**, `root/commands.sh` executes (system-wide setup: apt, npm globals). At **runtime**, `pi/commands.sh` executes via the entrypoint (workspace-local setup: venvs, cloned repos).
 4. If definition files are empty or absent, the workspace uses the shared base image (no project-specific build).
 
@@ -359,29 +359,73 @@ git clone https://github.com/example/repo.git
 - `root/commands.sh` runs at **build time** because it installs system-wide packages (apt, npm globals) that should be baked into the image. These persist across container runs.
 - `pi/commands.sh` runs at **runtime** because it creates workspace-local artifacts (venvs, cloned repos) in the bind-mounted workspace. If these were created at build time, they would be hidden by the bind mount at runtime.
 
-**Image caching:**
+**Image caching and cleanup:**
 
 Project-specific images are cached and reused across runs. pi-container computes a content hash of:
 - `.pi-container/dependencies/root/commands.sh` (if it exists and is non-empty)
-- `.pi-container/dependencies/pi/commands.sh` (if it exists and is non-empty)
 - `pi-coding-agent/Containerfile` (always)
 - `pi-coding-agent/entrypoint.sh` (always)
 
-The hash is stored as a label (`pi-container.hash`) on the image. On each run, pi-container reads this label and compares it to the current hash. If they match, the cached image is used (no rebuild). If they differ (or the label is missing), a new image is built.
+The hash is stored as the `pi-container.hash` label on the image. The image tag is `pi-container-project-<project-hash>-<image-hash>.local`, where:
+- `<project-hash>` is the first 10 characters of `SHA-256(str(project_dir.resolve()))` — the same hash used for proxy and network naming (`pi-proxy-<hash>`, `pi-isolated-net-<hash>`).
+- `<image-hash>` is the first 16 characters of the content digest computed from `root/commands.sh`, `Containerfile`, and `entrypoint.sh`.
+
+On each run, pi-container:
+1. Enumerates all existing project-specific images (those with the `pi-container.type=project` label).
+2. Removes any images whose `pi-container.project.hash` matches this project but whose `pi-container.hash` differs from the current content hash.
+3. If no image matches the current hash, builds a new one.
+4. If an image already matches, uses it (no rebuild).
 
 This enables:
-- **Cross-workspace sharing**: Two workspaces with identical definition files compute the same hash and share one image.
-- **Automatic invalidation**: Editing a definition file, the Containerfile, or the entrypoint triggers a rebuild on the next run.
-- **Migration**: Images built before this feature (no label) are treated as stale and rebuilt with the label.
+- **Automatic invalidation**: Editing a definition file, the Containerfile, or the entrypoint triggers a rebuild on the next run, and the old image is removed.
+- **Per-project isolation**: Images from different workspaces never collide, even with identical definition files.
+- **Disk-space management**: Stale project-specific images are cleaned up automatically.
+- **Orphan detection**: When a project directory is deleted, its images are automatically removed on the next run of any project (not just the deleted one). See [Orphan Detection](#orphan-detection).
 
-**Note on workspace-local artifacts:** Venvs, cloned repos, and other workspace-local artifacts created by `pi/commands.sh` are NOT cached across container runs. The image cache only applies to system-wide setup from `root/commands.sh` and the image definition itself.
+**Orphan detection:**
+
+Each project-specific image stores the absolute path of its source project directory in the `pi-container.project.path` label. On every run, pi-container scans all project images and removes any that don't have a verifiable source project. An image is removed if:
+
+- Its `pi-container.project.path` label points to a path that no longer exists (deleted project), OR
+- It has **no** `pi-container.project.path` label (older images from before this feature — unverifiable).
+
+Only images with a path label pointing to an **existing** directory are kept. This handles:
+
+- **Deleted projects**: Images from removed workspaces are cleaned up automatically.
+- **Moved projects**: Images retain the old path label → detected as orphaned and removed. New builds use the new path.
+- **Legacy images**: Images without a path label (from older versions) are removed as unverifiable.
+
+**Build function parameters:**
+
+The `build_project_image()` function in `src/build.py` accepts the following parameters:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `runtime` | `str` | Yes | Container runtime (`docker` or `podman`) |
+| `root_commands_path` | `str` | Yes | Absolute path to `root/commands.sh` on the host |
+| `pi_commands_path` | `str` | Yes | Absolute path to `pi/commands.sh` on the host |
+| `image_tag` | `str` | Yes | Image tag (format: `pi-container-project-<project-hash>-<image-hash>.local`) |
+| `label_hash` | `str` | Yes | Content hash for cache invalidation |
+| `project_hash` | `str` | No | Project identity hash → set as `pi-container.project.hash` label |
+| `project_path` | `str` | No | Absolute project directory path → set as `pi-container.project.path` label (enables orphan detection) |
+| `build_timestamp` | `str` | No | ISO 8601 timestamp → set as `pi-container.build.time` label |
+
+**Image labels:**
+
+| Label | Purpose | How it's calculated |
+|-------|---------|---------------------|
+| `pi-container.hash` | Content hash for cache invalidation. Compares against current definition files. | SHA-256 of concatenated hashes of: `.pi-container/dependencies/root/commands.sh` (if present), `pi-coding-agent/Containerfile`, `pi-coding-agent/entrypoint.sh` → 16-char hex digest |
+| `pi-container.project.hash` | Project identity hash. Links the image to its source workspace. | First 10 chars of SHA-256 of the absolute project directory path → 10-char hex digest |
+| `pi-container.project.path` | **Absolute path of the project directory at build time.** Used for orphan detection — if the path no longer exists, the image is automatically removed on the next run. | Stored as-is from `PROJECT_DIR.resolve()` at build time |
+| `pi-container.build.time` | ISO 8601 timestamp of the build. Used for age-based discovery. | UTC timestamp at build time in ISO 8601 format (e.g., `2024-01-15T12:30:45Z`) |
+| `pi-container.type` | Set to `"project"` for project-specific images (enables system-wide discovery via `docker image ls --filter label=pi-container.type=project`). | Always set to `"project"` by `build_project_image()` |
 
 **Key principles:**
 
 - The shared base image contains only packages essential to pi itself (see [Shared Base apt Packages](project-specific-containers.md#shared-base-apt-packages)).
 - Any additional packages must be installed via `root/commands.sh`.
 - Both files are optional — if absent, the workspace uses the shared image.
-- Changes to definition files trigger a rebuild on the next `run.sh` invocation (detected via image label comparison).
+- Changes to definition files trigger a rebuild on the next `run.sh` invocation (detected via image label comparison), and old images are removed automatically.
 
 ### Allowlist
 

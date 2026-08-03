@@ -8,6 +8,9 @@ Run with:
 import re
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -262,12 +265,12 @@ class TestResolveAgentImage:
         (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
         (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
         tag, is_project = run._resolve_agent_image(repo)
-        assert tag.startswith("pi-coding-agent-")
+        assert tag.startswith("pi-container-project-")
         assert tag.endswith(".local")
         assert is_project is True
 
     def test_project_tag_includes_hash(self, tmp_path):
-        """Project image tag includes content hash."""
+        """Project image tag includes project hash and content hash."""
         repo = tmp_path / "repo"
         deps = repo / ".pi-container" / "dependencies"
         deps.parent.mkdir(parents=True, exist_ok=True)
@@ -280,8 +283,42 @@ class TestResolveAgentImage:
         (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
         (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
         tag, _ = run._resolve_agent_image(repo)
-        # Tag should be pi-coding-agent-<hash>.local
-        assert re.fullmatch(r"pi-coding-agent-[0-9a-f]{16}\.local", tag)
+        # Tag format: pi-container-project-<project-hash>-<content-hash>.local
+        # project-hash is 10 hex chars, content-hash is 16 hex chars
+        assert re.fullmatch(r"pi-container-project-[0-9a-f]{10}-[0-9a-f]{16}\.local", tag)
+
+    def test_project_tag_differs_across_repos(self, tmp_path):
+        """Different project dirs produce different image tags."""
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        for d in (a, b):
+            deps = d / ".pi-container" / "dependencies"
+            deps.parent.mkdir(parents=True, exist_ok=True)
+            deps.mkdir(parents=True, exist_ok=True)
+            (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+            (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
+            pi_agent = d / "pi-coding-agent"
+            pi_agent.mkdir(parents=True, exist_ok=True)
+            (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
+            (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+        tag_a, _ = run._resolve_agent_image(a)
+        tag_b, _ = run._resolve_agent_image(b)
+        assert tag_a != tag_b
+
+    def test_project_tag_same_dir_same_tag(self, tmp_path):
+        """Same project dir produces the same image tag on repeated calls."""
+        deps = tmp_path / ".pi-container" / "dependencies"
+        deps.parent.mkdir(parents=True, exist_ok=True)
+        deps.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
+        pi_agent = tmp_path / "pi-coding-agent"
+        pi_agent.mkdir(parents=True, exist_ok=True)
+        (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
+        (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+        tag1, _ = run._resolve_agent_image(tmp_path)
+        tag2, _ = run._resolve_agent_image(tmp_path)
+        assert tag1 == tag2
 
 
 class TestGetImageLabel:
@@ -377,3 +414,413 @@ class TestImageIsCurrent:
         (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
         result = run._image_is_current(project_dir=tmp_path, image_tag="test:latest", current_hash="abc123")
         assert result is False
+
+
+class TestNowIso:
+    def test_returns_iso_format(self):
+        """now_iso() returns an ISO 8601 formatted string."""
+        result = run.now_iso()
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", result)
+
+
+class TestRemoveImage:
+    def test_removes_image_on_success(self, monkeypatch):
+        """_remove_image calls image rm and returns True on success."""
+        from unittest.mock import MagicMock
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+        monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
+        result = run._remove_image("docker", "some-image:latest")
+        assert result is True
+
+    def test_returns_false_on_failure(self, monkeypatch):
+        """_remove_image returns False when the runtime command fails."""
+        from unittest.mock import MagicMock
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        mock_result.stderr = "Error: image not found"
+        monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
+        result = run._remove_image("docker", "nonexistent:latest")
+        assert result is False
+
+    def test_handles_exception(self, monkeypatch):
+        """_remove_image returns False on exception."""
+        import subprocess
+
+        monkeypatch.setattr(
+            run.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired("cmd", 30))
+        )
+        result = run._remove_image("docker", "slow-image:latest")
+        assert result is False
+
+
+class TestListProjectImages:
+    def test_returns_empty_when_no_images(self, monkeypatch):
+        """_list_project_images returns [] when no project images exist."""
+        from unittest.mock import MagicMock
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+        monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
+        result = run._list_project_images("docker", "project-hash")
+        assert result == []
+
+    def test_returns_images_for_matching_project(self, monkeypatch):
+        """_list_project_images returns images with matching project hash."""
+        from unittest.mock import MagicMock
+
+        mock_ls_result = MagicMock()
+        mock_ls_result.returncode = 0
+        mock_ls_result.stdout = (
+            "pi-container-project-a1b2c-1111111111111111.local\npi-container-project-a1b2c-2222222222222222.local\n"
+        )
+
+        monkeypatch.setattr(
+            run,
+            "_get_image_label",
+            lambda tag, label_key: "a1b2c" if label_key == "pi-container.project.hash" else "1111111111111111",
+        )
+
+        # Mock image ls
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = (
+            "pi-container-project-a1b2c-1111111111111111.local\npi-container-project-a1b2c-2222222222222222.local\n"
+        )
+        monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
+
+        result = run._list_project_images("docker", "a1b2c")
+        assert len(result) == 2
+        # Each entry is (tag, content_hash)
+        for tag, _content_hash in result:
+            assert "a1b2c" in tag
+
+    def test_handles_runtime_failure(self, monkeypatch):
+        """_list_project_images returns [] when the runtime is unavailable."""
+        import subprocess
+
+        monkeypatch.setattr(
+            run.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired("cmd", 10))
+        )
+        result = run._list_project_images("docker", "project-hash")
+        assert result == []
+
+
+class TestCleanupStaleProjectImages:
+    def test_removes_stale_images(self, monkeypatch, tmp_path):
+        """_cleanup_stale_project_images removes images with mismatched hashes."""
+        project_hash = "a1b2c"
+        new_hash = "newhash1234567890"
+        stale_tag = f"pi-container-project-{project_hash}-oldhash1234567890.local"
+
+        def mock_subprocess_run(*args, **kwargs):
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = f"{stale_tag}\n"
+            m.stderr = ""
+            return m
+
+        monkeypatch.setattr(run.subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(
+            run,
+            "_get_image_label",
+            lambda tag, label_key: project_hash if label_key == "pi-container.project.hash" else "oldhash1234567890",
+        )
+
+        result = run._cleanup_stale_project_images(
+            "docker",
+            tmp_path,
+            project_hash,
+            new_hash,
+        )
+        assert stale_tag in result
+
+    def test_skips_images_matching_new_hash(self, monkeypatch, tmp_path):
+        """_cleanup_stale_project_images skips images whose hash matches new_hash."""
+        project_hash = "a1b2c"
+        new_hash = "newhash1234567890"
+        matching_tag = f"pi-container-project-{project_hash}-{new_hash}.local"
+
+        def mock_subprocess_run(*args, **kwargs):
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = f"{matching_tag}\n"
+            m.stderr = ""
+            return m
+
+        monkeypatch.setattr(run.subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(
+            run,
+            "_get_image_label",
+            lambda tag, label_key: project_hash if label_key == "pi-container.project.hash" else new_hash,
+        )
+
+        result = run._cleanup_stale_project_images(
+            "docker",
+            tmp_path,
+            project_hash,
+            new_hash,
+        )
+        assert result == []
+
+    def test_skips_other_projects_images(self, monkeypatch, tmp_path):
+        """_cleanup_stale_project_images does not touch images from other projects."""
+        this_hash = "a1b2c"
+        other_hash = "xyz99"
+        other_tag = f"pi-container-project-{other_hash}-somehash1234567.local"
+
+        def mock_subprocess_run(*args, **kwargs):
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = f"{other_tag}\n"
+            m.stderr = ""
+            return m
+
+        monkeypatch.setattr(run.subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(
+            run,
+            "_get_image_label",
+            lambda tag, label_key: other_hash if label_key == "pi-container.project.hash" else "somehash1234567",
+        )
+
+        result = run._cleanup_stale_project_images(
+            "docker",
+            tmp_path,
+            this_hash,
+            "newhash1234567890",
+        )
+        assert result == []
+
+
+class TestEnsureProjectConfigMissingTemplate:
+    def test_raises_when_template_missing(self, tmp_path, monkeypatch):
+        """_ensure_project_config raises FileNotFoundError when the template dir is absent."""
+        repo = tmp_path / "repo"
+        project = tmp_path / "project"
+        monkeypatch.setattr(run, "REPO_ROOT", repo)
+        monkeypatch.setattr(run, "PROJECT_DIR", project)
+        with pytest.raises(FileNotFoundError, match="Project config template not found"):
+            run._ensure_project_config()
+
+
+class TestGetImageLabelJsonFallback:
+    def test_falls_back_to_json_when_format_fails(self, monkeypatch):
+        """_get_image_label falls back to JSON inspect when --format output is empty."""
+        from unittest.mock import MagicMock
+
+        call_count = [0]
+
+        def mock_subprocess_run(*args, **kwargs):
+            m = MagicMock()
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call (--format) returns empty stdout
+                m.returncode = 0
+                m.stdout = ""
+                m.stderr = ""
+            else:
+                # Second call (JSON inspect) succeeds
+                m.returncode = 0
+                m.stdout = '[{"Config": {"Labels": {"pi-container.hash": "jsonhash123"}}}]\n'
+                m.stderr = ""
+            return m
+
+        monkeypatch.setattr(run.subprocess, "run", mock_subprocess_run)
+        result = run._get_image_label("test-image:latest", "pi-container.hash")
+        assert result == "jsonhash123"
+        assert call_count[0] == 2
+
+    def test_returns_none_when_both_fails(self, monkeypatch):
+        """_get_image_label returns None when both format and JSON inspect fail."""
+        from unittest.mock import MagicMock
+
+        def mock_subprocess_run(*args, **kwargs):
+            m = MagicMock()
+            m.returncode = 1
+            m.stdout = ""
+            m.stderr = "error"
+            return m
+
+        monkeypatch.setattr(run.subprocess, "run", mock_subprocess_run)
+        result = run._get_image_label("nonexistent:latest", "pi-container.hash")
+        assert result is None
+
+
+class TestImageIsCurrentShared:
+    def test_returns_true_for_shared_image(self, monkeypatch, tmp_path):
+        """_image_is_current returns True for shared (non-project) images."""
+        # Create a project with NO dependency files → shared image
+        monkeypatch.setattr(run, "_has_dependency_files", lambda d: False)
+        result = run._image_is_current(
+            project_dir=tmp_path,
+            image_tag="pi-coding-agent:local",
+            current_hash="anything",
+        )
+        assert result is True
+
+
+class TestCleanupStaleProjectImagesListFails:
+    def test_returns_empty_when_list_raises(self, monkeypatch, tmp_path):
+        """_cleanup_stale_project_images returns [] when _list_project_images raises."""
+        import subprocess
+
+        def mock_list(*args, **kwargs):
+            raise subprocess.TimeoutExpired("cmd", 10)
+
+        monkeypatch.setattr(run, "_list_project_images", mock_list)
+        result = run._cleanup_stale_project_images(
+            "docker",
+            tmp_path,
+            "a1b2c",
+            "newhash1234567890",
+        )
+        assert result == []
+
+
+class TestCleanupOrphanedProjectImages:
+    def test_removes_image_with_missing_path(self, monkeypatch):
+        """Images whose stored path no longer exists are removed."""
+        import subprocess as sp
+
+        # Mock the docker image ls output.
+        def mock_run(cmd, **kwargs):
+            class Result:
+                stdout = "pi-container-project-abc12-def3456789012345.local\n"
+                stderr = ""
+                returncode = 0
+
+            return Result()
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        # Mock _get_image_label to return a path that doesn't exist.
+        def mock_get_label(tag, label):
+            if label == "pi-container.project.path":
+                return "/nonexistent/project/path"
+            return None
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        # Mock _remove_image to track calls.
+        removed = []
+
+        def mock_remove(runtime, tag):
+            removed.append(tag)
+            return True
+
+        monkeypatch.setattr(run, "_remove_image", mock_remove)
+
+        result = run._cleanup_orphaned_project_images("docker")
+        assert len(result) == 1
+        assert "pi-container-project-abc12-def3456789012345.local" in result
+
+    def test_keeps_image_with_existing_path(self, monkeypatch):
+        """Images whose stored path still exists are NOT removed."""
+        import subprocess as sp
+
+        def mock_run(cmd, **kwargs):
+            class Result:
+                stdout = "pi-container-project-abc12-def3456789012345.local\n"
+                stderr = ""
+                returncode = 0
+
+            return Result()
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        def mock_get_label(tag, label):
+            if label == "pi-container.project.path":
+                return str(Path(__file__).parent)  # exists
+            return None
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        removed_count = [0]
+
+        def mock_remove(runtime, tag):
+            removed_count[0] += 1
+            return True
+
+        monkeypatch.setattr(run, "_remove_image", mock_remove)
+
+        result = run._cleanup_orphaned_project_images("docker")
+        assert len(result) == 0
+        assert removed_count[0] == 0
+
+    def test_removes_images_without_path_label(self, monkeypatch):
+        """Images without pi-container.project.path label are removed (unverifiable)."""
+        import subprocess as sp
+
+        def mock_run(cmd, **kwargs):
+            class Result:
+                stdout = "pi-container-project-abc12-def3456789012345.local\n"
+                stderr = ""
+                returncode = 0
+
+            return Result()
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        def mock_get_label(tag, label):
+            return None  # No path label
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        def mock_remove(runtime, tag):
+            return True
+
+        monkeypatch.setattr(run, "_remove_image", mock_remove)
+
+        result = run._cleanup_orphaned_project_images("docker")
+        assert len(result) == 1
+        assert "pi-container-project-abc12-def3456789012345.local" in result
+
+    def test_returns_empty_when_list_fails(self, monkeypatch):
+        """Returns [] when docker image ls fails."""
+        import subprocess as sp
+
+        def mock_run(cmd, **kwargs):
+            raise sp.TimeoutExpired("cmd", 10)
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        result = run._cleanup_orphaned_project_images("docker")
+        assert result == []
+
+    def test_removes_multiple_orphaned_images(self, monkeypatch):
+        """Multiple images without path labels are all removed."""
+        import subprocess as sp
+
+        def mock_run(cmd, **kwargs):
+            class Result:
+                stdout = (
+                    "pi-container-project-aaa11-bbb2222222222222.local\n"
+                    "pi-container-project-ccc33-ddd4444444444444.local\n"
+                    "pi-container-project-eee55-fff6666666666666.local\n"
+                )
+                stderr = ""
+                returncode = 0
+
+            return Result()
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        def mock_get_label(tag, label):
+            return None  # No path labels — all will be cleaned
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        def mock_remove(runtime, tag):
+            return True
+
+        monkeypatch.setattr(run, "_remove_image", mock_remove)
+
+        result = run._cleanup_orphaned_project_images("docker")
+        assert len(result) == 3

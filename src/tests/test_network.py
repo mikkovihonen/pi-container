@@ -591,3 +591,139 @@ class TestReadAgentExtras:
         extras = read_agent_extras(tmp_path)
         assert extras["capabilities"] == ["SYS_PTRACE", "NET_RAW"]
         assert extras["devices"] == ["/dev/video0:/dev/video0", "/dev/bus/usb:/dev/bus/usb:rw"]
+
+
+# ---------------------------------------------------------------------------
+# ContainerNetworkManager._preflight_ipv6_egress + warn_if_proxy_lacks_ipv6_egress
+# ---------------------------------------------------------------------------
+
+
+# Module-level logger capture hooks for ContainerNetworkManager methods.
+class _LogCapture:
+    def __init__(self):
+        self.warnings: list[str] = []
+        self.infos: list[str] = []
+
+    def warning(self, msg, *args, **kwargs):
+        self.warnings.append(msg % args if args else msg)
+
+    def info(self, msg, *args, **kwargs):
+        self.infos.append(msg % args if args else msg)
+
+
+class TestPreflightIpv6Egress:
+    def _make_manager(self):
+        mgr = ContainerNetworkManager(
+            container_runtime="docker",
+            network_name="test-net",
+            proxy_image="proxy:latest",
+            proxy_name="pi-proxy-test",
+        )
+        return mgr
+
+    def test_returns_early_when_runtime_lacks_ipv6_egress(self, monkeypatch):
+        """When runtime.ipv6_upstream_egress is False, preflight returns immediately."""
+        mgr = self._make_manager()
+        mgr.runtime.ipv6_upstream_egress = False
+        capture = _LogCapture()
+        monkeypatch.setattr("network.logger", capture)
+        mgr._preflight_ipv6_egress()
+        # The static-capability path returns early, upstream_network_has_ipv6
+        # should NOT have been called.
+        assert any("NATs IPv4 only" in w for w in capture.warnings)
+
+    def test_warns_when_upstream_network_lacks_ipv6(self, monkeypatch):
+        """When upstream network lacks IPv6, preflight logs a warning."""
+        mgr = self._make_manager()
+        mgr.runtime.ipv6_upstream_egress = True
+        monkeypatch.setattr(type(mgr.runtime), "upstream_network_has_ipv6", MagicMock(return_value=False))
+        capture = _LogCapture()
+        monkeypatch.setattr("network.logger", capture)
+        mgr._preflight_ipv6_egress()
+        assert any("not configured for IPv6" in w for w in capture.warnings)
+
+    def test_info_when_upstream_network_unknown(self, monkeypatch):
+        """When upstream network IPv6 status is None, preflight logs info."""
+        mgr = self._make_manager()
+        mgr.runtime.ipv6_upstream_egress = True
+        monkeypatch.setattr(type(mgr.runtime), "upstream_network_has_ipv6", MagicMock(return_value=None))
+        capture = _LogCapture()
+        monkeypatch.setattr("network.logger", capture)
+        mgr._preflight_ipv6_egress()
+        assert any("Could not determine IPv6 config" in m for m in capture.infos)
+
+
+class TestWarnIfProxyLacksIpv6Egress:
+    def _make_manager(self):
+        mgr = ContainerNetworkManager(
+            container_runtime="docker",
+            network_name="test-net",
+            proxy_image="proxy:latest",
+            proxy_name="pi-proxy-test",
+        )
+        return mgr
+
+    def test_warns_when_no_global_v6_address(self, monkeypatch):
+        """When proxy has no global IPv6 address, warns."""
+        mgr = self._make_manager()
+        addr_output = """eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 172.18.0.2  netmask 255.255.0.0  broadcast 172.18.255.255
+        inet6 fe80::0000:0000:0000:0000  prefixlen 64  scopeid 0x20<link>
+        ether 02:42:ac:12:00:02  txqueuelen 0  (Ethernet)
+"""
+        route_output = ""
+
+        def mock_run(cmd, **kwargs):
+            m = MagicMock()
+            if "addr" in cmd:
+                m.stdout = addr_output
+            elif "route" in cmd:
+                m.stdout = route_output
+            else:
+                m.stdout = ""
+            return m
+
+        monkeypatch.setattr("subprocess.run", mock_run)
+        capture = _LogCapture()
+        monkeypatch.setattr("network.logger", capture)
+        mgr.warn_if_proxy_lacks_ipv6_egress()
+        assert any("no working IPv6 egress" in w for w in capture.warnings)
+
+    def test_info_when_ipv6_egress_works(self, monkeypatch):
+        """When proxy has both global IPv6 address and default route, logs info."""
+        mgr = self._make_manager()
+        addr_output = """eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 172.18.0.2  netmask 255.255.0.0  broadcast 172.18.255.255
+        inet6 2001:db8::1/64 scope global
+        ether 02:42:ac:12:00:02  txqueuelen 0  (Ethernet)
+"""
+        route_output = "default via fe80::1 dev eth0"
+
+        def mock_run(cmd, **kwargs):
+            m = MagicMock()
+            if "addr" in cmd:
+                m.stdout = addr_output
+            elif "route" in cmd:
+                m.stdout = route_output
+            else:
+                m.stdout = ""
+            return m
+
+        monkeypatch.setattr("subprocess.run", mock_run)
+        capture = _LogCapture()
+        monkeypatch.setattr("network.logger", capture)
+        mgr.warn_if_proxy_lacks_ipv6_egress()
+        assert any("Proxy has IPv6 egress" in m for m in capture.infos)
+
+    def test_handles_exception(self, monkeypatch):
+        """warn_if_proxy_lacks_ipv6_egress returns gracefully on exception."""
+        import subprocess
+
+        mgr = self._make_manager()
+
+        def mock_run(cmd, **kwargs):
+            raise subprocess.TimeoutExpired(cmd, 5)
+
+        monkeypatch.setattr("subprocess.run", mock_run)
+        # Should not raise
+        mgr.warn_if_proxy_lacks_ipv6_egress()

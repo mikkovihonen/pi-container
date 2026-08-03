@@ -69,6 +69,9 @@ RUN npm set cafile /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.pem
 
 ARG ROOT_COMMANDS_PATH
 ARG LABEL_HASH
+ARG PROJECT_HASH=""
+ARG PROJECT_PATH=""
+ARG BUILD_TIMESTAMP=""
 
 COPY --from=root_commands_path ${ROOT_COMMANDS_PATH} /root/commands.sh
 
@@ -77,4 +80,8 @@ RUN chmod +x /root/commands.sh && /root/commands.sh
 WORKDIR /workspace
 
 LABEL pi-container.hash="${LABEL_HASH}"
+LABEL pi-container.project.hash="${PROJECT_HASH}"
+LABEL pi-container.project.path="${PROJECT_PATH}"
+LABEL pi-container.build.time="${BUILD_TIMESTAMP}"
+LABEL pi-container.type="project"
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
