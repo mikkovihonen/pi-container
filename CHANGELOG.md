@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Proxy image build timestamp: `build_proxy()` now sets `pi-container.build.time` and `pi-container.type=shared` labels on the proxy image, enabling age comparison with project-specific images.
+- Proxy certificate staleness detection: before building a project-specific image, `run.py` compares the proxy image's build time against the project image's build time. If the proxy is newer, the project image has a stale mitmproxy CA certificate and is automatically rebuilt.
+- `_get_image_build_time()` helper: reads the `pi-container.build.time` label from any image and returns a UTC datetime, or `None` if absent.
+
+### Changed
+- Missing build timestamps are now a hard error (`sys.exit(1)`) instead of silently proceeding — the project image cannot be trusted without verifiable build ordering.
+
+### Fixed
+- Project-specific images now stay in sync with the proxy image's mitmproxy CA certificate after `build.sh` rebuilds the proxy.
+
 ## [0.3.3] - 2026-08-03
 
 ### Added

@@ -58,6 +58,24 @@ class TestBuildProxy:
             tag_idx = cmd.index("--tag")
             assert cmd[tag_idx + 1] == PROXY_IMAGE_TAG
 
+    def test_includes_build_time_label(self):
+        """build_proxy should set pi-container.build.time label."""
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
+            build_proxy("docker")
+            cmd = mock_popen.call_args[0][0]
+            assert "--label" in cmd
+            labels = [cmd[i + 1] for i, c in enumerate(cmd) if c == "--label"]
+            assert any(lbl.startswith("pi-container.build.time=") for lbl in labels)
+            assert any(lbl == "pi-container.type=shared" for lbl in labels)
+
+    def test_includes_shared_type_label(self):
+        """build_proxy should set pi-container.type=shared label."""
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
+            build_proxy("docker")
+            cmd = mock_popen.call_args[0][0]
+            labels = [cmd[i + 1] for i, c in enumerate(cmd) if c == "--label"]
+            assert "pi-container.type=shared" in labels
+
     def test_build_agent_calls_runtime(self):
         """build_agent should invoke the container runtime with correct args."""
         with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:

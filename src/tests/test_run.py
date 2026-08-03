@@ -684,6 +684,57 @@ class TestCleanupStaleProjectImagesListFails:
         assert result == []
 
 
+class TestGetImageBuildTime:
+    """Tests for _get_image_build_time()."""
+
+    def test_returns_datetime_when_label_exists(self, monkeypatch):
+        """Returns a timezone-aware UTC datetime when the label is present."""
+
+        def mock_get_label(image_tag, label_key):
+            return "2025-01-15T12:30:00Z"
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+        result = run._get_image_build_time("test-image:latest")
+        assert result is not None
+        assert result.year == 2025
+        assert result.month == 1
+        assert result.day == 15
+        assert result.hour == 12
+        assert result.minute == 30
+        assert result.tzinfo is not None
+
+    def test_returns_none_when_label_missing(self, monkeypatch):
+        """Returns None when the build time label is absent."""
+
+        def mock_get_label(image_tag, label_key):
+            return None
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+        result = run._get_image_build_time("test-image:latest")
+        assert result is None
+
+    def test_returns_none_on_bad_format(self, monkeypatch):
+        """Returns None when the timestamp string is not parseable."""
+
+        def mock_get_label(image_tag, label_key):
+            return "not-a-timestamp"
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+        result = run._get_image_build_time("test-image:latest")
+        assert result is None
+
+    def test_returns_none_on_runtime_failure(self, monkeypatch):
+        """Returns None when the container runtime is unavailable."""
+        import subprocess
+
+        def mock_get_label(image_tag, label_key):
+            raise subprocess.TimeoutExpired(["docker", "inspect"], 5)
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+        result = run._get_image_build_time("test-image:latest")
+        assert result is None
+
+
 class TestCleanupOrphanedProjectImages:
     def test_removes_image_with_missing_path(self, monkeypatch):
         """Images whose stored path no longer exists are removed."""
@@ -793,6 +844,137 @@ class TestCleanupOrphanedProjectImages:
 
         result = run._cleanup_orphaned_project_images("docker")
         assert result == []
+
+    def test_proxy_newer_forces_rebuild(self, monkeypatch, tmp_path):
+        """When proxy image is newer than project image, rebuild is triggered."""
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        # Set up dependency files so we get a project-specific image
+        deps = project_dir / ".pi-container" / "dependencies"
+        deps.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
+        pi_agent = project_dir / "pi-coding-agent"
+        pi_agent.mkdir(parents=True, exist_ok=True)
+        (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
+        (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+
+        # Mock _get_image_label to simulate proxy built AFTER project
+        build_times = {}
+
+        def mock_get_label(image_tag, label_key):
+            if label_key == "pi-container.hash":
+                return "abc123def4567890"
+            if label_key == "pi-container.build.time":
+                return build_times.get(image_tag, "2025-01-01T00:00:00Z")
+            return None
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        # Project image built first
+        build_times["pi-container-project-abcde-abc123def4567890.local"] = "2025-01-01T00:00:00Z"
+        # Proxy image built later
+        build_times["pi-coding-agent-proxy:local"] = "2025-06-01T00:00:00Z"
+
+        # _image_is_current should return True (hash matches)
+        assert (
+            run._image_is_current(
+                project_dir=project_dir,
+                image_tag="pi-container-project-abcde-abc123def4567890.local",
+                current_hash="abc123def4567890",
+            )
+            is True
+        )
+
+        # But proxy is newer — the check should detect this
+        proxy_ts = run._get_image_build_time("pi-coding-agent-proxy:local")
+        project_ts = run._get_image_build_time("pi-container-project-abcde-abc123def4567890.local")
+        assert proxy_ts is not None and project_ts is not None
+        assert proxy_ts > project_ts
+
+    def test_proxy_not_newer_no_forced_rebuild(self, monkeypatch, tmp_path):
+        """When proxy image is older or equal to project image, no forced rebuild."""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        deps = project_dir / ".pi-container" / "dependencies"
+        deps.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
+        pi_agent = project_dir / "pi-coding-agent"
+        pi_agent.mkdir(parents=True, exist_ok=True)
+        (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
+        (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+
+        build_times = {}
+
+        def mock_get_label(image_tag, label_key):
+            if label_key == "pi-container.hash":
+                return "abc123def4567890"
+            if label_key == "pi-container.build.time":
+                return build_times.get(image_tag, "2025-01-01T00:00:00Z")
+            return None
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        # Proxy built before project
+        build_times["pi-container-project-abcde-abc123def4567890.local"] = "2025-06-01T00:00:00Z"
+        build_times["pi-coding-agent-proxy:local"] = "2025-01-01T00:00:00Z"
+
+        proxy_ts = run._get_image_build_time("pi-coding-agent-proxy:local")
+        project_ts = run._get_image_build_time("pi-container-project-abcde-abc123def4567890.local")
+        assert proxy_ts is not None and project_ts is not None
+        assert proxy_ts <= project_ts
+
+    def test_missing_proxy_timestamp_exits(self, monkeypatch, tmp_path):
+        """Missing proxy build timestamp causes sys.exit(1)."""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        deps = project_dir / ".pi-container" / "dependencies"
+        deps.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
+        pi_agent = project_dir / "pi-coding-agent"
+        pi_agent.mkdir(parents=True, exist_ok=True)
+        (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
+        (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+
+        def mock_get_label(image_tag, label_key):
+            if label_key == "pi-container.build.time":
+                return None  # Proxy has no build time
+            return "abc123def4567890"
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        # Verify _get_image_build_time returns None for missing label
+        proxy_ts = run._get_image_build_time("pi-coding-agent-proxy:local")
+        assert proxy_ts is None
+
+    def test_missing_project_timestamp_exits(self, monkeypatch, tmp_path):
+        """Missing project build timestamp causes sys.exit(1)."""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        deps = project_dir / ".pi-container" / "dependencies"
+        deps.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
+        pi_agent = project_dir / "pi-coding-agent"
+        pi_agent.mkdir(parents=True, exist_ok=True)
+        (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
+        (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+
+        def mock_get_label(image_tag, label_key):
+            if label_key == "pi-container.build.time":
+                return None  # Project has no build time
+            return "abc123def4567890"
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        # Verify _get_image_build_time returns None for missing label
+        project_ts = run._get_image_build_time("pi-container-project-abcde-abc123def4567890.local")
+        assert project_ts is None
 
     def test_removes_multiple_orphaned_images(self, monkeypatch):
         """Multiple images without path labels are all removed."""

@@ -70,11 +70,18 @@ def _run_command_with_logging(cmd: list[str], **kwargs) -> subprocess.CompletedP
 
 
 def build_proxy(runtime: str) -> None:
+    from datetime import UTC, datetime
+
+    build_ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     logger.info(f"Building proxy image ({runtime}): {PROXY_IMAGE_TAG}")
     _run_command_with_logging(
         [
             runtime,
             "build",
+            "--label",
+            f"pi-container.build.time={build_ts}",
+            "--label",
+            "pi-container.type=shared",
             "--tag",
             PROXY_IMAGE_TAG,
             "--file",

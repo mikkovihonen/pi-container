@@ -312,6 +312,28 @@ def _get_image_label(image_tag: str, label_key: str) -> str | None:
     return None
 
 
+def _get_image_build_time(image_tag: str) -> datetime | None:
+    """Read the pi-container.build.time label from a container image.
+
+    Returns:
+        A timezone-aware UTC datetime, or None if the label is absent or the
+        image could not be inspected.
+    """
+    try:
+        ts_str = _get_image_label(image_tag, "pi-container.build.time")
+    except Exception:
+        logger.warning(f"Could not read build time from image {image_tag}")
+        return None
+    if ts_str is None:
+        return None
+    try:
+        # ISO 8601 format: "2025-01-15T12:30:00Z"
+        return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        logger.warning(f"Could not parse build time '{ts_str}' from image {image_tag}")
+        return None
+
+
 def _image_is_current(project_dir: Path, image_tag: str, current_hash: str) -> bool:
     """Check if the project-specific image is up-to-date by comparing labels.
 
@@ -679,8 +701,43 @@ def main() -> None:
                     )
                     if removed:
                         logger.info(f"Removed {len(removed)} stale project image(s): {', '.join(removed)}")
-                    if not _image_is_current(PROJECT_DIR, agent_image_tag, label_hash):
-                        logger.info(f"Building project-specific agent image: {agent_image_tag}")
+
+                    # 3. Check whether the proxy image has been rebuilt more
+                    #    recently than the project-specific image. The project
+                    #    image bakes in the mitmproxy CA certificate from the
+                    #    proxy image at build time; if the proxy image has a
+                    #    newer build timestamp, the project image's baked-in
+                    #    certificate is stale and must be refreshed.
+                    #    Both timestamps are required — if either is missing,
+                    #    the images are not trustworthy and we must error out.
+                    proxy_ts = _get_image_build_time("pi-coding-agent-proxy:local")
+                    project_ts = _get_image_build_time(agent_image_tag)
+                    proxy_newer = False
+                    if proxy_ts is None:
+                        logger.error(
+                            "ERROR: Could not read build timestamp from proxy image "
+                            "(pi-coding-agent-proxy:local). The project image may have a stale "
+                            "mitmproxy CA certificate. Rebuild with: build.sh"
+                        )
+                        sys.exit(1)
+                    if project_ts is None:
+                        logger.error(
+                            f"ERROR: Could not read build timestamp from project image "
+                            f"({agent_image_tag}). Rebuild required."
+                        )
+                        sys.exit(1)
+                    if proxy_ts > project_ts:
+                        proxy_newer_delta = proxy_ts - project_ts
+                        proxy_newer = True
+                        logger.warning(
+                            f"Proxy image has been rebuilt since the project image was built "
+                            f"({proxy_newer_delta.total_seconds():.0f}s ago). "
+                            f"The project image has a stale mitmproxy CA certificate and will be rebuilt."
+                        )
+
+                    if proxy_newer or not _image_is_current(PROJECT_DIR, agent_image_tag, label_hash):
+                        reason = "stale proxy certificate" if proxy_newer else "content hash mismatch"
+                        logger.info(f"Building project-specific agent image: {agent_image_tag} ({reason})")
                         root_commands_path = str(
                             PROJECT_DIR / ".pi-container" / "dependencies" / "root" / "commands.sh"
                         )

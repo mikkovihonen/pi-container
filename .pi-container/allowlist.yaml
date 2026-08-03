@@ -32,6 +32,7 @@ global:
       mode: "allow"
       hostnames:
         - "github.com"
+        - "ghcr.io"
         - "api.github.com"
         - "codeload.github.com"
         - "objects.githubusercontent.com"
