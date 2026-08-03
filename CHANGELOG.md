@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Fixed OOM errors when building project-specific agent containers with podman's default 2GB RAM limit (`e166a05`).
+
 ## [0.3.2] - 2026-08-03
 
 ### Added
