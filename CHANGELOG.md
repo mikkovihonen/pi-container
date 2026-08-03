@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-03
+
+### Added
+- Agent container `capabilities` and `devices` configuration via config.yaml (forwarded as `--cap-add` and `--device` flags to the container runtime).
+- Structured logging in `build.py`: replaced `print()` calls with `logging` module and added `_run_command_with_logging` helper that streams subprocess output line-by-line.
+- SHA256 verification of Python source tarball in `root/commands.sh`.
+- Hash-verified uv installation via pip in `root/commands.sh`.
+
+### Changed
+- `root/commands.sh`: added progress logging, quieter build output, and hash-verified uv installation.
+- `pi/commands.sh`: wrapped setup commands in a subshell with output suppressed.
+- `Containerfile`: removed shared base apt packages section (now project-specific only).
+- `entrypoint.sh`: removed obsolete Apple `container` reference from comment.
+- `AGENTS.md`: added instructions for uv dependency management and handling unmet system package dependencies.
+- `build.py`: added logging configuration and `--build-context` flag for project-specific `root/commands.sh` to support standalone `build.sh` invocation.
+
+### Fixed
+- `build.py` tests updated to mock `subprocess.Popen` instead of `subprocess.run` to match new implementation.
+
 ## [0.3.1] - 2026-07-21
 
 ### Added

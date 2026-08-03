@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(podman --version)",
+      "Bash(podman machine *)",
+      "Bash(podman info *)",
+      "Bash(podman images *)",
+      "Bash(podman ps *)",
+      "Bash(podman network *)",
+      "Read(//opt/homebrew/Cellar/llama.cpp/10210/bin/**)",
+      "Bash(brew list *)",
+      "Bash(podman history *)",
+      "Bash(./build.sh)",
+      "Bash(echo \"EXIT: $?\")"
+    ]
+  }
+}

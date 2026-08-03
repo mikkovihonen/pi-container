@@ -20,9 +20,24 @@ DOTENV_PATH = REPO_ROOT / ".env"
 
 load_dotenv(DOTENV_PATH)
 
+# ─── Logging ─────────────────────────────────────────────────────────────────
+# build.py is its own entry point (build.sh) and does not import ``config``,
+# where the root logger is normally configured. Without this the per-line build
+# output emitted at INFO is dropped and a failed build surfaces nothing but its
+# exit status.
+
+log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+logging.basicConfig(level=log_level, format="%(levelname)s: %(message)s")
+
 LLAMA_BIN = os.environ.get("LLAMA_BIN") or shutil.which("llama-server")
 PI_IMAGE_TAG = os.environ.get("PI_IMAGE_TAG", "pi-coding-agent:local")
 PROXY_IMAGE_TAG = os.environ.get("PROXY_IMAGE_TAG", "pi-coding-agent-proxy:local")
+
+# The Containerfile unconditionally does `COPY --from=root_commands_path`, so
+# every build must supply that context. Project-specific builds point it at the
+# workspace's own root/commands.sh; the shared image uses this no-op default.
+DEFAULT_ROOT_COMMANDS = REPO_ROOT / "pi-coding-agent" / "default" / "dependencies" / "root" / "commands.sh"
 
 
 def _run_command_with_logging(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -75,6 +90,10 @@ def build_agent(runtime: str) -> None:
         [
             runtime,
             "build",
+            "--build-context",
+            f"root_commands_path={DEFAULT_ROOT_COMMANDS.parent}",
+            "--build-arg",
+            f"ROOT_COMMANDS_PATH={DEFAULT_ROOT_COMMANDS.name}",
             "--tag",
             PI_IMAGE_TAG,
             "--file",
