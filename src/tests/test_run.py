@@ -17,6 +17,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import run
 
 
+def _ts(iso: str):
+    """Parse an ISO 8601 ``...Z`` timestamp into an aware UTC datetime."""
+    from datetime import UTC, datetime
+
+    return datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+
+
+def _make_project_with_deps(tmp_path: Path) -> Path:
+    """Create a workspace whose dependency files select a project-specific image."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(exist_ok=True)
+    root_cmd = project_dir / ".pi-container" / "dependencies" / "root" / "commands.sh"
+    root_cmd.parent.mkdir(parents=True, exist_ok=True)
+    root_cmd.write_text("#!/bin/bash\necho install\n")
+    pi_agent = project_dir / "pi-coding-agent"
+    pi_agent.mkdir(parents=True, exist_ok=True)
+    (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
+    (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+    return project_dir
+
+
 class TestProjectScope:
     def test_stable_for_same_dir(self, tmp_path):
         assert run._project_scope(tmp_path) == run._project_scope(tmp_path)
@@ -136,42 +157,31 @@ class TestEnsureProjectConfig:
 class TestComputeImageHash:
     """Tests for _compute_image_hash()."""
 
-    def _make_template(self, root):
-        """Build a minimal pi-coding-agent template under root."""
-        template = root / "pi-coding-agent"
-        template.mkdir(parents=True, exist_ok=True)
-        (template / "Containerfile").write_text("FROM ubuntu:22.04\n")
-        (template / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
-        return template
-
-    def test_returns_none_when_no_files(self, tmp_path):
-        """No definition files → returns None."""
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        result = run._compute_image_hash(repo)
-        assert result is None
-
-    def test_includes_root_commands_sh(self, tmp_path):
-        """root/commands.sh is included in the hash."""
+    def test_includes_repo_files_and_root_commands_sh(self, tmp_path):
+        """root/commands.sh is included alongside Containerfile/entrypoint.sh from REPO_ROOT."""
         repo = tmp_path / "repo"
         deps = repo / ".pi-container" / "dependencies"
         deps.parent.mkdir(parents=True, exist_ok=True)
         deps.mkdir(parents=True, exist_ok=True)
         (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
         (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
-        self._make_template(repo)
         result = run._compute_image_hash(repo)
         assert result is not None
         assert len(result) == 16
 
-    def test_includes_containerfile_and_entrypoint(self, tmp_path):
-        """Containerfile and entrypoint.sh are always included."""
+    def test_includes_pi_commands_sh(self, tmp_path):
+        """pi/commands.sh is included in the hash (fixes -None.local tag issue)."""
         repo = tmp_path / "repo"
-        self._make_template(repo)
+        deps = repo / ".pi-container" / "dependencies"
+        deps.parent.mkdir(parents=True, exist_ok=True)
+        deps.mkdir(parents=True, exist_ok=True)
+        (deps / "pi" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "pi" / "commands.sh").write_text("#!/bin/bash\necho setup\n")
         result = run._compute_image_hash(repo)
         assert result is not None
+        assert result != "None"
 
-    def test_different_content_different_hash(self, tmp_path):
+    def test_different_root_content_different_hash(self, tmp_path):
         """Different root/commands.sh content produces different hashes."""
         repo = tmp_path / "repo"
         deps = repo / ".pi-container" / "dependencies"
@@ -180,7 +190,6 @@ class TestComputeImageHash:
 
         (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
         (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install1\n")
-        self._make_template(repo)
         hash1 = run._compute_image_hash(repo)
 
         (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
@@ -189,18 +198,47 @@ class TestComputeImageHash:
 
         assert hash1 != hash2
 
-    def test_empty_root_commands_skipped(self, tmp_path):
-        """Empty root/commands.sh is skipped (not hashed)."""
+    def test_different_pi_content_different_hash(self, tmp_path):
+        """Different pi/commands.sh content produces different hashes."""
+        repo = tmp_path / "repo"
+        deps = repo / ".pi-container" / "dependencies"
+        deps.parent.mkdir(parents=True, exist_ok=True)
+        deps.mkdir(parents=True, exist_ok=True)
+
+        (deps / "pi" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "pi" / "commands.sh").write_text("#!/bin/bash\necho setup1\n")
+        hash1 = run._compute_image_hash(repo)
+
+        (deps / "pi" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "pi" / "commands.sh").write_text("#!/bin/bash\necho setup2\n")
+        hash2 = run._compute_image_hash(repo)
+
+        assert hash1 != hash2
+
+    def test_empty_commands_skipped(self, tmp_path):
+        """Empty dependency files are skipped (not hashed)."""
         repo = tmp_path / "repo"
         deps = repo / ".pi-container" / "dependencies"
         deps.parent.mkdir(parents=True, exist_ok=True)
         deps.mkdir(parents=True, exist_ok=True)
         (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
         (deps / "root" / "commands.sh").write_text("")
-        self._make_template(repo)
-        # Should only hash Containerfile and entrypoint.sh, not the empty file
+        (deps / "pi" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "pi" / "commands.sh").write_text("")
+        # Should only hash Containerfile and entrypoint.sh from REPO_ROOT
         result = run._compute_image_hash(repo)
         assert result is not None
+
+    def test_no_deps_no_repo_files_returns_none(self, tmp_path, monkeypatch):
+        """When REPO_ROOT has no pi-coding-agent dir and no deps exist → returns None."""
+        # Simulate a foreign environment where REPO_ROOT/pi-coding-agent doesn't exist
+        fake_repo = tmp_path / "fake_repo"
+        fake_repo.mkdir()
+        monkeypatch.setattr(run, "REPO_ROOT", fake_repo)
+        repo = tmp_path / "workspace"
+        repo.mkdir()
+        result = run._compute_image_hash(repo)
+        assert result is None
 
 
 class TestHasDependencyFiles:
@@ -952,18 +990,9 @@ class TestCleanupOrphanedProjectImages:
         proxy_ts = run._get_image_build_time("pi-coding-agent-proxy:local")
         assert proxy_ts is None
 
-    def test_missing_project_timestamp_exits(self, monkeypatch, tmp_path):
-        """Missing project build timestamp causes sys.exit(1)."""
-        project_dir = tmp_path / "project"
-        project_dir.mkdir()
-        deps = project_dir / ".pi-container" / "dependencies"
-        deps.mkdir(parents=True, exist_ok=True)
-        (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
-        (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
-        pi_agent = project_dir / "pi-coding-agent"
-        pi_agent.mkdir(parents=True, exist_ok=True)
-        (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
-        (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+    def test_missing_project_timestamp_triggers_rebuild(self, monkeypatch, tmp_path):
+        """An existing project image with no build timestamp is rebuilt, not fatal."""
+        project_dir = _make_project_with_deps(tmp_path)
 
         def mock_get_label(image_tag, label_key):
             if label_key == "pi-container.build.time":
@@ -971,10 +1000,18 @@ class TestCleanupOrphanedProjectImages:
             return "abc123def4567890"
 
         monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+        monkeypatch.setattr(run, "_image_exists", lambda tag: True)
 
-        # Verify _get_image_build_time returns None for missing label
         project_ts = run._get_image_build_time("pi-container-project-abcde-abc123def4567890.local")
         assert project_ts is None
+
+        reason = run._project_image_build_reason(
+            project_dir,
+            "pi-container-project-abcde-abc123def4567890.local",
+            "abc123def4567890",
+            _ts("2025-01-01T00:00:00Z"),
+        )
+        assert reason == "missing build timestamp"
 
     def test_removes_multiple_orphaned_images(self, monkeypatch):
         """Multiple images without path labels are all removed."""
@@ -1006,3 +1043,125 @@ class TestCleanupOrphanedProjectImages:
 
         result = run._cleanup_orphaned_project_images("docker")
         assert len(result) == 3
+
+
+class TestImageExists:
+    """Tests for _image_exists()."""
+
+    def test_true_when_inspect_succeeds(self, monkeypatch):
+        import subprocess as sp
+
+        monkeypatch.setattr(run, "CONTAINER_RUNTIME", "docker", raising=False)
+        monkeypatch.setattr(sp, "run", lambda cmd, **kw: MagicMock(returncode=0, stdout="[{}]", stderr=""))
+        assert run._image_exists("some-image:local") is True
+
+    def test_false_when_inspect_fails(self, monkeypatch):
+        import subprocess as sp
+
+        monkeypatch.setattr(run, "CONTAINER_RUNTIME", "docker", raising=False)
+        monkeypatch.setattr(sp, "run", lambda cmd, **kw: MagicMock(returncode=1, stdout="", stderr="No such image"))
+        assert run._image_exists("missing-image:local") is False
+
+    def test_false_when_runtime_unavailable(self, monkeypatch):
+        import subprocess as sp
+
+        monkeypatch.setattr(run, "CONTAINER_RUNTIME", "docker", raising=False)
+
+        def boom(cmd, **kw):
+            raise FileNotFoundError("docker")
+
+        monkeypatch.setattr(sp, "run", boom)
+        assert run._image_exists("some-image:local") is False
+
+
+class TestProjectImageBuildReason:
+    """Tests for _project_image_build_reason() — the build/reuse decision."""
+
+    def test_missing_image_builds_instead_of_failing(self, monkeypatch, tmp_path):
+        """A project image that does not exist yet is built, not treated as an error.
+
+        Regression: a first run in a workspace (or the run right after stale-image
+        cleanup pruned the previous image) used to abort with "Could not read build
+        timestamp from project image ... Rebuild required."
+        """
+        project_dir = _make_project_with_deps(tmp_path)
+        monkeypatch.setattr(run, "_image_exists", lambda tag: False)
+
+        def unexpected(*args, **kwargs):
+            raise AssertionError("labels must not be read for a nonexistent image")
+
+        monkeypatch.setattr(run, "_get_image_label", unexpected)
+
+        reason = run._project_image_build_reason(
+            project_dir,
+            "pi-container-project-abcde-abc123def4567890.local",
+            "abc123def4567890",
+            _ts("2025-01-01T00:00:00Z"),
+        )
+        assert reason == "image not built yet"
+
+    def test_none_when_image_is_current_and_proxy_older(self, monkeypatch, tmp_path):
+        """A present, hash-matching image newer than the proxy is reused."""
+        project_dir = _make_project_with_deps(tmp_path)
+        monkeypatch.setattr(run, "_image_exists", lambda tag: True)
+
+        def mock_get_label(image_tag, label_key):
+            if label_key == "pi-container.build.time":
+                return "2025-06-01T00:00:00Z"
+            if label_key == "pi-container.hash":
+                return "abc123def4567890"
+            return None
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        reason = run._project_image_build_reason(
+            project_dir,
+            "pi-container-project-abcde-abc123def4567890.local",
+            "abc123def4567890",
+            _ts("2025-01-01T00:00:00Z"),
+        )
+        assert reason is None
+
+    def test_stale_proxy_certificate(self, monkeypatch, tmp_path):
+        """A proxy image newer than the project image forces a rebuild."""
+        project_dir = _make_project_with_deps(tmp_path)
+        monkeypatch.setattr(run, "_image_exists", lambda tag: True)
+
+        def mock_get_label(image_tag, label_key):
+            if label_key == "pi-container.build.time":
+                return "2025-01-01T00:00:00Z"
+            if label_key == "pi-container.hash":
+                return "abc123def4567890"
+            return None
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        reason = run._project_image_build_reason(
+            project_dir,
+            "pi-container-project-abcde-abc123def4567890.local",
+            "abc123def4567890",
+            _ts("2025-06-01T00:00:00Z"),
+        )
+        assert reason == "stale proxy certificate"
+
+    def test_content_hash_mismatch(self, monkeypatch, tmp_path):
+        """A present, up-to-date-cert image with a different content hash rebuilds."""
+        project_dir = _make_project_with_deps(tmp_path)
+        monkeypatch.setattr(run, "_image_exists", lambda tag: True)
+
+        def mock_get_label(image_tag, label_key):
+            if label_key == "pi-container.build.time":
+                return "2025-06-01T00:00:00Z"
+            if label_key == "pi-container.hash":
+                return "0000000000000000"
+            return None
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        reason = run._project_image_build_reason(
+            project_dir,
+            "pi-container-project-abcde-abc123def4567890.local",
+            "abc123def4567890",
+            _ts("2025-01-01T00:00:00Z"),
+        )
+        assert reason == "content hash mismatch"

@@ -178,30 +178,29 @@ def _compute_image_hash(project_dir: Path) -> str | None:
     """Compute a content hash of all files that affect the project-specific image.
 
     Returns a hex digest of the concatenated SHA-256 hashes of:
+    - `pi-coding-agent/Containerfile` (at REPO_ROOT, to detect image definition changes)
+    - `pi-coding-agent/entrypoint.sh` (at REPO_ROOT, to detect entrypoint changes)
     - `.pi-container/dependencies/root/commands.sh` (if it exists and is non-empty)
-    - `pi-coding-agent/Containerfile` (always, to detect image definition changes)
-    - `pi-coding-agent/entrypoint.sh` (always, to detect entrypoint changes)
+    - `.pi-container/dependencies/pi/commands.sh` (if it exists and is non-empty)
 
-    Note: `pi/commands.sh` is NOT included — it runs at container entrypoint
-    (runtime) and is not baked into the image.
-
-    Returns None if no definition files exist (root/commands.sh is absent or
-    empty).
+    Returns None if no definition files exist (all dependency files are absent or
+    empty, and Containerfile/entrypoint.sh are absent at REPO_ROOT).
     """
     deps_root = project_dir / ".pi-container" / "dependencies"
-    agent_dir = project_dir / "pi-coding-agent"
+    agent_dir = REPO_ROOT / "pi-coding-agent"
     files_to_hash = []
-
-    # root/commands.sh (optional — skip if absent or empty)
-    root_cmd_path = deps_root / "root/commands.sh"
-    if root_cmd_path.exists() and root_cmd_path.stat().st_size > 0:
-        files_to_hash.append("root/commands.sh")
 
     # Image definition files (always included — their changes require a rebuild)
     for img_file in ("Containerfile", "entrypoint.sh"):
         img_path = agent_dir / img_file
         if img_path.exists():
             files_to_hash.append(img_file)
+
+    # Dependency files (optional — skip if absent or empty)
+    for cmd_file in ("root/commands.sh", "pi/commands.sh"):
+        cmd_path = deps_root / cmd_file
+        if cmd_path.exists() and cmd_path.stat().st_size > 0:
+            files_to_hash.append(cmd_file)
 
     if not files_to_hash:
         return None
@@ -312,6 +311,25 @@ def _get_image_label(image_tag: str, label_key: str) -> str | None:
     return None
 
 
+def _image_exists(image_tag: str) -> bool:
+    """Return True if ``image_tag`` is present in the local image store.
+
+    Used to distinguish "no image yet, build it" from "image is there but
+    unreadable/unlabeled", which need different handling.
+    """
+    try:
+        result = subprocess.run(
+            [CONTAINER_RUNTIME, "image", "inspect", image_tag],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def _get_image_build_time(image_tag: str) -> datetime | None:
     """Read the pi-container.build.time label from a container image.
 
@@ -334,7 +352,7 @@ def _get_image_build_time(image_tag: str) -> datetime | None:
         return None
 
 
-def _image_is_current(project_dir: Path, image_tag: str, current_hash: str) -> bool:
+def _image_is_current(project_dir: Path, image_tag: str, current_hash: str | None) -> bool:
     """Check if the project-specific image is up-to-date by comparing labels.
 
     For project-specific images, compares the stored `pi-container.hash` label
@@ -356,6 +374,51 @@ def _image_is_current(project_dir: Path, image_tag: str, current_hash: str) -> b
 
     # Compare hashes
     return stored_hash == current_hash
+
+
+def _project_image_build_reason(
+    project_dir: Path,
+    image_tag: str,
+    content_hash: str | None,
+    proxy_ts: datetime,
+) -> str | None:
+    """Decide whether the project-specific image needs to be (re)built.
+
+    Returns a short reason string to build, or None when the cached image can be
+    reused as-is.
+
+    The proxy-vs-project timestamp comparison only applies to an image that is
+    actually present: on the first run in a workspace — or right after stale
+    images were pruned following a definition change — there is no image to
+    date, and the correct outcome is a build, not a hard failure.
+
+    An image that exists but carries no ``pi-container.build.time`` label was
+    built by an older pi-container; its baked-in mitmproxy CA cannot be dated,
+    so it is rebuilt rather than trusted.
+    """
+    if not _image_exists(image_tag):
+        return "image not built yet"
+
+    project_ts = _get_image_build_time(image_tag)
+    if project_ts is None:
+        logger.warning(
+            f"Project image ({image_tag}) has no build timestamp; its mitmproxy CA "
+            f"certificate cannot be verified and it will be rebuilt."
+        )
+        return "missing build timestamp"
+
+    if proxy_ts > project_ts:
+        logger.warning(
+            f"Proxy image has been rebuilt since the project image was built "
+            f"({(proxy_ts - project_ts).total_seconds():.0f}s ago). "
+            f"The project image has a stale mitmproxy CA certificate and will be rebuilt."
+        )
+        return "stale proxy certificate"
+
+    if not _image_is_current(project_dir, image_tag, content_hash):
+        return "content hash mismatch"
+
+    return None
 
 
 # ─── Image lifecycle helpers ──────────────────────────────────────────────
@@ -708,11 +771,10 @@ def main() -> None:
                     #    proxy image at build time; if the proxy image has a
                     #    newer build timestamp, the project image's baked-in
                     #    certificate is stale and must be refreshed.
-                    #    Both timestamps are required — if either is missing,
-                    #    the images are not trustworthy and we must error out.
+                    #    A project image that is absent (first run here, or just
+                    #    pruned by step 2 after a definition change) has no
+                    #    timestamp to compare and is simply built.
                     proxy_ts = _get_image_build_time("pi-coding-agent-proxy:local")
-                    project_ts = _get_image_build_time(agent_image_tag)
-                    proxy_newer = False
                     if proxy_ts is None:
                         logger.error(
                             "ERROR: Could not read build timestamp from proxy image "
@@ -720,23 +782,9 @@ def main() -> None:
                             "mitmproxy CA certificate. Rebuild with: build.sh"
                         )
                         sys.exit(1)
-                    if project_ts is None:
-                        logger.error(
-                            f"ERROR: Could not read build timestamp from project image "
-                            f"({agent_image_tag}). Rebuild required."
-                        )
-                        sys.exit(1)
-                    if proxy_ts > project_ts:
-                        proxy_newer_delta = proxy_ts - project_ts
-                        proxy_newer = True
-                        logger.warning(
-                            f"Proxy image has been rebuilt since the project image was built "
-                            f"({proxy_newer_delta.total_seconds():.0f}s ago). "
-                            f"The project image has a stale mitmproxy CA certificate and will be rebuilt."
-                        )
 
-                    if proxy_newer or not _image_is_current(PROJECT_DIR, agent_image_tag, label_hash):
-                        reason = "stale proxy certificate" if proxy_newer else "content hash mismatch"
+                    reason = _project_image_build_reason(PROJECT_DIR, agent_image_tag, label_hash, proxy_ts)
+                    if reason is not None:
                         logger.info(f"Building project-specific agent image: {agent_image_tag} ({reason})")
                         root_commands_path = str(
                             PROJECT_DIR / ".pi-container" / "dependencies" / "root" / "commands.sh"

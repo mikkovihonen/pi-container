@@ -10,12 +10,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Proxy image build timestamp: `build_proxy()` now sets `pi-container.build.time` and `pi-container.type=shared` labels on the proxy image, enabling age comparison with project-specific images.
 - Proxy certificate staleness detection: before building a project-specific image, `run.py` compares the proxy image's build time against the project image's build time. If the proxy is newer, the project image has a stale mitmproxy CA certificate and is automatically rebuilt.
 - `_get_image_build_time()` helper: reads the `pi-container.build.time` label from any image and returns a UTC datetime, or `None` if absent.
+- `_image_exists()` helper: reports whether an image is present in the local image store, distinguishing "not built yet" from "built but unreadable".
+- `_project_image_build_reason()` helper: consolidates the build/reuse decision for project-specific images and returns the reason a build is needed (or `None` to reuse the cache).
 
 ### Changed
-- Missing build timestamps are now a hard error (`sys.exit(1)`) instead of silently proceeding — the project image cannot be trusted without verifiable build ordering.
+- A missing **proxy** build timestamp remains a hard error (`sys.exit(1)`) — build ordering cannot be verified without it. A missing **project** build timestamp now triggers a rebuild instead, which is the actual remedy.
 
 ### Fixed
 - Project-specific images now stay in sync with the proxy image's mitmproxy CA certificate after `build.sh` rebuilds the proxy.
+- `run.py` no longer aborts with "Could not read build timestamp from project image ... Rebuild required." when the project-specific image does not exist. A first run in a workspace — or the run immediately after stale-image cleanup pruned the previous image following a `commands.sh`/`Containerfile` change — now builds the image as intended.
 
 ## [0.3.3] - 2026-08-03
 
