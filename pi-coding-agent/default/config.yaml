@@ -70,6 +70,27 @@ agent:
   #     - /dev/bus/usb:/dev/bus/usb
   devices: []
 
+# Nested containers. When enabled, the agent can run its own containers (podman /
+# docker compose / testcontainers) inside the agent container, as rootless podman.
+#
+# Traffic from nested containers still egresses through the proxy and is inspected
+# by mitmproxy — nesting does NOT create a bypass. But enabling this DOES relax the
+# agent container's SELinux confinement (see docs/design/nested-containers.md) and
+# grants /dev/fuse + /dev/net/tun. Off by default.
+#
+# Registry hosts must also be allowed in allowlist.yaml, or image pulls will 403.
+nested_containers:
+  enabled: false
+  # Where nested image layers live:
+  #   volume → persistent per-project named volume (default; survives runs)
+  #   tmpfs  → volatile RAM disk (needs a large podman machine; re-pulls each run)
+  storage: volume
+  # SELinux posture for the agent container:
+  #   disable  → label=disable (default; nested containers need no special flags)
+  #   engine_t → label=type:container_engine_t (agent stays confined, but every
+  #              nested container must be run with --security-opt unmask=all)
+  security: disable
+
 # Transient tmpfs mounts inside the agent container. Each path (under /workspace)
 # is a volatile RAM disk — data is lost when the container stops. Use it for build
 # artifacts / caches you don't want written back to the host workspace.

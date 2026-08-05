@@ -33,6 +33,7 @@ def valid_config(tmp_path: Path) -> Path:
                 "network": {"ipv6": False, "dns": "1.1.1.1"},
                 "proxy": {"expose_ui": "localhost"},
                 "agent": {"env": {}, "mounts": []},
+                "nested_containers": {"enabled": False, "storage": "volume", "security": "disable"},
                 "tmpfs": {"paths": []},
                 "flow_export": {"enabled": False},
                 "egress": {"allow": {}},
@@ -199,6 +200,7 @@ class TestValidateConfig:
                     "network": {"ipv6": False, "dns": "1.1.1.1"},
                     "proxy": {"expose_ui": "localhost"},
                     "agent": {"env": {}, "mounts": []},
+                    "nested_containers": {"enabled": False, "storage": "volume", "security": "disable"},
                     "tmpfs": {"paths": []},
                     "flow_export": {"enabled": False},
                     "egress": {"allow": {}},
@@ -223,6 +225,51 @@ class TestValidateConfig:
         is_valid, errors, _ = validate_config(config_path)
         assert is_valid is False
         assert any("YAML" in e for e in errors)
+
+
+class TestNestedContainersSchema:
+    """The nested_containers section is required, like every other section."""
+
+    def test_missing_section_fails(self, valid_config: Path):
+        import yaml as _yaml
+
+        from config_schema import validate_config
+
+        data = _yaml.safe_load(valid_config.read_text())
+        del data["nested_containers"]
+        valid_config.write_text(_yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is False
+        assert any("nested_containers" in e and "missing" in e for e in errors)
+
+    def test_wrong_storage_type_fails(self, valid_config: Path):
+        import yaml as _yaml
+
+        from config_schema import validate_config
+
+        data = _yaml.safe_load(valid_config.read_text())
+        data["nested_containers"]["storage"] = 42  # must be a str
+        valid_config.write_text(_yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is False
+        assert any("storage" in e for e in errors)
+
+    def test_enabled_accepts_yaml_bool_and_string(self, valid_config: Path):
+        import yaml as _yaml
+
+        from config_schema import validate_config
+
+        for value in (True, "true", 1):
+            data = _yaml.safe_load(valid_config.read_text())
+            data["nested_containers"]["enabled"] = value
+            valid_config.write_text(_yaml.dump(data))
+            with patch("config_schema.get_app_version", return_value=None):
+                is_valid, errors, _ = validate_config(valid_config)
+            assert is_valid is True, errors
 
 
 class TestValidateModels:

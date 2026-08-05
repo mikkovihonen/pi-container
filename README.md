@@ -19,13 +19,13 @@ A containerized environment for running the [`pi-coding-agent`](https://pi.dev) 
 - **Auditable traffic** — all HTTP/HTTPS/DNS is intercepted by [`mitmproxy`](https://mitmproxy.org), with a hostname **allowlist** and a **token injector**, and captured to a per-project flow export.
 - **Local inference** — [`llama.cpp`](https://llama.app)'s `llama-server` runs natively on the host (Metal / CUDA / ROCm), shared across projects by config fingerprint.
 - **Per-workspace isolation** — each workspace gets its own pi-container container image, proxy, isolated network, mitmweb port, and config, seeded on first run.
-- **Runtime-agnostic** — works with [`podman`](https://podman.io), and [`docker`](https://www.docker.com).
+- **Rootless by construction** — runs on [`podman`](https://podman.io), so the agent container lives inside a user namespace where container root is an unprivileged host user. On macOS/Windows the podman machine needs **at least 4 GB** of memory (`podman machine set --memory 4096`); see [Getting Started](docs/getting-started.md).
 
 ## Quick start
 
 ```bash
 cp .env.example .env       # then set ADMIN_PASSWORD to a strong value
-./build.sh                 # build the proxy + agent images
+./build.sh                 # build the proxy, toolchain and agent images
 alias pi="$PWD/run.sh"     # convenience alias
 cd /path/to/your/project   # any workspace
 pi                         # launch the agent for that workspace

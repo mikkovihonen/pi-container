@@ -385,7 +385,7 @@ class TestGetImageLabel:
 
         monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
         # Set CONTAINER_RUNTIME so the function doesn't raise NameError
-        run.CONTAINER_RUNTIME = "docker"
+        run.CONTAINER_RUNTIME = "podman"
         result = run._get_image_label("test-image:latest", "pi-container.hash")
         assert result == "abc123def456"
 
@@ -471,7 +471,7 @@ class TestRemoveImage:
         mock_result.stdout = ""
         mock_result.stderr = ""
         monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
-        result = run._remove_image("docker", "some-image:latest")
+        result = run._remove_image("podman", "some-image:latest")
         assert result is True
 
     def test_returns_false_on_failure(self, monkeypatch):
@@ -483,7 +483,7 @@ class TestRemoveImage:
         mock_result.stdout = ""
         mock_result.stderr = "Error: image not found"
         monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
-        result = run._remove_image("docker", "nonexistent:latest")
+        result = run._remove_image("podman", "nonexistent:latest")
         assert result is False
 
     def test_handles_exception(self, monkeypatch):
@@ -493,7 +493,7 @@ class TestRemoveImage:
         monkeypatch.setattr(
             run.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired("cmd", 30))
         )
-        result = run._remove_image("docker", "slow-image:latest")
+        result = run._remove_image("podman", "slow-image:latest")
         assert result is False
 
 
@@ -507,7 +507,7 @@ class TestListProjectImages:
         mock_result.stdout = ""
         mock_result.stderr = ""
         monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
-        result = run._list_project_images("docker", "project-hash")
+        result = run._list_project_images("podman", "project-hash")
         assert result == []
 
     def test_returns_images_for_matching_project(self, monkeypatch):
@@ -534,7 +534,7 @@ class TestListProjectImages:
         )
         monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
 
-        result = run._list_project_images("docker", "a1b2c")
+        result = run._list_project_images("podman", "a1b2c")
         assert len(result) == 2
         # Each entry is (tag, content_hash)
         for tag, _content_hash in result:
@@ -547,7 +547,7 @@ class TestListProjectImages:
         monkeypatch.setattr(
             run.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired("cmd", 10))
         )
-        result = run._list_project_images("docker", "project-hash")
+        result = run._list_project_images("podman", "project-hash")
         assert result == []
 
 
@@ -573,7 +573,7 @@ class TestCleanupStaleProjectImages:
         )
 
         result = run._cleanup_stale_project_images(
-            "docker",
+            "podman",
             tmp_path,
             project_hash,
             new_hash,
@@ -601,7 +601,7 @@ class TestCleanupStaleProjectImages:
         )
 
         result = run._cleanup_stale_project_images(
-            "docker",
+            "podman",
             tmp_path,
             project_hash,
             new_hash,
@@ -629,7 +629,7 @@ class TestCleanupStaleProjectImages:
         )
 
         result = run._cleanup_stale_project_images(
-            "docker",
+            "podman",
             tmp_path,
             this_hash,
             "newhash1234567890",
@@ -714,7 +714,7 @@ class TestCleanupStaleProjectImagesListFails:
 
         monkeypatch.setattr(run, "_list_project_images", mock_list)
         result = run._cleanup_stale_project_images(
-            "docker",
+            "podman",
             tmp_path,
             "a1b2c",
             "newhash1234567890",
@@ -766,7 +766,7 @@ class TestGetImageBuildTime:
         import subprocess
 
         def mock_get_label(image_tag, label_key):
-            raise subprocess.TimeoutExpired(["docker", "inspect"], 5)
+            raise subprocess.TimeoutExpired(["podman", "inspect"], 5)
 
         monkeypatch.setattr(run, "_get_image_label", mock_get_label)
         result = run._get_image_build_time("test-image:latest")
@@ -778,7 +778,7 @@ class TestCleanupOrphanedProjectImages:
         """Images whose stored path no longer exists are removed."""
         import subprocess as sp
 
-        # Mock the docker image ls output.
+        # Mock the `podman image ls` output.
         def mock_run(cmd, **kwargs):
             class Result:
                 stdout = "pi-container-project-abc12-def3456789012345.local\n"
@@ -806,7 +806,7 @@ class TestCleanupOrphanedProjectImages:
 
         monkeypatch.setattr(run, "_remove_image", mock_remove)
 
-        result = run._cleanup_orphaned_project_images("docker")
+        result = run._cleanup_orphaned_project_images("podman")
         assert len(result) == 1
         assert "pi-container-project-abc12-def3456789012345.local" in result
 
@@ -839,7 +839,7 @@ class TestCleanupOrphanedProjectImages:
 
         monkeypatch.setattr(run, "_remove_image", mock_remove)
 
-        result = run._cleanup_orphaned_project_images("docker")
+        result = run._cleanup_orphaned_project_images("podman")
         assert len(result) == 0
         assert removed_count[0] == 0
 
@@ -867,12 +867,12 @@ class TestCleanupOrphanedProjectImages:
 
         monkeypatch.setattr(run, "_remove_image", mock_remove)
 
-        result = run._cleanup_orphaned_project_images("docker")
+        result = run._cleanup_orphaned_project_images("podman")
         assert len(result) == 1
         assert "pi-container-project-abc12-def3456789012345.local" in result
 
     def test_returns_empty_when_list_fails(self, monkeypatch):
-        """Returns [] when docker image ls fails."""
+        """Returns [] when `podman image ls` fails."""
         import subprocess as sp
 
         def mock_run(cmd, **kwargs):
@@ -880,7 +880,7 @@ class TestCleanupOrphanedProjectImages:
 
         monkeypatch.setattr(sp, "run", mock_run)
 
-        result = run._cleanup_orphaned_project_images("docker")
+        result = run._cleanup_orphaned_project_images("podman")
         assert result == []
 
     def test_proxy_newer_forces_rebuild(self, monkeypatch, tmp_path):
@@ -1041,7 +1041,7 @@ class TestCleanupOrphanedProjectImages:
 
         monkeypatch.setattr(run, "_remove_image", mock_remove)
 
-        result = run._cleanup_orphaned_project_images("docker")
+        result = run._cleanup_orphaned_project_images("podman")
         assert len(result) == 3
 
 
@@ -1051,27 +1051,82 @@ class TestImageExists:
     def test_true_when_inspect_succeeds(self, monkeypatch):
         import subprocess as sp
 
-        monkeypatch.setattr(run, "CONTAINER_RUNTIME", "docker", raising=False)
+        monkeypatch.setattr(run, "CONTAINER_RUNTIME", "podman", raising=False)
         monkeypatch.setattr(sp, "run", lambda cmd, **kw: MagicMock(returncode=0, stdout="[{}]", stderr=""))
         assert run._image_exists("some-image:local") is True
 
     def test_false_when_inspect_fails(self, monkeypatch):
         import subprocess as sp
 
-        monkeypatch.setattr(run, "CONTAINER_RUNTIME", "docker", raising=False)
+        monkeypatch.setattr(run, "CONTAINER_RUNTIME", "podman", raising=False)
         monkeypatch.setattr(sp, "run", lambda cmd, **kw: MagicMock(returncode=1, stdout="", stderr="No such image"))
         assert run._image_exists("missing-image:local") is False
 
     def test_false_when_runtime_unavailable(self, monkeypatch):
         import subprocess as sp
 
-        monkeypatch.setattr(run, "CONTAINER_RUNTIME", "docker", raising=False)
+        monkeypatch.setattr(run, "CONTAINER_RUNTIME", "podman", raising=False)
 
         def boom(cmd, **kw):
-            raise FileNotFoundError("docker")
+            raise FileNotFoundError("podman")
 
         monkeypatch.setattr(sp, "run", boom)
         assert run._image_exists("some-image:local") is False
+
+
+class TestNewestSharedImageTime:
+    """Tests for _newest_shared_image_time() — which shared image dates a rebuild."""
+
+    def test_returns_the_newer_of_the_two(self, monkeypatch):
+        times = {
+            "pi-coding-agent-proxy:local": "2025-01-01T00:00:00Z",
+            "pi-coding-agent-builder:local": "2025-06-01T00:00:00Z",
+        }
+        monkeypatch.setattr(
+            run,
+            "_get_image_label",
+            lambda tag, key: times[tag] if key == "pi-container.build.time" else None,
+        )
+
+        result = run._newest_shared_image_time()
+        assert result == ("pi-coding-agent-builder:local", _ts("2025-06-01T00:00:00Z"))
+
+    def test_proxy_wins_when_newer(self, monkeypatch):
+        times = {
+            "pi-coding-agent-proxy:local": "2025-06-01T00:00:00Z",
+            "pi-coding-agent-builder:local": "2025-01-01T00:00:00Z",
+        }
+        monkeypatch.setattr(
+            run,
+            "_get_image_label",
+            lambda tag, key: times[tag] if key == "pi-container.build.time" else None,
+        )
+
+        result = run._newest_shared_image_time()
+        assert result == ("pi-coding-agent-proxy:local", _ts("2025-06-01T00:00:00Z"))
+
+    def test_none_when_an_image_cannot_be_dated(self, monkeypatch):
+        """An undateable shared image is a hard stop, not a silent pass.
+
+        Without a timestamp there is no way to tell whether the project image's
+        copied CA certificate and toolchain are current, and running a stale one is
+        the failure this check exists to prevent.
+        """
+        times = {"pi-coding-agent-proxy:local": "2025-06-01T00:00:00Z"}
+        monkeypatch.setattr(
+            run,
+            "_get_image_label",
+            lambda tag, key: times.get(tag) if key == "pi-container.build.time" else None,
+        )
+
+        assert run._newest_shared_image_time() is None
+
+    def test_covers_both_source_images(self):
+        """Both images the project image COPYs --from must be checked."""
+        assert set(run._SHARED_SOURCE_IMAGES) == {
+            "pi-coding-agent-proxy:local",
+            "pi-coding-agent-builder:local",
+        }
 
 
 class TestProjectImageBuildReason:
@@ -1122,8 +1177,8 @@ class TestProjectImageBuildReason:
         )
         assert reason is None
 
-    def test_stale_proxy_certificate(self, monkeypatch, tmp_path):
-        """A proxy image newer than the project image forces a rebuild."""
+    def test_stale_shared_image(self, monkeypatch, tmp_path):
+        """A shared source image newer than the project image forces a rebuild."""
         project_dir = _make_project_with_deps(tmp_path)
         monkeypatch.setattr(run, "_image_exists", lambda tag: True)
 
@@ -1142,7 +1197,38 @@ class TestProjectImageBuildReason:
             "abc123def4567890",
             _ts("2025-06-01T00:00:00Z"),
         )
-        assert reason == "stale proxy certificate"
+        assert reason == "stale shared image"
+
+    def test_newer_toolchain_image_forces_rebuild(self, monkeypatch, tmp_path, caplog):
+        """A rebuilt toolchain image is as stale-making as a rebuilt proxy image.
+
+        The project image copies its whole toolchain (python, podman, netavark) out
+        of the builder image, so a newer builder means the copy is out of date even
+        when the proxy has not moved.
+        """
+        project_dir = _make_project_with_deps(tmp_path)
+        monkeypatch.setattr(run, "_image_exists", lambda tag: True)
+
+        def mock_get_label(image_tag, label_key):
+            if label_key == "pi-container.build.time":
+                return "2025-01-01T00:00:00Z"
+            if label_key == "pi-container.hash":
+                return "abc123def4567890"
+            return None
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        with caplog.at_level("WARNING"):
+            reason = run._project_image_build_reason(
+                project_dir,
+                "pi-container-project-abcde-abc123def4567890.local",
+                "abc123def4567890",
+                _ts("2025-06-01T00:00:00Z"),
+                "pi-coding-agent-builder:local",
+            )
+        assert reason == "stale shared image"
+        # The warning has to name which image moved, or the rebuild is unexplained.
+        assert "pi-coding-agent-builder:local" in caplog.text
 
     def test_content_hash_mismatch(self, monkeypatch, tmp_path):
         """A present, up-to-date-cert image with a different content hash rebuilds."""
@@ -1165,3 +1251,195 @@ class TestProjectImageBuildReason:
             _ts("2025-01-01T00:00:00Z"),
         )
         assert reason == "content hash mismatch"
+
+
+# ---------------------------------------------------------------------------
+# Project key (shared identity of every per-workspace resource)
+# ---------------------------------------------------------------------------
+
+
+class TestProjectKey:
+    def test_shared_with_proxy_and_network_names(self, tmp_path):
+        key = run._project_key(tmp_path)
+        proxy_name, network_name = run._project_scope(tmp_path)
+        assert re.fullmatch(r"[0-9a-f]{10}", key)
+        assert proxy_name == f"pi-proxy-{key}"
+        assert network_name == f"pi-isolated-net-{key}"
+
+    def test_differs_across_dirs(self, tmp_path):
+        a, b = tmp_path / "a", tmp_path / "b"
+        a.mkdir()
+        b.mkdir()
+        assert run._project_key(a) != run._project_key(b)
+
+
+# ---------------------------------------------------------------------------
+# Nested-container image store (per-project named volume)
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureNestedVolume:
+    def test_existing_volume_is_reused(self, monkeypatch):
+        """A present store must not be recreated — that is what keeps the cache."""
+        monkeypatch.setattr(run, "_volume_exists", lambda rt, name: True)
+
+        def unexpected(*args, **kwargs):
+            raise AssertionError("volume create must not run for an existing volume")
+
+        monkeypatch.setattr(run.subprocess, "run", unexpected)
+        assert run._ensure_nested_volume("podman", "pi-nested-abc", "pi-proxy-abc", "/tmp/proj") is True
+
+    def test_creates_with_project_labels(self, monkeypatch):
+        monkeypatch.setattr(run, "_volume_exists", lambda rt, name: False)
+        calls: list[list[str]] = []
+
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(run.subprocess, "run", mock_run)
+        assert run._ensure_nested_volume("podman", "pi-nested-abc", "pi-proxy-abc", "/tmp/proj") is True
+
+        cmd = calls[0]
+        assert cmd[:3] == ["podman", "volume", "create"]
+        assert cmd[-1] == "pi-nested-abc"
+        # Labelled like project images, so the same orphan rule reclaims it.
+        assert "pi-container.type=nested-storage" in cmd
+        assert "pi-container.project.hash=pi-proxy-abc" in cmd
+        assert "pi-container.project.path=/tmp/proj" in cmd
+
+    def test_returns_false_when_create_fails(self, monkeypatch):
+        monkeypatch.setattr(run, "_volume_exists", lambda rt, name: False)
+        monkeypatch.setattr(
+            run.subprocess,
+            "run",
+            lambda cmd, **kw: MagicMock(returncode=125, stdout="", stderr="out of space"),
+        )
+        assert run._ensure_nested_volume("podman", "pi-nested-abc", "pi-proxy-abc", "/tmp/proj") is False
+
+
+class TestCleanupOrphanedNestedVolumes:
+    def _mock_ls(self, monkeypatch, names: str):
+        monkeypatch.setattr(
+            run.subprocess,
+            "run",
+            lambda cmd, **kw: MagicMock(returncode=0, stdout=names, stderr=""),
+        )
+
+    def test_removes_volume_with_missing_path(self, monkeypatch):
+        self._mock_ls(monkeypatch, "pi-nested-abc1234567\n")
+        monkeypatch.setattr(
+            run,
+            "_get_volume_label",
+            lambda rt, name, label: "/nonexistent/project/path",
+        )
+        removed: list[str] = []
+        monkeypatch.setattr(run, "_remove_volume", lambda rt, name: removed.append(name) or True)
+
+        assert run._cleanup_orphaned_nested_volumes("podman") == ["pi-nested-abc1234567"]
+        assert removed == ["pi-nested-abc1234567"]
+
+    def test_keeps_volume_with_existing_path(self, monkeypatch):
+        self._mock_ls(monkeypatch, "pi-nested-abc1234567\n")
+        monkeypatch.setattr(run, "_get_volume_label", lambda rt, name, label: str(Path(__file__).parent))
+
+        def unexpected(rt, name):
+            raise AssertionError("a live project's store must never be removed")
+
+        monkeypatch.setattr(run, "_remove_volume", unexpected)
+        assert run._cleanup_orphaned_nested_volumes("podman") == []
+
+    def test_removes_volume_without_path_label(self, monkeypatch):
+        self._mock_ls(monkeypatch, "pi-nested-abc1234567\n")
+        monkeypatch.setattr(run, "_get_volume_label", lambda rt, name, label: None)
+        monkeypatch.setattr(run, "_remove_volume", lambda rt, name: True)
+        assert run._cleanup_orphaned_nested_volumes("podman") == ["pi-nested-abc1234567"]
+
+    def test_skips_volume_still_in_use(self, monkeypatch):
+        """`volume rm` fails while a container holds it — skip, don't abort."""
+        self._mock_ls(monkeypatch, "pi-nested-abc1234567\n")
+        monkeypatch.setattr(run, "_get_volume_label", lambda rt, name, label: "/nonexistent/path")
+        monkeypatch.setattr(run, "_remove_volume", lambda rt, name: False)
+        assert run._cleanup_orphaned_nested_volumes("podman") == []
+
+    def test_returns_empty_when_list_fails(self, monkeypatch):
+        import subprocess as sp
+
+        def boom(cmd, **kw):
+            raise sp.TimeoutExpired("cmd", 10)
+
+        monkeypatch.setattr(run.subprocess, "run", boom)
+        assert run._cleanup_orphaned_nested_volumes("podman") == []
+
+
+class TestVolumeHelpers:
+    def test_volume_exists_true_on_success(self, monkeypatch):
+        monkeypatch.setattr(run.subprocess, "run", lambda cmd, **kw: MagicMock(returncode=0, stdout="[{}]"))
+        assert run._volume_exists("podman", "pi-nested-abc") is True
+
+    def test_volume_exists_false_on_failure(self, monkeypatch):
+        monkeypatch.setattr(run.subprocess, "run", lambda cmd, **kw: MagicMock(returncode=125, stdout=""))
+        assert run._volume_exists("podman", "pi-nested-abc") is False
+
+    def test_get_volume_label_reads_value(self, monkeypatch):
+        monkeypatch.setattr(run.subprocess, "run", lambda cmd, **kw: MagicMock(returncode=0, stdout="/tmp/proj\n"))
+        assert run._get_volume_label("podman", "v", "pi-container.project.path") == "/tmp/proj"
+
+    def test_get_volume_label_treats_no_value_as_absent(self, monkeypatch):
+        """podman renders a missing label key as `<no value>`, not an error."""
+        monkeypatch.setattr(run.subprocess, "run", lambda cmd, **kw: MagicMock(returncode=0, stdout="<no value>\n"))
+        assert run._get_volume_label("podman", "v", "nope") is None
+
+    def test_remove_volume_reports_failure(self, monkeypatch):
+        monkeypatch.setattr(
+            run.subprocess, "run", lambda cmd, **kw: MagicMock(returncode=2, stdout="", stderr="volume is being used")
+        )
+        assert run._remove_volume("podman", "pi-nested-abc") is False
+
+
+# ---------------------------------------------------------------------------
+# Registry allowlist preflight
+# ---------------------------------------------------------------------------
+
+
+class TestWarnIfNoRegistryAllowlisted:
+    def _allowlist(self, tmp_path: Path, hostnames: list[str]) -> Path:
+        import yaml
+
+        (tmp_path / "allowlist.yaml").write_text(
+            yaml.dump({"global": {"rules": [{"name": "r", "mode": "allow", "hostnames": hostnames}]}})
+        )
+        return tmp_path
+
+    def test_warns_when_no_registry_present(self, tmp_path, caplog):
+        self._allowlist(tmp_path, ["pypi.org", "github.com"])
+        with caplog.at_level("WARNING"):
+            run._warn_if_no_registry_allowlisted(tmp_path)
+        assert any("no container registry hostname is allowed" in r.message for r in caplog.records)
+
+    def test_silent_when_registry_allowed(self, tmp_path, caplog):
+        self._allowlist(tmp_path, ["pypi.org", "registry-1.docker.io"])
+        with caplog.at_level("WARNING"):
+            run._warn_if_no_registry_allowlisted(tmp_path)
+        assert caplog.records == []
+
+    def test_wildcard_registry_counts(self, tmp_path, caplog):
+        self._allowlist(tmp_path, ["*.ghcr.io"])
+        with caplog.at_level("WARNING"):
+            run._warn_if_no_registry_allowlisted(tmp_path)
+        assert caplog.records == []
+
+    def test_missing_allowlist_is_silent(self, tmp_path, caplog):
+        """An unreadable allowlist is the addon's problem to report, not this preflight's."""
+        with caplog.at_level("WARNING"):
+            run._warn_if_no_registry_allowlisted(tmp_path)
+        assert caplog.records == []
+
+    def test_commented_template_still_warns(self, tmp_path, caplog):
+        """The seeded template ships the registry rule commented out."""
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        template = repo_root / "pi-coding-agent" / "default" / "allowlist.yaml"
+        (tmp_path / "allowlist.yaml").write_text(template.read_text())
+        with caplog.at_level("WARNING"):
+            run._warn_if_no_registry_allowlisted(tmp_path)
+        assert any("no container registry hostname is allowed" in r.message for r in caplog.records)

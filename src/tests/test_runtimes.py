@@ -14,7 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from runtimes import (
     ContainerRuntime,
-    DockerRuntime,
     PodmanRuntime,
 )
 
@@ -24,17 +23,20 @@ from runtimes import (
 
 
 class TestCreate:
-    def test_creates_each_runtime(self):
+    def test_creates_podman(self):
         assert isinstance(ContainerRuntime.create("podman"), PodmanRuntime)
-        assert isinstance(ContainerRuntime.create("docker"), DockerRuntime)
 
     def test_unknown_runtime_raises(self):
         with pytest.raises(ValueError, match="Unsupported container runtime"):
             ContainerRuntime.create("nerdctl")
 
-    def test_defaults_per_runtime(self):
+    def test_docker_is_no_longer_registered(self):
+        """Docker support was removed deliberately — it must not resolve."""
+        with pytest.raises(ValueError, match="Unsupported container runtime"):
+            ContainerRuntime.create("docker")
+
+    def test_defaults(self):
         assert ContainerRuntime.create("podman").upstream_network == "podman"
-        assert ContainerRuntime.create("docker").upstream_network == "bridge"
 
     def test_env_overrides_win(self):
         rt = ContainerRuntime.create("podman", bridge_interface="br0", upstream_network="mynet")
@@ -48,15 +50,12 @@ class TestCreate:
 
 
 class TestIsolatedNetworkCreate:
-    @pytest.mark.parametrize("name", ["docker"])
-    def test_internal_flag_used(self, name):
-        argv = ContainerRuntime.create(name).create_isolated_network_argv("isolated-net")
-        assert argv == ["network", "create", "--internal", "isolated-net"]
+    def test_internal_flag_used(self):
+        argv = PodmanRuntime().create_isolated_network_argv("isolated-net")
+        assert "--internal" in argv
 
-    @pytest.mark.parametrize("name", ["podman", "docker"])
-    def test_delete_uses_rm(self, name):
-        """`rm` works for podman/docker."""
-        argv = ContainerRuntime.create(name).delete_isolated_network_argv("isolated-net")
+    def test_delete_uses_rm(self):
+        argv = PodmanRuntime().delete_isolated_network_argv("isolated-net")
         assert argv == ["network", "rm", "isolated-net"]
 
     def test_podman_disables_dns(self):
@@ -65,18 +64,13 @@ class TestIsolatedNetworkCreate:
         argv = PodmanRuntime().create_isolated_network_argv("isolated-net")
         assert argv == ["network", "create", "--internal", "--disable-dns", "isolated-net"]
 
-    def test_docker_ipv6_uses_ipv6_flag(self):
-        argv = DockerRuntime().create_isolated_network_argv("isolated-net", ipv6=True)
-        assert argv == ["network", "create", "--internal", "--ipv6", "isolated-net"]
-
     def test_podman_ipv6_flag_appended(self):
         argv = PodmanRuntime().create_isolated_network_argv("isolated-net", ipv6=True)
         assert argv == ["network", "create", "--internal", "--disable-dns", "--ipv6", "isolated-net"]
 
-    @pytest.mark.parametrize("name", ["podman", "docker"])
-    def test_ipv6_default_is_v4_only(self, name):
-        """Default (ipv6=False) must not append --ipv6 for any runtime."""
-        argv = ContainerRuntime.create(name).create_isolated_network_argv("isolated-net")
+    def test_ipv6_default_is_v4_only(self):
+        """Default (ipv6=False) must not append --ipv6."""
+        argv = PodmanRuntime().create_isolated_network_argv("isolated-net")
         assert "--ipv6" not in argv
 
 
@@ -96,18 +90,9 @@ class TestProxyNetworkArgs:
             "isolated-net:interface_name=eth1",
         ]
 
-    def test_docker_connects_second_network_post_run(self):
-        rt = DockerRuntime()
-        assert rt.proxy_network_args("isolated-net") == ["--network", "bridge"]
-        assert rt.proxy_secondary_connect_argv("proxy", "isolated-net") == [
-            "network",
-            "connect",
-            "isolated-net",
-            "proxy",
-        ]
-
-    def test_non_docker_has_no_secondary_connect(self):
-        assert PodmanRuntime().proxy_secondary_connect_argv("proxy", "isolated-net") is None
+    def test_secondary_connect_hook_is_gone(self):
+        """Removed with DockerRuntime: podman attaches both networks at run time."""
+        assert not hasattr(PodmanRuntime(), "proxy_secondary_connect_argv")
 
 
 # ---------------------------------------------------------------------------
@@ -116,12 +101,10 @@ class TestProxyNetworkArgs:
 
 
 class TestAgentNetworkArgs:
-    @pytest.mark.parametrize("name", ["podman", "docker"])
-    def test_agent_routed_through_proxy_for_all_runtimes(self, name):
-        """The internal network has no gateway, so every runtime must inject
+    def test_agent_routed_through_proxy(self):
+        """The internal network has no gateway, so the agent must get
         DEFAULT_ROUTE + NET_ADMIN and point DNS at the proxy."""
-        rt = ContainerRuntime.create(name)
-        args = rt.agent_network_args("isolated-net", "10.89.3.2")
+        args = PodmanRuntime().agent_network_args("isolated-net", "10.89.3.2")
         assert "--network" in args and "isolated-net" in args
         assert args[args.index("--dns") + 1] == "10.89.3.2"
         assert "NET_ADMIN" in args
@@ -134,8 +117,9 @@ class TestAgentNetworkArgs:
 
 
 class TestTmpfsArgs:
-    def test_docker_uses_tmpfs_flag(self):
-        assert DockerRuntime().tmpfs_args("/home/pi/") == ["--tmpfs", "/home/pi/"]
+    def test_base_uses_plain_tmpfs_flag(self):
+        """The base-class default; PodmanRuntime overrides it."""
+        assert ContainerRuntime.tmpfs_args(PodmanRuntime(), "/x") == ["--tmpfs", "/x"]
 
     def test_podman_uses_mount_syntax(self):
         assert PodmanRuntime().tmpfs_args("/home/pi/") == [
@@ -155,14 +139,8 @@ class TestLlamaHostReachability:
         # needs_host_socat() was removed when Apple container support was dropped
         assert rt.llama_host_addr() == "host.containers.internal"
 
-    def test_docker_uses_host_internal_no_socat(self):
-        rt = DockerRuntime()
-        # needs_host_socat() was removed when Apple container support was dropped
-        assert rt.llama_host_addr() == "host.docker.internal"
-
     def test_isolated_interface_is_eth1(self):
-        for name in ("podman", "docker"):
-            assert ContainerRuntime.create(name).proxy_isolated_interface == "eth1"
+        assert PodmanRuntime().proxy_isolated_interface == "eth1"
 
     def test_podman_resolves_host_addr_via_probe(self):
         from unittest.mock import MagicMock, patch
@@ -179,10 +157,9 @@ class TestLlamaHostReachability:
         with patch("runtimes.subprocess.run", side_effect=Exception("boom")):
             assert rt.resolve_llama_host_addr("proxy:latest") == PodmanRuntime.HOST_INTERNAL_FALLBACK_IP
 
-    def test_vm_runtimes_set_ip_forwarding(self):
-        """Podman/Docker set net.ipv4.ip_forward=1 for proxy NAT."""
+    def test_vm_runtime_sets_ip_forwarding(self):
+        """Podman sets net.ipv4.ip_forward=1 for proxy NAT."""
         assert PodmanRuntime().proxy_extra_run_args() == ["--sysctl", "net.ipv4.ip_forward=1"]
-        assert DockerRuntime().proxy_extra_run_args() == ["--sysctl", "net.ipv4.ip_forward=1"]
 
 
 # ---------------------------------------------------------------------------
@@ -191,22 +168,19 @@ class TestLlamaHostReachability:
 
 
 class TestIpv6RunArgs:
-    @pytest.mark.parametrize("name", ["podman", "docker"])
-    def test_vm_disables_ipv6_when_off(self, name):
-        rt = ContainerRuntime.create(name)
-        assert rt.ipv6_run_args(enabled=False) == ["--sysctl", "net.ipv6.conf.all.disable_ipv6=1"]
+    def test_vm_disables_ipv6_when_off(self):
+        assert PodmanRuntime().ipv6_run_args(enabled=False) == ["--sysctl", "net.ipv6.conf.all.disable_ipv6=1"]
 
-    @pytest.mark.parametrize("name", ["podman", "docker"])
-    def test_vm_enables_forwarding_for_proxy(self, name):
-        rt = ContainerRuntime.create(name)
-        assert rt.ipv6_run_args(enabled=True, forwarding=True) == ["--sysctl", "net.ipv6.conf.all.forwarding=1"]
+    def test_vm_enables_forwarding_for_proxy(self):
+        assert PodmanRuntime().ipv6_run_args(enabled=True, forwarding=True) == [
+            "--sysctl",
+            "net.ipv6.conf.all.forwarding=1",
+        ]
 
-    @pytest.mark.parametrize("name", ["podman", "docker"])
-    def test_vm_agent_needs_no_flag_when_on(self, name):
+    def test_vm_agent_needs_no_flag_when_on(self):
         """An enabled endpoint container (agent, forwarding=False) needs no flag:
         the default is IPv6-on, no-forwarding — exactly right."""
-        rt = ContainerRuntime.create(name)
-        assert rt.ipv6_run_args(enabled=True, forwarding=False) == []
+        assert PodmanRuntime().ipv6_run_args(enabled=True, forwarding=False) == []
 
 
 # ---------------------------------------------------------------------------
@@ -215,17 +189,6 @@ class TestIpv6RunArgs:
 
 
 class TestUpstreamNetworkHasIpv6:
-    def test_docker_enable_ipv6_flag(self):
-        assert DockerRuntime()._network_entry_has_ipv6({"EnableIPv6": True}) is True
-
-    def test_docker_ipam_v6_subnet(self):
-        entry = {"EnableIPv6": False, "IPAM": {"Config": [{"Subnet": "fd00::/64"}]}}
-        assert DockerRuntime()._network_entry_has_ipv6(entry) is True
-
-    def test_docker_v4_only(self):
-        entry = {"EnableIPv6": False, "IPAM": {"Config": [{"Subnet": "172.17.0.0/16"}]}}
-        assert DockerRuntime()._network_entry_has_ipv6(entry) is False
-
     def test_podman_ipv6_enabled_flag(self):
         assert PodmanRuntime()._network_entry_has_ipv6({"ipv6_enabled": True}) is True
 
@@ -238,16 +201,13 @@ class TestUpstreamNetworkHasIpv6:
         assert PodmanRuntime()._network_entry_has_ipv6(entry) is False
 
     def test_base_returns_unknown(self):
-        """Base class returns None (unknown); runtimes override when their JSON format is known."""
-        # Use DockerRuntime as a concrete example (base class is now abstract)
-        rt = DockerRuntime()
-        # DockerRuntime returns False for unknown formats (no EnableIPv6 or v6 subnet)
-        assert rt._network_entry_has_ipv6({"anything": True}) is False
+        """Base class returns None (unknown); a runtime overrides when its JSON format is known."""
+        assert ContainerRuntime._network_entry_has_ipv6(PodmanRuntime(), {"anything": True}) is None
 
     def test_inspect_command_failure_returns_none(self):
         from unittest.mock import MagicMock, patch
 
-        rt = DockerRuntime()
+        rt = PodmanRuntime()
         failed = MagicMock(returncode=1, stdout="")
         with patch("runtimes.subprocess.run", return_value=failed):
             assert rt.upstream_network_has_ipv6() is None
@@ -255,7 +215,84 @@ class TestUpstreamNetworkHasIpv6:
     def test_inspect_parses_json(self):
         from unittest.mock import MagicMock, patch
 
-        rt = DockerRuntime()
-        completed = MagicMock(returncode=0, stdout='[{"EnableIPv6": true}]')
+        rt = PodmanRuntime()
+        completed = MagicMock(returncode=0, stdout='[{"ipv6_enabled": true}]')
         with patch("runtimes.subprocess.run", return_value=completed):
             assert rt.upstream_network_has_ipv6() is True
+
+
+# ---------------------------------------------------------------------------
+# Nested containers (config.yaml nested_containers)
+# ---------------------------------------------------------------------------
+
+_STORE = "/home/pi/.local/share/containers"
+
+
+def _nested(**overrides) -> dict:
+    """A nested_containers config dict, as read_nested_containers_config returns."""
+    return {"enabled": True, "storage": "volume", "security": "disable", **overrides}
+
+
+class TestNestedContainerArgs:
+    def test_disabled_adds_nothing(self):
+        """Off by default: no devices, no relaxed label, no store, no env."""
+        rt = PodmanRuntime()
+        assert rt.nested_container_args(_nested(enabled=False), "abcdef1234") == []
+        assert rt.nested_container_args({}, "abcdef1234") == []
+
+    def test_enabled_grants_devices_and_env(self):
+        args = PodmanRuntime().nested_container_args(_nested(), "abcdef1234")
+        assert args.count("--device") == 2
+        assert "/dev/fuse" in args
+        assert "/dev/net/tun" in args
+        assert "XDG_RUNTIME_DIR=/run/user/1000" in args
+        assert "NESTED_CONTAINERS=true" in args
+
+    def test_enabled_grants_sys_admin_and_unmask(self):
+        """Both were measured as necessary, not predicted: without unmask=ALL the
+        inner runtime cannot write its sysctls (podman's read-only /proc binds are
+        locked in the nested userns), and without CAP_SYS_ADMIN podman's default
+        seccomp profile refuses sethostname/mount."""
+        args = PodmanRuntime().nested_container_args(_nested(), "abcdef1234")
+        assert "unmask=ALL" in args
+        assert args[args.index("--cap-add") + 1] == "SYS_ADMIN"
+
+    def test_enabled_does_not_grant_privileges(self):
+        """The load-bearing negative: nesting must not need --privileged, an
+        unconfined seccomp profile, a userns override, or a host socket."""
+        args = PodmanRuntime().nested_container_args(_nested(), "abcdef1234")
+        assert "--privileged" not in args
+        assert "--userns" not in args
+        assert not any("seccomp" in a for a in args)
+        assert not any("docker.sock" in a or "podman.sock" in a for a in args)
+
+    def test_disabled_grants_neither_sys_admin_nor_unmask(self):
+        """The relaxations must be scoped to nesting being explicitly enabled."""
+        args = PodmanRuntime().nested_container_args(_nested(enabled=False), "abcdef1234")
+        assert args == []
+
+    def test_volume_storage_mounts_named_volume(self):
+        args = PodmanRuntime().nested_container_args(_nested(storage="volume"), "abcdef1234")
+        assert args[args.index("--volume") + 1] == f"pi-nested-abcdef1234:{_STORE}"
+        assert "--mount" not in args
+
+    def test_tmpfs_storage_mounts_tmpfs(self):
+        args = PodmanRuntime().nested_container_args(_nested(storage="tmpfs"), "abcdef1234")
+        assert "--volume" not in args
+        assert any(a.startswith("type=tmpfs") and a.endswith(f"destination={_STORE}") for a in args)
+
+    def test_security_disable_is_the_default_label(self):
+        args = PodmanRuntime().nested_container_args(_nested(security="disable"), "abcdef1234")
+        assert args[args.index("--security-opt") + 1] == "label=disable"
+
+    def test_security_engine_t_keeps_agent_confined(self):
+        args = PodmanRuntime().nested_container_args(_nested(security="engine_t"), "abcdef1234")
+        assert args[args.index("--security-opt") + 1] == "label=type:container_engine_t"
+
+    def test_unknown_security_falls_back_to_disable(self):
+        args = PodmanRuntime().nested_container_args(_nested(security="whatever"), "abcdef1234")
+        assert args[args.index("--security-opt") + 1] == "label=disable"
+
+    def test_volume_name_is_per_project(self):
+        assert PodmanRuntime.nested_volume_name("abcdef1234") == "pi-nested-abcdef1234"
+        assert PodmanRuntime.nested_volume_name("0123456789") != PodmanRuntime.nested_volume_name("abcdef1234")

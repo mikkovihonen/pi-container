@@ -37,6 +37,14 @@ agent:
   env: {}
   mounts: []
 
+# Nested containers (rootless podman inside the agent container). Off by default:
+# enabling it relaxes the agent container's SELinux confinement and grants
+# /dev/fuse + /dev/net/tun. See docs/design/nested-containers.md.
+nested_containers:
+  enabled: false
+  storage: volume
+  security: disable
+
 # Transient tmpfs mounts inside the agent container (volatile; lost on stop).
 # These shadow this repo's own build/runtime artifacts so the agent works against
 # clean, empty dirs rather than the host's caches/locks/models.

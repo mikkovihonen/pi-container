@@ -21,15 +21,30 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 | `PI_IMAGE_TAG` | The tag of the pi container image to run | `pi-coding-agent:local` |
 | `PROXY_IMAGE_TAG` | The tag of the proxy container image to run | `pi-coding-agent-proxy:local` |
 | `LLAMA_BIN` | Path to the `llama-server` executable | `llama-server` or `/opt/homebrew/bin/llama-server` |
-| `BRIDGE_INTERFACE` | Host bridge interface for container networking | Per-runtime: `podman0` / `docker0` |
-| `PROXY_UPSTREAM_NETWORK` | The upstream network the proxy connects to for internet access | Per-runtime: `default` / `podman` / `bridge` |
+| `BRIDGE_INTERFACE` | Host bridge interface for container networking | `podman0` |
+| `PROXY_UPSTREAM_NETWORK` | The upstream network the proxy connects to for internet access | `podman` |
 | `LOG_LEVEL` | Log level | `INFO` |
 | `ADMIN_PASSWORD` | Password for mitmproxy Web UI | `CHANGEME` |
-| `CONTAINER_RUNTIME` | Container CLI to use (`docker` or `podman`) | Auto-detected (prefers `docker` > `podman`) |
+| `CONTAINER_RUNTIME` | Container CLI to use — `podman` is the only supported value | Auto-detected (`podman`) |
+| `BUILDER_IMAGE_TAG` | The tag of the toolchain image the agent image copies node/python/podman from | `pi-coding-agent-builder:local` |
+| `NODE_SOURCE` | `build` compiles Node from source in the toolchain image (~1 hour) instead of staging the official tarball | `prebuilt` |
+| `PYTHON_OPTIMIZE` | `0` skips the PGO CPython build in the toolchain image: a fraction of the memory and time, ~10-20% slower Python | `1` (PGO on) |
+| `PI_MEMORY_PREFLIGHT` | `0` skips the pre-build memory check (see below) | `1` (check on) |
 
-`BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` are derived from `CONTAINER_RUNTIME` and rarely need setting; provide them only to override the per-runtime default for your host.
+`BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` have per-runtime defaults and rarely need setting; provide them only to override the default for your host.
 
-> Per-project settings (IPv6, proxy DNS, mitmweb UI exposure, llama-server startup tuning, resource limits, tmpfs, flow export, egress, extra agent env/mounts) are **not** environment variables — they live in `.pi-container/config.yaml`, documented below.
+`NODE_SOURCE` and `PYTHON_OPTIMIZE` are the two toolchain knobs `build.sh` forwards as build args. The **component versions themselves** are not environment variables — every version, git commit and SHA-256 the toolchain image builds from is an `ARG` in [`pi-coding-agent-builder/Containerfile`](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-builder/Containerfile), declared on the stage that uses it. Bumping podman, Node, CPython, Go, Rust, netavark or any pip pin is an edit in that one file. Overriding one for a one-off build means calling podman directly, since `build.sh` forwards only the two knobs above:
+
+```bash
+podman build --build-arg PODMAN_VERSION=v6.1.0 --build-arg PODMAN_COMMIT=<peeled-sha> \
+    --tag pi-coding-agent-builder:local -f pi-coding-agent-builder/Containerfile .
+```
+
+A version and its hashes must move together — the build refuses to start if any pin is unset or empty (naming the `ARG`), and a mismatched hash fails the download rather than building something unverified.
+
+> **Docker is not supported.** pi-container's isolation model rests on the agent container running inside a user namespace where container uid 0 maps to an unprivileged host user — stock Docker provides no such remap, so the same configuration would ship two materially different security guarantees. See [Nested containers](#nested-containers).
+
+> Per-project settings (IPv6, proxy DNS, mitmweb UI exposure, llama-server startup tuning, resource limits, tmpfs, flow export, egress, nested containers, extra agent env/mounts) are **not** environment variables — they live in `.pi-container/config.yaml`, documented below.
 
 ## Per-workspace Configuration
 
@@ -230,6 +245,10 @@ agent:
   mounts: []                  # extra bind mounts (absolute host paths)
   capabilities: []            # Linux capabilities to add (e.g., SYS_PTRACE)
   devices: []                 # device passthroughs (e.g., /dev/video0:/dev/video0)
+nested_containers:
+  enabled: false              # let the agent run its own containers (off by default)
+  storage: volume             # nested image store: volume | tmpfs
+  security: disable           # agent SELinux label: disable | engine_t
 tmpfs:
   paths: []
 flow_export:
@@ -313,6 +332,83 @@ agent:
 
 Device entries support the optional `mode` suffix (`r` for read-only, `w` for write-only, `rw` for read-write; default is `rw` if omitted).
 
+<a name="nested-containers"></a>
+### Nested containers
+
+`nested_containers` lets the agent run its own containers **inside** the agent container — `podman build`, `podman run`, `docker compose up`, testcontainers-style integration tests — as rootless podman. It is **off by default**: enabling it is a genuine (small, bounded) reduction in the agent container's confinement.
+
+```yaml
+# .pi-container/config.yaml
+nested_containers:
+  enabled: false
+  storage: volume     # volume | tmpfs
+  security: disable   # disable | engine_t
+```
+
+| Key | Values | Meaning |
+|-----|--------|---------|
+| `enabled` | `false` (default) / `true` | When false, no extra run flags, no volume, no entrypoint work — the only cost is the toolchain's ~150 MB in the image. |
+| `storage` | `volume` (default) / `tmpfs` | Where nested image layers live. `volume` is a persistent per-project named volume (`pi-nested-<project-hash>`) that survives runs, so base images are not re-pulled every session. `tmpfs` is a volatile RAM disk — it needs a large `podman machine` and re-pulls each run. |
+| `security` | `disable` (default) / `engine_t` | The agent container's SELinux label (see below). |
+
+**Egress is still intercepted.** Containers the agent starts are *children* — in its mount and network namespaces — so rootless podman NATs their traffic (via `pasta`) into the agent's own network stack, subject to the agent's routes. The agent's only route out is the proxy, and the proxy's `FORWARD` policy is `DROP`. Verified: with the agent on the `--internal` isolated network, a nested container reaching for a raw IP gets `Network unreachable` from the kernel. Nesting is **not** a bypass, and the proxy needs no changes.
+
+Two honest consequences:
+
+- **Flow attribution coarsens.** `flow_export` partitions captured flows by client IP, and nested-container traffic carries the agent's IP — so nested flows are indistinguishable from the agent's own.
+- **Per-inner-container resource limits are best-effort.** Rootless podman in a container has no delegated cgroup subtree, so `podman run --memory=…` *inside* the agent does not enforce. `resources.agent` still bounds the whole tree in aggregate — a nested workload cannot exceed the agent's budget.
+
+**What `enabled: true` actually changes.** The agent container gains, *only* while nesting is enabled:
+
+| Flag | Why it is required |
+|------|--------------------|
+| `--device /dev/fuse` | `fuse-overlayfs` fallback when native rootless overlay is unavailable. |
+| `--device /dev/net/tun` | `pasta` creates the inner tap device. Grants no egress — the only route off the isolated network is still the proxy. |
+| `--security-opt label=disable` | `/dev/net/tun` is inaccessible under the default SELinux label (see below). |
+| `--security-opt unmask=ALL` | Podman bind-mounts parts of `/proc` read-only and masks others in the agent container; those mounts are **locked** in the nested user namespace, so without this the inner runtime fails with `crun: open /proc/sys/net/ipv4/ping_group_range: Read-only file system`. |
+| `--cap-add SYS_ADMIN` | Podman's default seccomp profile permits `mount`/`sethostname`/`umount2`/`pivot_root` **only** when `CAP_SYS_ADMIN` is in the container's capability set, and a seccomp filter cannot be relaxed from inside a nested user namespace. Without it the inner runtime fails with `crun: sethostname: Operation not permitted`. |
+
+`CAP_SYS_ADMIN` sounds alarming and deserves the plain reading: inside a user namespace it is **namespaced**. The agent container's userns maps container uid 0 to an unprivileged host user, so the capability confers power over what that namespace owns — not over the host, the host kernel's global state, or other containers. It is nonetheless the broadest capability there is, and it is the main reason nesting is opt-in.
+
+Still **absent**, with nesting on: `--privileged`, `seccomp=unconfined` (the filter stays active for everything the profile does not gate on `CAP_SYS_ADMIN`), `--userns` overrides, and any container-runtime socket. Mounting the host runtime socket (`/var/run/docker.sock`) is **never** offered — that socket is a full-privilege API to the host runtime and would delete the isolation model, not weaken it.
+
+Egress interception is unaffected by any of this. Verified with the final flag set: with the agent attached only to the `--internal` isolated network, an inner container gets `Network unreachable` from the kernel for a raw IP, and no HTTPS connection succeeds.
+
+**SELinux posture.** On an SELinux-enforcing host, `/dev/net/tun` is inaccessible under the default `container_t` label, so one of two labels is required:
+
+| `security` | Agent flag | Trade-off |
+|-----------|-----------|-----------|
+| `disable` (default) | `--security-opt label=disable` | Nested containers need no special flags — `docker compose`, testcontainers and anything driving the API socket work unmodified. The agent loses SELinux *type* confinement, but keeps the user namespace (container uid 0 is still an unprivileged host user), rootlessness, seccomp, the capability bounding set, the routing dead end, and the absence of any host socket. |
+| `engine_t` | `--security-opt label=type:container_engine_t` | The agent stays SELinux-confined, but **every** nested container must then be run with `--security-opt unmask=all` or it fails in `crun` (`mount tmpfs to proc/acpi: Permission denied`). `unmask` is not a `containers.conf` key, so this cannot be made transparent. |
+
+**Registries must be allowlisted.** The proxy's allowlist is `default_action: block`, so image pulls 403 until a registry is permitted. `allowlist.yaml` ships a commented-out `container-registries-allow` rule (Docker Hub, GHCR, Quay, GCR) — uncomment it, or add the registries you use. `run.py` logs a warning at startup when nesting is enabled and no registry hostname is allowed.
+
+**TLS inside nested containers.** The image ships `/etc/containers/containers.conf.d/50-pi-container.conf`, which mounts the agent's full CA bundle (system CAs *plus* the mitmproxy CA) into every nested container and points `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `GIT_SSL_CAINFO` at it. That covers tools honouring those variables (OpenSSL, Go, Node, Python-requests, curl, git). A tool that only reads a hardcoded path inside its own image still fails — the fix is per-image (`COPY` the CA in a build stage).
+
+**Machine sizing.** A podman machine of **at least 4 GB is required** to build the agent image at all (see [Getting Started](getting-started.md#prerequisites)), and nesting is the workload most likely to expose anything smaller than that: the default `resources.agent.memory` is `16g`, which a 4 GB VM cannot honour. Raise the machine (`podman machine set --memory 8192` or more) before enabling nesting, and especially before choosing `storage: tmpfs`, where the first sizeable image pull lands in RAM.
+
+The same limit bites at **image build** time, because the [toolchain image](architecture.md#toolchain-builder-image) compiles CPython, podman and netavark (and Node too, with `NODE_SOURCE=build`): one PGO compile job peaks near 900 MiB, and anything already running in the VM (other containers, a live `pi` session) eats into the total — which is why 2 GiB is not enough and 4 GB is the documented minimum. `build.sh` therefore checks available memory in the builder **before starting the build** and refuses with the fix options rather than dying minutes later at `gcc: fatal error: Killed signal terminated program cc1`:
+
+```
+ERROR: Only 276 MiB of memory is available where images are built, but compiling
+       Python needs ~900 MiB for a single compile job. Not starting the build …
+Fix one of:
+  * give the VM more memory:  podman machine stop && podman machine set --memory 4096 && podman machine start
+  * free memory in the VM:    stop containers you are not using (podman ps)
+  * skip the PGO build:       PYTHON_OPTIMIZE=0 ./build.sh  (~10-20% slower Python)
+  * already-cached Python:    PI_MEMORY_PREFLIGHT=0 ./build.sh  (skips this check)
+```
+
+The check reads `MemAvailable` (reclaimable page cache counts — on a warm builder it is an order of magnitude above `MemFree`) from inside the podman VM, since that is where the build runs. It applies to `build.sh` only: `run.py`'s project-image build compiles nothing, because the toolchain arrives as a `COPY` from a prebuilt image.
+
+The compilers are also capped by *memory* rather than core count — `make -j`, `go build -p` and `cargo --jobs` each get `MemAvailable / peak-RSS-per-job` jobs, never more than `nproc`. Giving the VM more memory automatically raises the cap; `MAKE_JOBS` overrides it for CPython.
+
+**Storage lifecycle.** The `pi-nested-<project-hash>` volume carries the same labels as project-specific images (`pi-container.type=nested-storage`, `pi-container.project.hash`, `pi-container.project.path`), so the same orphan-cleanup pass reclaims it when the project directory is deleted or moved — see [Orphan detection](#orphan-detection). Concurrent runs in one workspace share the volume (that is what makes the layer cache shared); they interlock through containers/storage's own lockfiles, which live inside the shared graph root, while each run keeps its own podman run root under its private `XDG_RUNTIME_DIR`.
+
+**`docker` and `compose` both work out of the box.** A `docker` → `podman` shim is installed at `/usr/local/bin/docker`, so tools that shell out to `docker` by name work (`docker build`, `docker run`, `docker ps`, …), and **`podman-compose`** ships as the compose provider — so `docker compose up` and `podman compose up` work with no per-project setup. The provider is pinned in `containers.conf` (`compose_providers = ["podman-compose"]`); without that pin podman would try `docker-compose` first and report it missing instead of using the provider that is installed.
+
+For the full design — including the rejected alternatives (host socket, privileged DinD, sibling sidecar) and the verification log — see `docs/design/nested-containers.md`.
+
 ### Dependency definition files
 
 Project-specific setup is defined in two files under `.pi-container/dependencies/`. These are **baked into the project-specific image at build time**, not installed at runtime. This eliminates redundant `apt-get update` and `apt-get install` calls at container startup.
@@ -363,18 +459,22 @@ git clone https://github.com/example/repo.git
 
 Project-specific images are cached and reused across runs. pi-container computes a content hash of:
 - `.pi-container/dependencies/root/commands.sh` (if it exists and is non-empty)
+- `.pi-container/dependencies/pi/commands.sh` (if it exists and is non-empty)
 - `pi-coding-agent/Containerfile` (always)
 - `pi-coding-agent/entrypoint.sh` (always)
 
+The toolchain (`pi-coding-agent-builder/`) is deliberately **not** hashed: the project image consumes it as a built image, not as source. What invalidates a project image there is the builder image's **build time** — see below.
+
 The hash is stored as the `pi-container.hash` label on the image. The image tag is `pi-container-project-<project-hash>-<image-hash>.local`, where:
 - `<project-hash>` is the first 10 characters of `SHA-256(str(project_dir.resolve()))` — the same hash used for proxy and network naming (`pi-proxy-<hash>`, `pi-isolated-net-<hash>`).
-- `<image-hash>` is the first 16 characters of the content digest computed from `root/commands.sh`, `Containerfile`, and `entrypoint.sh`.
+- `<image-hash>` is the first 16 characters of the content digest computed from `root/commands.sh`, `pi/commands.sh`, `Containerfile`, and `entrypoint.sh`.
 
 On each run, pi-container:
 1. Enumerates all existing project-specific images (those with the `pi-container.type=project` label).
 2. Removes any images whose `pi-container.project.hash` matches this project but whose `pi-container.hash` differs from the current content hash.
-3. If no image matches the current hash, builds a new one.
-4. If an image already matches, uses it (no rebuild).
+3. Compares the image's `pi-container.build.time` against the newest build time of the two images it copies content from — `pi-coding-agent-proxy:local` (the mitmproxy CA certificate) and `pi-coding-agent-builder:local` (the toolchain). If either is newer, the copy is stale and the image is rebuilt.
+4. If no image matches the current hash, builds a new one.
+5. If an image already matches and is not stale, uses it (no rebuild).
 
 This enables:
 - **Automatic invalidation**: Editing a definition file, the Containerfile, or the entrypoint triggers a rebuild on the next run, and the old image is removed.
@@ -401,7 +501,7 @@ The `build_project_image()` function in `src/build.py` accepts the following par
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `runtime` | `str` | Yes | Container runtime (`docker` or `podman`) |
+| `runtime` | `str` | Yes | Container runtime (`podman`) |
 | `root_commands_path` | `str` | Yes | Absolute path to `root/commands.sh` on the host |
 | `pi_commands_path` | `str` | Yes | Absolute path to `pi/commands.sh` on the host |
 | `image_tag` | `str` | Yes | Image tag (format: `pi-container-project-<project-hash>-<image-hash>.local`) |
@@ -414,16 +514,16 @@ The `build_project_image()` function in `src/build.py` accepts the following par
 
 | Label | Purpose | How it's calculated |
 |-------|---------|---------------------|
-| `pi-container.hash` | Content hash for cache invalidation. Compares against current definition files. | SHA-256 of concatenated hashes of: `.pi-container/dependencies/root/commands.sh` (if present), `pi-coding-agent/Containerfile`, `pi-coding-agent/entrypoint.sh` → 16-char hex digest |
+| `pi-container.hash` | Content hash for cache invalidation. Compares against current definition files. | SHA-256 of concatenated hashes of: `.pi-container/dependencies/root/commands.sh` and `pi/commands.sh` (each if non-empty), `pi-coding-agent/Containerfile`, `pi-coding-agent/entrypoint.sh` → 16-char hex digest |
 | `pi-container.project.hash` | Project identity hash. Links the image to its source workspace. | First 10 chars of SHA-256 of the absolute project directory path → 10-char hex digest |
 | `pi-container.project.path` | **Absolute path of the project directory at build time.** Used for orphan detection — if the path no longer exists, the image is automatically removed on the next run. | Stored as-is from `PROJECT_DIR.resolve()` at build time |
 | `pi-container.build.time` | ISO 8601 timestamp of the build. Used for age-based discovery. | UTC timestamp at build time in ISO 8601 format (e.g., `2024-01-15T12:30:45Z`) |
-| `pi-container.type` | Set to `"project"` for project-specific images (enables system-wide discovery via `docker image ls --filter label=pi-container.type=project`). | Always set to `"project"` by `build_project_image()` |
+| `pi-container.type` | Set to `"project"` for project-specific images (enables system-wide discovery via `podman image ls --filter label=pi-container.type=project`). | Always set to `"project"` by `build_project_image()` |
 
 **Key principles:**
 
-- The shared base image contains only packages essential to pi itself (see [Shared Base apt Packages](project-specific-containers.md#shared-base-apt-packages)).
-- Any additional packages must be installed via `root/commands.sh`.
+- The shared base image carries the language runtimes and tooling every workspace needs: **Node 26**, **CPython 3.14 with `uv`**, the nested-container toolchain (**podman**, `netavark`, `aardvark-dns`) and `podman-compose`. All of those are compiled in the [toolchain builder image](architecture.md#toolchain-builder-image) and copied in. Anything beyond that is project-specific and belongs in `root/commands.sh`.
+- None of it is per-project. Building Python in `root/commands.sh` meant a workspace that left the file at its no-op default had no interpreter at all, and every project-image rebuild recompiled CPython — the slowest and most OOM-prone step in the build. A project-image rebuild now compiles nothing; it copies a prebuilt tree.
 - Both files are optional — if absent, the workspace uses the shared image.
 - Changes to definition files trigger a rebuild on the next `run.sh` invocation (detected via image label comparison), and old images are removed automatically.
 
@@ -459,7 +559,7 @@ tmpfs:
     - /workspace/node_modules/.cache
 ```
 
-Each path is mounted at the same absolute location inside the container. On podman/docker, mounts use the `notmpcopyup` flag so they start empty rather than copying the host's bind-mounted content into the tmpfs. Paths are deduplicated and sorted for deterministic output.
+Each path is mounted at the same absolute location inside the container. Mounts use podman's `notmpcopyup` flag so they start empty rather than copying the host's bind-mounted content into the tmpfs. Paths are deduplicated and sorted for deterministic output.
 
 ### Flow export
 

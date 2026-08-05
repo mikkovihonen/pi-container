@@ -102,6 +102,14 @@ SCHEMA: dict = {
             "mounts": {"type": list},
         },
     },
+    "nested_containers": {
+        "type": dict,
+        "keys": {
+            "enabled": {"type": (bool, str, int)},  # YAML bools, "true"/"1"/0/1 strings
+            "storage": {"type": str},  # volume | tmpfs
+            "security": {"type": str},  # disable | engine_t
+        },
+    },
     "tmpfs": {
         "type": dict,
         "keys": {

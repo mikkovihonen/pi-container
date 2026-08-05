@@ -205,6 +205,40 @@ def read_proxy_ui_expose(config_dir: Path | None = None) -> str:
     return value if value in ("localhost", "lan") else "localhost"
 
 
+_DEFAULT_NESTED_CONTAINERS = {"enabled": False, "storage": "volume", "security": "disable"}
+_NESTED_STORAGE_MODES = ("volume", "tmpfs")
+_NESTED_SECURITY_MODES = ("disable", "engine_t")
+
+
+def read_nested_containers_config(config_dir: Path | None = None) -> dict:
+    """Nested-container settings from config.yaml ``nested_containers``.
+
+    Returns ``{"enabled": <bool>, "storage": "volume"|"tmpfs", "security":
+    "disable"|"engine_t"}`` — whether the agent may run its own containers
+    (rootless podman inside the agent container), where the nested image layers
+    live, and which SELinux posture the agent container gets.
+
+    Fail-safe: an absent, malformed or unrecognised value falls back to
+    :data:`_DEFAULT_NESTED_CONTAINERS`, i.e. nesting **off**. Enabling it relaxes
+    the agent container's SELinux confinement and grants ``/dev/fuse`` +
+    ``/dev/net/tun``, so it must never be turned on by accident. Traffic from
+    nested containers still egresses through the proxy — nesting is not a bypass
+    (see ``docs/design/nested-containers.md``).
+    """
+    section = load_project_config(config_dir).get("nested_containers") or {}
+    storage = str(section.get("storage") or "").strip().lower()
+    security = str(section.get("security") or "").strip().lower()
+    if storage and storage not in _NESTED_STORAGE_MODES:
+        logger.warning(f"Unknown nested_containers.storage '{storage}'; using 'volume'.")
+    if security and security not in _NESTED_SECURITY_MODES:
+        logger.warning(f"Unknown nested_containers.security '{security}'; using 'disable'.")
+    return {
+        "enabled": _egress_truthy(section.get("enabled", _DEFAULT_NESTED_CONTAINERS["enabled"])),
+        "storage": storage if storage in _NESTED_STORAGE_MODES else _DEFAULT_NESTED_CONTAINERS["storage"],
+        "security": security if security in _NESTED_SECURITY_MODES else _DEFAULT_NESTED_CONTAINERS["security"],
+    }
+
+
 def read_agent_extras(config_dir: Path | None = None) -> dict:
     """Extra agent-container env vars, bind mounts, capabilities, and devices from config.yaml ``agent``.
 
@@ -498,8 +532,9 @@ class ContainerNetworkManager:
         else:
             logger.info(f"Network {self.network_name} already exists, skipping creation.")
 
-        # Start proxy container. It attaches to the upstream network (eth0 →
-        # internet) and the isolated network (eth1 → agent). LLAMA_HOST_ADDR
+        # Start proxy container. It attaches to both networks at run time — the
+        # upstream network (eth0 → internet) and the isolated network (eth1 →
+        # agent), with interface names pinned. LLAMA_HOST_ADDR
         # tells the proxy where to DNAT llama-server traffic; when unset the
         # proxy falls back to resolving its own default gateway.
         logger.info(f"Starting proxy container {self.proxy_name} from {self.proxy_image}...")
@@ -590,15 +625,6 @@ class ContainerNetworkManager:
         # Label (not the argv) is what surfaces on failure — cmd carries
         # ADMIN_PASSWORD and must never reach logs/tracebacks.
         run_quiet(cmd, label=f"start proxy container {self.proxy_name}", logger=logger)
-
-        # Some runtimes (Docker) attach the isolated network only after run.
-        connect_argv = self.runtime.proxy_secondary_connect_argv(self.proxy_name, self.network_name)
-        if connect_argv:
-            run_quiet(
-                [self.container_runtime, *connect_argv],
-                label=f"connect {self.proxy_name} to {self.network_name}",
-                logger=logger,
-            )
 
         # Wait for proxy to be ready via health probe
         self._wait_for_proxy_health(timeout=30)
