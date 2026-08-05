@@ -108,11 +108,11 @@ class TestValidateEnvironment:
             mock_shutil.which.side_effect = lambda cmd: {
                 "hf": "/usr/bin/hf",
                 "socat": "/usr/bin/socat",
-                "docker": "/usr/bin/docker",
+                "podman": "/usr/bin/podman",
             }.get(cmd)
 
             result = validate_environment("/usr/bin/llama-server")
-            assert result == "docker"
+            assert result == "podman"
 
     def test_llama_bin_not_found_raises(self):
         with patch("util.Path") as mock_path:
@@ -135,7 +135,7 @@ class TestValidateEnvironment:
 
             mock_shutil.which.side_effect = lambda cmd: {
                 "socat": "/usr/bin/socat",
-                "docker": "/usr/bin/docker",
+                "podman": "/usr/bin/podman",
             }.get(cmd)
 
             with pytest.raises(EnvironmentError, match="hf not found"):
@@ -150,12 +150,12 @@ class TestValidateEnvironment:
 
             mock_shutil.which.side_effect = lambda cmd: {
                 "hf": "/usr/bin/hf",
-                "docker": "/usr/bin/docker",
+                "podman": "/usr/bin/podman",
             }.get(cmd)
 
             # Should succeed - socat is no longer required
             result = validate_environment("/usr/bin/llama-server")
-            assert result == "docker"
+            assert result == "podman"
 
     def test_no_container_runtime_raises(self):
         with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
@@ -168,11 +168,11 @@ class TestValidateEnvironment:
                 "socat": "/usr/bin/socat",
             }.get(cmd)
 
-            with pytest.raises(EnvironmentError, match="No supported container runtime"):
+            with pytest.raises(EnvironmentError, match="podman not found"):
                 validate_environment("/usr/bin/llama-server")
 
-    def test_returns_docker_first(self):
-        """docker should be preferred over podman (container runtime removed)."""
+    def test_docker_alone_is_not_enough(self):
+        """Docker support was removed: a host with only docker must fail loudly."""
         with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
@@ -181,24 +181,24 @@ class TestValidateEnvironment:
             mock_shutil.which.side_effect = lambda cmd: {
                 "hf": "/usr/bin/hf",
                 "docker": "/usr/bin/docker",
-                "podman": "/usr/bin/podman",
             }.get(cmd)
 
-            assert validate_environment("/usr/bin/llama-server") == "docker"
+            with pytest.raises(EnvironmentError, match="podman not found"):
+                validate_environment("/usr/bin/llama-server")
 
-    def test_returns_docker_when_only_docker(self):
-        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
+    def test_explicit_docker_runtime_raises(self):
+        """CONTAINER_RUNTIME=docker is no longer a supported value."""
+        with (
+            patch("util.Path") as mock_path,
+            patch("util.shutil"),
+            patch.dict(os.environ, {"CONTAINER_RUNTIME": "docker"}),
+        ):
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
 
-            mock_shutil.which.side_effect = lambda cmd: {
-                "hf": "/usr/bin/hf",
-                "socat": "/usr/bin/socat",
-                "docker": "/usr/bin/docker",
-            }.get(cmd)
-
-            assert validate_environment("/usr/bin/llama-server") == "docker"
+            with pytest.raises(EnvironmentError, match="Unsupported CONTAINER_RUNTIME"):
+                validate_environment("/usr/bin/llama-server")
 
     def test_returns_podman_when_only_podman(self):
         with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
@@ -253,10 +253,10 @@ class TestValidateEnvironment:
             mock_shutil.which.side_effect = lambda cmd: {
                 "hf": "/usr/bin/hf",
                 "socat": "/usr/bin/socat",
-                "docker": "/usr/bin/docker",
+                "podman": "/usr/bin/podman",
             }.get(cmd)
 
-            assert validate_environment("/usr/bin/llama-server") == "docker"
+            assert validate_environment("/usr/bin/llama-server") == "podman"
 
 
 # ---------------------------------------------------------------------------

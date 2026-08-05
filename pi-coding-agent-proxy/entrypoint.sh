@@ -72,11 +72,11 @@ ipt -t nat -A PREROUTING -i eth1 -p tcp --dport 53 -j REDIRECT --to-port 5353
 # (hosts-file entry above) to eth1's IP, then hits http://llama:<cp>/v1.
 # DNAT redirects that traffic out eth0 to wherever the host llama-server is
 # reachable:
-#   * LLAMA_HOST_ADDR set (podman/docker): the host loopback is reached via
-#     host.containers.internal / host.docker.internal (gvproxy). Resolved to an
-#     IP here because iptables DNAT requires a numeric destination.
-#   * LLAMA_HOST_ADDR unset (Apple container): fall back to the default gateway,
-#     which is the host bridge IP where a host-side socat exposes llama-server.
+#   * LLAMA_HOST_ADDR set (podman): the host loopback is reached via
+#     host.containers.internal (gvproxy). Resolved to an IP by run.py because
+#     iptables DNAT requires a numeric destination.
+#   * LLAMA_HOST_ADDR unset: fall back to the default gateway, i.e. the host
+#     bridge IP.
 if [ -n "$LLAMA_PORTS" ]; then
     if [ -n "$LLAMA_HOST_ADDR" ]; then
         if echo "$LLAMA_HOST_ADDR" | grep -qE '^[0-9]+(\.[0-9]+){3}$'; then

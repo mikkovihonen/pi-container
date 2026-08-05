@@ -1,5 +1,29 @@
-FROM node:26.3.1-trixie-slim AS runner
+# Plain Debian, not node:<ver>-trixie-slim. Node is built in
+# pi-coding-agent-builder/ like everything else and arrives through the COPY below, so
+# the base image no longer decides which Node this is — nor carries anything else on
+# that tag's behalf. (The node: images are themselves debian:trixie-slim plus a Node
+# tarball, so this is the same Debian, minus the tarball.)
+FROM debian:trixie-slim AS runner
 
+# Runtime packages, plus the -dev headers Python needs to build native wheels.
+#
+# Nothing here is a *toolchain*: Node, CPython, podman, netavark and aardvark-dns are
+# compiled by pi-coding-agent-builder/Containerfile and arrive via the COPY below.
+# What apt still provides for the nested-container stack is the pieces Debian ships
+# at a version podman 6 accepts:
+#   crun, conmon    the OCI runtime and its monitor (podman 6 needs conmon >= 2.1.7)
+#   catatonit       the init used by `podman run --init`
+#   passt           pasta, the only rootless network stack podman 6 supports
+#   fuse-overlayfs  the storage driver when overlay-on-overlay is unavailable
+#   uidmap          newuidmap/newgidmap, for the nested user namespace's id maps
+#   nftables        the `nft` binary netavark shells out to for a bridge network
+#   libcap2-bin     setcap, used below on newuidmap/newgidmap
+#   libseccomp2     linked by podman (built with the seccomp tag) and by crun
+#
+# The lib*-dev block mirrors pi-coding-agent-builder/Containerfile's — the Python
+# built there links against these, and keeping the headers means `uv sync` and
+# `pip install` can still compile a wheel from source in a workspace, which is the
+# common case for a coding agent. Keep the two lists in step.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     build-essential \
@@ -43,8 +67,168 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     yq \
     bzip2 \
     gawk \
-    && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
-    && locale-gen en_US.UTF-8
+    # Python: headers for building native wheels in a workspace
+    libbz2-dev \
+    libdb5.3-dev \
+    libexpat1-dev \
+    libffi-dev \
+    libgdbm-dev \
+    liblzma-dev \
+    libncurses5-dev \
+    libncursesw5-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libssl-dev \
+    uuid-dev \
+    zlib1g-dev \
+    # Nested containers
+    catatonit \
+    conmon \
+    crun \
+    fuse-overlayfs \
+    libcap2-bin \
+    libseccomp2 \
+    nftables \
+    passt \
+    uidmap \
+ && rm -rf /var/lib/apt/lists/* \
+ && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
+ && locale-gen en_US.UTF-8
+
+# ─── Toolchain from the builder image ────────────────────────────────────────
+# Node, CPython + uv + podman-compose, podman built with our own build tags, and the
+# netavark/aardvark-dns release podman 6 requires. All staged under /out by
+# pi-coding-agent-builder/Containerfile, which build.sh builds first.
+#
+# Copying a prebuilt tree instead of compiling in place is what keeps a
+# project-specific image rebuild cheap: this layer is invalidated only when the
+# builder image itself changes, and even then it is a copy, not a compile.
+COPY --from=pi-coding-agent-builder:local /out/ /
+
+# uv reads the system trust store, which carries the mitmproxy CA (installed below).
+ENV UV_SYSTEM_CERTS=1
+
+# Fail the build here, not at the agent's first `node`/`python` or first nested
+# container. A staged binary that cannot resolve a shared library (an ABI skew between
+# the builder's base image and this one, or a missing runtime package above) is
+# otherwise invisible until runtime.
+#
+# The manifest is assembled from one fragment per build script — see stage_record() in
+# pi-coding-agent-builder/common.sh for why they arrive separately — into a single file
+# the agent can read: /usr/local/share/pi-container/toolchain-versions.txt.
+RUN ldconfig \
+ && node --version \
+ && npm --version \
+ && python --version \
+ && pip --version \
+ && uv --version \
+ && podman --version \
+ && /usr/local/libexec/podman/netavark --version \
+ && /usr/local/libexec/podman/aardvark-dns --version \
+ && cat /usr/local/share/pi-container/toolchain-versions.d/*.txt \
+      | sort > /usr/local/share/pi-container/toolchain-versions.txt \
+ && cat /usr/local/share/pi-container/toolchain-versions.txt
+
+# ─── Nested container toolchain ──────────────────────────────────────────────
+# Lets the agent run its own rootless podman *inside* this container (podman
+# build/run, docker compose, testcontainers). Always present in the image but
+# inert unless nested_containers.enabled is set in .pi-container/config.yaml —
+# run.py then passes the device/security/storage flags (see
+# docs/design/nested-containers.md).
+
+# Nested subordinate ID ranges for `pi` (uid 1000). These must fall INSIDE the
+# UID range the outer user namespace maps (verified: container UIDs 1..1000000).
+# The split around 1000 mirrors quay.io/podman/stable and stays valid even on
+# hosts with only the conventional 65536-wide subuid range.
+RUN printf 'pi:1:999\npi:1001:64535\n' > /etc/subuid \
+ && cp /etc/subuid /etc/subgid \
+ # newuidmap/newgidmap need CAP_SETUID/CAP_SETGID to write the nested namespace's
+ # id maps. File capabilities, NOT setuid-root: measured in this exact setup
+ # (rootless podman on an applehv machine, agent userns 0→501 / 1→100000), a
+ # setuid-root newuidmap acquires CAP_SETUID yet still fails the kernel's id-map
+ # permission check with "write to uid_map failed: Operation not permitted",
+ # while cap_setuid=ep succeeds. This matches quay.io/podman/stable.
+ && chmod 0755 /usr/bin/newuidmap /usr/bin/newgidmap \
+ && setcap cap_setuid+ep /usr/bin/newuidmap \
+ && setcap cap_setgid+ep /usr/bin/newgidmap
+
+# A `docker` on PATH, because a great many tools shell out to it by name
+# (testcontainers, Makefiles, CI scripts). Debian's podman-docker package would
+# provide this, but it is not installed: it depends on Debian's podman, which is
+# 5.4.2 and would land next to the 6.x built here.
+RUN printf '%s\n' '#!/bin/sh' '# pi-container: docker(1) is podman.' \
+      'exec /usr/local/bin/podman "$@"' > /usr/local/bin/docker \
+ && chmod 0755 /usr/local/bin/docker
+
+# /etc/containers: what podman reads before it will run anything.
+#
+# These files normally come from Debian's containers-common, which is not
+# installed — it is 0.62.2, and podman 6 wants configuration from common 0.68.0.
+# Writing them here is both correct for this podman and more control than the
+# package gives, and being inline in this Containerfile means _compute_image_hash()
+# invalidates project images when they change.
+#
+#   policy.json     REQUIRED — podman refuses to pull or run without it. This is
+#                   upstream's default: accept unsigned images. Signature policy is
+#                   not the control that matters here; what the agent can reach at
+#                   all is, and that is the proxy's allowlist.
+#   registries.conf Short names ("alpine") resolve against docker.io only. Podman's
+#                   short-name mode would otherwise have nothing to resolve against
+#                   and fail. A single entry also means no ambiguous-name prompt,
+#                   which would hang a non-interactive agent.
+RUN mkdir -p /etc/containers \
+ && printf '%s\n' \
+      '{' \
+      '  "default": [{"type": "insecureAcceptAnything"}],' \
+      '  "transports": {' \
+      '    "docker-daemon": {"": [{"type": "insecureAcceptAnything"}]}' \
+      '  }' \
+      '}' \
+    > /etc/containers/policy.json \
+ && printf '%s\n' \
+      'unqualified-search-registries = ["docker.io"]' \
+      'short-name-mode = "enforcing"' \
+    > /etc/containers/registries.conf
+
+# Defaults for every container the agent starts inside this one. Baked into /etc
+# (NOT under /home/pi — that path is tmpfs at runtime and would mask anything the
+# image shipped there) and written inline so _compute_image_hash(), which hashes
+# this Containerfile, invalidates project images when it changes.
+#   * `mounts`, not `volumes` — [containers] volumes is silently ignored.
+#   * the mounted bundle is the agent's FULL trust store (system CAs plus the
+#     mitmproxy CA installed below), so pointing SSL_CERT_FILE at it is strictly
+#     additive. Without it, TLS from inside an arbitrary image (alpine, postgres)
+#     fails: those images know nothing about the mitmproxy CA.
+#   * cgroupfs because there is no cgroup delegation inside the agent container
+#     and systemd/dbus are absent; per-inner-container --memory/--cpus are then
+#     best-effort (resources.agent still bounds the whole tree).
+#   * log_driver is podman's own default for a build without the systemd tag
+#     (see pi-coding-agent-builder/build-podman.sh). Stated explicitly so that
+#     `podman logs` cannot start pointing at a journald socket that does not
+#     exist here if that build tag ever changes.
+#   * compose_providers pins podman-compose. Podman's default list tries
+#     docker-compose first, which is not installed, so `docker compose` would
+#     report the missing provider instead of using the one that is there.
+RUN mkdir -p /etc/containers/containers.conf.d \
+ && printf '%s\n' \
+      '[containers]' \
+      'mounts = [' \
+      '  "type=bind,source=/etc/ssl/certs/ca-certificates.crt,destination=/etc/pi-container-ca.crt,ro=true",' \
+      ']' \
+      'env = [' \
+      '  "SSL_CERT_FILE=/etc/pi-container-ca.crt",' \
+      '  "NODE_EXTRA_CA_CERTS=/etc/pi-container-ca.crt",' \
+      '  "REQUESTS_CA_BUNDLE=/etc/pi-container-ca.crt",' \
+      '  "CURL_CA_BUNDLE=/etc/pi-container-ca.crt",' \
+      '  "GIT_SSL_CAINFO=/etc/pi-container-ca.crt",' \
+      ']' \
+      'log_driver = "k8s-file"' \
+      '' \
+      '[engine]' \
+      'cgroup_manager = "cgroupfs"' \
+      'compose_providers = ["podman-compose"]' \
+      'compose_warning_logs = false' \
+    > /etc/containers/containers.conf.d/50-pi-container.conf
 
 COPY pi-coding-agent/entrypoint.sh /usr/local/bin/entrypoint.sh
 
@@ -53,9 +237,9 @@ RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 ARG PI_UID=1000
 ARG PI_GID=1000
 
-RUN userdel --remove node 2>/dev/null || true \
- && groupdel node 2>/dev/null || true \
- && groupadd --gid ${PI_GID} pi \
+# No node user to remove any more: that was the node: base image's own uid-1000 user,
+# which had to go before `pi` could claim 1000. Plain Debian ships no such user.
+RUN groupadd --gid ${PI_GID} pi \
  && useradd --uid ${PI_UID} --gid ${PI_GID} --create-home --shell /bin/bash pi
 
 ENV NODE_USE_SYSTEM_CA=1

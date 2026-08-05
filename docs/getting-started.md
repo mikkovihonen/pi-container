@@ -9,12 +9,28 @@ Before running, ensure you have the following installed on your host machine:
   - Other platforms: `curl -LsSf https://astral.sh/uv/install.sh | sh`
   - `build.sh` and `run.sh` invoke `uv run`, which creates `.venv` and installs the declared dependencies (including the `hf` CLI and `huggingface_hub`) automatically on first use. No manual `pip install` is needed.
 
-- **Container Runtime**: Set `CONTAINER_RUNTIME` or pass it via the build/run scripts.
+- **[podman](https://podman.io)**: the only supported container runtime.
+  - On macOS: `brew install podman`, then **`podman machine init --memory 4096`** and `podman machine start`
+  - On Linux (Debian/Ubuntu): `sudo apt install podman`, or your distro's package manager
 
-  | Runtime | Platform | Installation |
-  |---------|----------|--------------|
-  | `docker` | macOS / Linux / WSL2 | [Install Docker](https://docs.docker.com/get-docker/) |
-  | `podman` | macOS / Linux / WSL2 | `brew install podman` (macOS) or `sudo apt install podman` (Debian/Ubuntu) or your distro's package manager |
+  **The podman machine needs at least 4 GB of memory** (macOS/Windows, where podman
+  runs in a VM). The default is 2 GiB, which is not enough: `build.sh` compiles CPython,
+  podman and netavark from source, and one CPython PGO job peaks near 900 MiB —
+  with 2 GiB total, the build is OOM-killed. More memory buys more parallel compile
+  jobs, since the caps are memory-derived rather than core-count-derived. On an existing
+  machine:
+
+  ```bash
+  podman machine stop && podman machine set --memory 4096 && podman machine start
+  ```
+
+  `build.sh` checks this before it starts building and tells you if there is not
+  enough room, so a short machine fails in a second rather than several minutes in.
+
+  Docker is **not** supported: pi-container's isolation model (and nested containers in
+  particular) depends on the agent container running inside a user namespace where
+  container uid 0 maps to an unprivileged host user, which stock Docker does not provide.
+  See [Configuration](configuration.md#nested-containers).
 
 - **llama.cpp**: Specifically `llama-server`.
   - On macOS: `brew install llama.cpp`
@@ -35,28 +51,27 @@ To run this environment comfortably, especially when utilizing the full 128k con
 - **Memory (RAM):**
   - **Minimum:** 32 GB (Performance may degrade with large contexts)
   - **Recommended:** 64 GB or more (For optimal performance)
+- **podman machine (macOS/Windows):**
+  - **Required:** 4 GB (`podman machine set --memory 4096`) — the 2 GiB default cannot build the toolchain image
+  - **Recommended:** 8 GB, and more again if you enable [nested containers](configuration.md#nested-containers)
 - **Storage:** 50 GB of available SSD space.
 
 ## Platform-Specific Notes
 
 ### Linux / WSL2
 
-- **Container runtime**: Use `docker` or `podman`. Set `CONTAINER_RUNTIME=docker` or `CONTAINER_RUNTIME=podman` in your `.env`.
-- **Network**: The default bridge interface is `docker0` (Docker) or `podman0` (Podman). The proxy upstream network defaults to `bridge` (Docker) or `podman` (Podman). Override via `BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` in `.env` if needed.
+- **Container runtime**: podman. `CONTAINER_RUNTIME` defaults to it and takes no other value.
+- **Network**: The default bridge interface is `podman0` and the proxy upstream network defaults to `podman`. Override via `BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` in `.env` if needed.
 - **LLaMA backend**: The `llama-server` binary runs natively on Linux/WSL2. For GPU acceleration on Linux, build llama.cpp with CUDA or ROCm support.
-- **WSL2**: Ensure WSL2 is properly configured with a Linux distro. Docker Desktop or Podman can be used inside WSL2 for containerization.
+- **WSL2**: Ensure WSL2 is properly configured with a Linux distro; podman runs inside it.
 
 ### macOS
 
-- **Container runtime**: The default is `docker` (or `podman`).
-- **Network**: These per-runtime defaults are applied automatically; `BRIDGE_INTERFACE` / `PROXY_UPSTREAM_NETWORK` are only needed to override them.
+- **Container runtime**: podman.
+- **Network**: The defaults are applied automatically; `BRIDGE_INTERFACE` / `PROXY_UPSTREAM_NETWORK` are only needed to override them.
 - **LLaMA backend**: Runs natively using Apple's Metal GPU acceleration.
-- **podman / docker on macOS**: These run containers inside a Linux VM (no `podman0`/`docker0` bridge exists on the host), so `socat` is not used — the proxy reaches host `llama-server` via `host.containers.internal` (gvproxy). The runtime abstraction ([`src/runtimes.py`](https://github.com/mikkovihonen/pi-container/blob/main/src/runtimes.py)) handles these differences. Each runtime configures the isolated network and proxy attachment differently:
-
-| Runtime | Network flags | Interface pinning |
-|---------|--------------|-------------------|
-| Podman | `--internal --disable-dns` | `interface_name=eth0` / `interface_name=eth1` |
-| Docker | `--internal` | None — uses default `eth0`/`eth1` |
+- **podman on macOS**: containers run inside a Linux VM (no `podman0` bridge exists on the host), so `socat` is not used — the proxy reaches host `llama-server` via `host.containers.internal` (gvproxy). The isolated network is created `--internal --disable-dns`, and the proxy's interfaces are pinned (`interface_name=eth0` / `interface_name=eth1`) so the isolated network is deterministically `eth1`. See [`src/runtimes.py`](https://github.com/mikkovihonen/pi-container/blob/main/src/runtimes.py).
+- **Machine sizing**: **4 GB is the minimum** (`podman machine set --memory 4096`); the 2 GiB default cannot build the toolchain image. `resources.agent.memory` defaults to `16g`, which the VM can never actually provide — raise the machine further before enabling [nested containers](configuration.md#nested-containers), and especially before `storage: tmpfs`.
 
 ## Build and Run
 
@@ -80,7 +95,19 @@ See [Configuration](configuration.md) for the full list of environment variables
 
 `build.sh` (and `run.sh`) run through `uv`, which creates the `.venv` and installs dependencies from `uv.lock` on first invocation — no separate setup step is required. To provision the environment ahead of time, run `uv sync`.
 
-This builds two images in order: `pi-coding-agent-proxy:local` (the transparent proxy) and `pi-coding-agent:local` (the main agent). The agent image depends on the proxy image to copy the mitmproxy CA certificate into the system trust store.
+This builds three images, in this order:
+
+1. `pi-coding-agent-proxy:local` — the transparent proxy.
+2. `pi-coding-agent-builder:local` — the [toolchain image](architecture.md#toolchain-builder-image). Compiles CPython 3.14 (PGO), podman and netavark/aardvark-dns from source, and stages Node from the official nodejs.org tarball. **A few minutes** on a 9-core/8 GB machine.
+
+    `NODE_SOURCE=build ./build.sh` compiles Node from source instead, which takes **about an hour** (measured: ~65 min at 3 compile jobs). It buys a trixie-native build rather than the generic-glibc official one, and nothing else — Node has no build tags worth choosing, so unlike podman there is no correctness argument for it. The default `prebuilt` mode stages byte-for-byte the same Node the old `node:` base image shipped, since that image is this same tarball extracted into `/usr/local`.
+
+    Compile parallelism is capped by available memory rather than core count, so a bigger machine directly shortens this step (`MAKE_JOBS=<n>` overrides the cap). Later builds skip the image entirely unless one of its pinned versions changes, and each component is a separate stage, so bumping podman does not rebuild Node.
+
+    Every version, git commit and SHA-256 it builds from is an `ARG` in [`pi-coding-agent-builder/Containerfile`](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-builder/Containerfile) — that one file is where you bump a component.
+3. `pi-coding-agent:local` — the main agent, which copies the mitmproxy CA certificate out of the proxy image and its whole toolchain out of the builder image.
+
+The order is not optional: the agent image `COPY --from`s both of the others.
 
 ### 3. Run the Agent
 

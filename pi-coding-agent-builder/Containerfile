@@ -1,0 +1,215 @@
+# Toolchain builder for the pi-coding-agent image.
+#
+# Compiles everything the agent image runs on, and stages it under /out so the agent
+# image can pick it up with a single COPY --from:
+#
+#   Node.js                         the agent image used to *be* the node: image
+#                                   (prebuilt tarball by default; NODE_SOURCE=build
+#                                   compiles it instead)
+#   CPython + uv + podman-compose   Debian's python3 would be a second 3.13 tree
+#   podman                          trixie has 5.4.2 (Mar 2025); this builds 6.0.2
+#                                   with an explicit BUILDTAGS set
+#   netavark + aardvark-dns         podman 6 requires 2.0.0; trixie has 1.14.0
+#
+# WHY A SEPARATE IMAGE AND NOT A STAGE OF pi-coding-agent/Containerfile
+#   1. build.sh builds this once. A project-specific image rebuild (run.py, on a
+#      change to a workspace's commands.sh) then only replays the COPY, so it can
+#      never recompile anything. Before this split, a cache miss on the Python layer
+#      turned a project rebuild into a ~10 minute PGO compile.
+#   2. Nothing from the toolchains can leak into the shipped image. Go, Rust, four
+#      source trees and their build caches are several GB; only /out is copied.
+#
+# WHY FOUR INDEPENDENT STAGES
+# Each component builds FROM the same deps stage and stages into its own /out, so
+# bumping one cannot invalidate the others. That matters because the costs are wildly
+# uneven: with NODE_SOURCE=build, Node is ~65 minutes against CPython's ~3 and podman's
+# ~2. In a single linear chain, whichever component sat above Node would make a podman
+# bump cost a full Node rebuild.
+#
+# The base image is deliberately the SAME one the agent image uses. Everything staged
+# here is dynamically linked against that image's glibc, OpenSSL and SQLite, so
+# building against a different Debian point release invites an ABI skew that only shows
+# up as a runtime symbol error inside the agent.
+#
+# WHERE THE VERSIONS LIVE
+# Every version, git commit and sha256 this image builds from is an ARG in this file,
+# declared on the stage that consumes it. The build scripts read them from the
+# environment (podman exports build args to RUN) and assert their presence via
+# require_env — none of them defaults in a script, so this file is the only answer to
+# "what is this image built from?", and bumping anything is an edit here.
+#
+# It also makes every pin overridable for a one-off build without touching a tracked
+# file, e.g. --build-arg PODMAN_VERSION=v6.1.0 --build-arg PODMAN_COMMIT=<sha>.
+
+# ─── Rust (shared) ───────────────────────────────────────────────────────────
+# The one pin declared before the first FROM, because two stages need it: netavark and
+# aardvark-dns are Rust programs, and Node 26 implements `Temporal` in Rust. Each of
+# those stages re-declares these ARGs *without* a default, which is how a pre-FROM ARG
+# is inherited — and what keeps this one pin instead of two that can drift apart.
+# Hashes come from https://static.rust-lang.org/dist/channel-rust-stable.toml.
+ARG RUST_VERSION=1.97.1
+ARG RUST_DIST_DATE=2026-07-16
+ARG RUST_SHA256_X86_64=b4cdbc7cc6b0ee0a2666b1872769fdb2ad8393b28b63952f6493b4b400e4832b
+ARG RUST_SHA256_AARCH64=2f2496c70bd336a66a4c8baf2d303ba161f3552f192444c3639ba903c7c1e2c5
+
+FROM debian:trixie-slim AS deps
+
+# Everything that will be copied into the agent image is staged here, mirroring its
+# final layout: /out/usr/local/bin/podman → /usr/local/bin/podman.
+ENV PI_STAGE=/out
+
+# Build dependencies for every script below, grouped by what needs them. None of this
+# is shipped — the agent image installs its own (smaller) runtime set.
+#
+# The python* block is the one place this list overlaps with the agent image, which
+# keeps the same -dev packages so `uv sync`/`pip install` can still build native
+# wheels from source in a workspace. Keep the two in step.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # common
+    build-essential \
+    ca-certificates \
+    curl \
+    git \
+    make \
+    pkg-config \
+    xz-utils \
+    # python
+    libbz2-dev \
+    libdb5.3-dev \
+    libexpat1-dev \
+    libffi-dev \
+    libgdbm-dev \
+    liblzma-dev \
+    libncurses5-dev \
+    libncursesw5-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libssl-dev \
+    uuid-dev \
+    zlib1g-dev \
+    # node: its configure and GYP are Python scripts
+    python3 \
+    # podman: seccomp for the seccomp build tag, sqlite3 for libsqlite3
+    libseccomp-dev \
+    # netavark: its build.rs generates the dhcp-proxy's protobuf bindings
+    protobuf-compiler \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY pi-coding-agent-builder/common.sh /build/common.sh
+
+# ─── CPython + uv + podman-compose ───────────────────────────────────────────
+# MAKE_JOBS caps make parallelism. The script derives a safe default from available
+# MEMORY rather than core count (a PGO compile peaks near 900 MiB per job and the
+# default podman machine has 2 GiB), so override it only to go lower on a
+# constrained builder or higher on a large one.
+# PYTHON_OPTIMIZE=0 skips the PGO build (~10-20% slower Python, but a fraction of
+# the memory and time) for builders that cannot fit a ~900 MiB compile job.
+FROM deps AS python
+ARG PYTHON_VERSION=3.14.6
+ARG PYTHON_SHA256=74d0d71d0600e477651a077101d6e62d1e2e69b8e992ba18c993dd643b7ba222
+# The pip packages carry one hash per wheel pip may resolve for this architecture, so
+# each *_SHA256 is a space-separated list. build-python.sh reassembles them into
+# --hash=sha256: arguments; a requirement with an empty list is an error, not an
+# unpinned install. Get them from `pip download --no-deps` or PyPI's JSON API.
+ARG UV_VERSION=0.11.30
+ARG UV_SHA256="\
+    cc28cb55c2b3c80a26ea374a172fec70b0561ada211e6fb23936ccea3ecb80b2 \
+    ea5f0d4fe452dc3daf915c714504eb2f1e570f8ebac752abf51f9e6f58a1ff68 \
+    7c41e83a2811c22e04ae50d0986932318ba82e6f9e29f0fca727d855df6bd959 \
+    988133c7f44c6c64f6fef482483014995260cdb3a68270805256ddb9e6fed9e8 \
+    7d9d922cfef27757156f1023eb057abab192e3e9f5436ba60eac57ffbc2b5c23 \
+    a2aff328164d7e8fbcf6b82182cc16f7a729ec7edfce77b4d0c2908fca12bd63 \
+    6a29031ff95150ea6156607394db8f79dfb06d5287f46ff07e3f60b9df76121c"
+ARG PODMAN_COMPOSE_VERSION=1.6.0
+ARG PODMAN_COMPOSE_SHA256="\
+    98e48af25d44c10ecef948163bfcca002e32aa8bbb7e66593fbd4faff7270c30 \
+    c83fd9bcbaa635100d581ce52a7a4b712ee0d457481232aff392efe3ebc5a217"
+# podman-compose's two runtime dependencies. Pinned because pip requires hashes for the
+# whole resolved set once any requirement has one — not because we chose these versions.
+ARG PYTHON_DOTENV_VERSION=1.2.2
+ARG PYTHON_DOTENV_SHA256="\
+    1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a \
+    2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3"
+ARG PYYAML_VERSION=6.0.3
+ARG PYYAML_SHA256="\
+    501a031947e3a9025ed4405a168e6ef5ae3126c59f90ce0cd6f2bfc477be31b7 \
+    c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5 \
+    d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f"
+ARG PYTHON_OPTIMIZE=1
+ARG MAKE_JOBS=""
+COPY pi-coding-agent-builder/build-python.sh /build/
+RUN bash /build/build-python.sh
+
+# ─── Node.js ─────────────────────────────────────────────────────────────────
+# NODE_SOURCE=prebuilt (default) stages the official nodejs.org tarball — seconds, and
+# byte-identical to the Node the `node:` base image shipped, since that image is this
+# same tarball extracted into /usr/local. NODE_SOURCE=build compiles from source
+# instead: ~65 minutes on a 9-core/8 GB machine, and only worth it to change the
+# configure flags. Either way the same parity checks run. See build-node.sh.
+FROM deps AS node
+# 26.6.0 rather than the 26.3.1 the old base-image tag pinned: v26.5.1 was a security
+# release, so that pin was missing fixes. All three hashes come from
+# https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt — the source tarball for
+# NODE_SOURCE=build, the per-arch binaries for prebuilt. Bump all four together.
+ARG NODE_VERSION=26.6.0
+ARG NODE_SRC_SHA256=ecb6eec812505c9292529087a2436ec6c891ffe0e3a897833416e5d7436d659f
+ARG NODE_BIN_SHA256_X64=e53a8c8ca2ee7135de38e63859bd4f43002ae2d222f5b3a98ac1945db9f544bb
+ARG NODE_BIN_SHA256_ARM64=974e6f0332fb26179b34d49c57f35339e089a89faf8b82a81e44c0e1164b7923
+# Inherited from the pre-FROM block; needed only by NODE_SOURCE=build, for Temporal.
+ARG RUST_VERSION
+ARG RUST_DIST_DATE
+ARG RUST_SHA256_X86_64
+ARG RUST_SHA256_AARCH64
+ARG NODE_SOURCE=prebuilt
+ARG MAKE_JOBS=""
+COPY pi-coding-agent-builder/build-node.sh /build/
+RUN bash /build/build-node.sh
+
+# ─── podman ──────────────────────────────────────────────────────────────────
+FROM deps AS podman
+# PODMAN_COMMIT is the pin that matters; the tag is a mutable pointer and the build
+# fails if it ever resolves elsewhere. It must be the COMMIT, not the annotated tag
+# object — see clone_verified in common.sh for how to get it.
+ARG PODMAN_VERSION=v6.0.2
+ARG PODMAN_COMMIT=b28edb9ad70ce4317dc762ee9ce0a6d081d154e9
+# Builder-only: podman 6 needs Go >= 1.25 and trixie has 1.24. Hashes from
+# https://go.dev/dl/.
+ARG GO_VERSION=1.26.5
+ARG GO_SHA256_AMD64=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
+ARG GO_SHA256_ARM64=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
+COPY pi-coding-agent-builder/build-podman.sh /build/
+RUN bash /build/build-podman.sh
+
+# ─── netavark + aardvark-dns ─────────────────────────────────────────────────
+FROM deps AS network
+# Both must be 2.0.0 to match podman 6 — see build-network.sh. The vendor sha256 is the
+# value published in each release's own `sha256sum` asset.
+ARG NETAVARK_VERSION=v2.0.0
+ARG NETAVARK_COMMIT=dd456fba828316d602f9ea8a6f1ac9b9a8441b4c
+ARG NETAVARK_VENDOR_SHA256=86de7eb3a4e9ecc4acd5addc462879e8f2bac3562a4b99f12a4be67e5218c2cb
+ARG AARDVARK_VERSION=v2.0.0
+ARG AARDVARK_COMMIT=d98c5990d9bfe25ba8e85cb4202c3272a6e4a5d7
+ARG AARDVARK_VENDOR_SHA256=c5ca49d98c535fa3c8d0d195512faf1f8610ad9ca4f62bec73c7bbfc4ddcc0b6
+# Inherited from the pre-FROM block.
+ARG RUST_VERSION
+ARG RUST_DIST_DATE
+ARG RUST_SHA256_X86_64
+ARG RUST_SHA256_AARCH64
+COPY pi-coding-agent-builder/build-network.sh /build/
+RUN bash /build/build-network.sh
+
+# ─── The shipped artefact ────────────────────────────────────────────────────
+# Nothing but the four staged trees: no toolchains, no package manager, no shell. This
+# image exists to be COPYed --from, and keeping it at exactly its payload (rather than
+# ~1.7 GB of build environment) is the point of staging in the first place.
+#
+# The trees are disjoint by construction — each component owns its own paths under
+# /usr/local — except for the per-script manifest fragments in
+# toolchain-versions.d/, which is precisely why stage_record() writes one file per
+# script instead of appending to a shared one.
+FROM scratch AS stage
+COPY --from=python /out/ /out/
+COPY --from=node /out/ /out/
+COPY --from=podman /out/ /out/
+COPY --from=network /out/ /out/
+LABEL pi-container.type="shared"

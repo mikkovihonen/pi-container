@@ -48,6 +48,24 @@ global:
         - "*.yarnpkg.com"
       ip_ranges: []
 
+    # Uncomment when nested_containers.enabled = true. Registry pulls are HTTPS and
+    # are inspected by mitmproxy like any other traffic.
+    # - name: "container-registries-allow"
+    #   mode: "allow"
+    #   hostnames:
+    #     - "registry-1.docker.io"
+    #     - "auth.docker.io"
+    #     - "production.cloudflare.docker.com"
+    #     - "*.docker.io"
+    #     - "ghcr.io"
+    #     - "*.ghcr.io"
+    #     - "pkg-containers.githubusercontent.com"
+    #     - "quay.io"
+    #     - "*.quay.io"
+    #     - "gcr.io"
+    #     - "*.gcr.io"
+    #   ip_ranges: []
+
     - name: "debian-apt-allow"
       mode: "allow"
       hostnames:

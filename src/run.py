@@ -36,6 +36,7 @@ from network import (
     read_agent_extras,
     read_flow_export_enabled,
     read_llama_config,
+    read_nested_containers_config,
     read_network_config,
     read_resource_limits,
     resource_limit_args,
@@ -100,14 +101,25 @@ _PROJECT_CONFIG_DIRS = ("agent", "chat-templates")
 _PROJECT_CONFIG_FILES = ("config.yaml", "allowlist.yaml", "token_replacer.yaml")
 
 
+def _project_key(project_dir: Path) -> str:
+    """The 10-hex-char identity of a workspace: a hash of its absolute path.
+
+    Every per-workspace resource name is derived from it — the proxy container,
+    the isolated network, the project-specific image tag, and the nested-container
+    image-store volume — so repeated (or concurrent) runs from the same workspace
+    always resolve to the same set.
+    """
+    return hashlib.sha256(str(project_dir.resolve()).encode()).hexdigest()[:10]
+
+
 def _project_scope(project_dir: Path) -> tuple[str, str]:
     """Return ``(proxy_name, network_name)`` unique to this workspace.
 
-    Keyed by a hash of the absolute project path so each workspace gets its own
-    isolated network + proxy container, while repeated (or concurrent) runs from
-    the same workspace resolve to the same pair and share it via refcount.
+    Keyed by :func:`_project_key` so each workspace gets its own isolated network
+    + proxy container, while repeated (or concurrent) runs from the same workspace
+    resolve to the same pair and share it via refcount.
     """
-    key = hashlib.sha256(str(project_dir.resolve()).encode()).hexdigest()[:10]
+    key = _project_key(project_dir)
     return f"pi-proxy-{key}", f"pi-isolated-net-{key}"
 
 
@@ -173,6 +185,12 @@ def _ensure_project_config() -> Path:
 
 # ─── Project-specific image resolution ─────────────────────────────────────
 
+# Files under ``pi-coding-agent/`` that define the image itself. A change to any
+# of them must invalidate every project-specific image, so they are always part
+# of the content hash — unlike the per-workspace ``commands.sh`` files, which are
+# only hashed when non-empty.
+_IMAGE_DEFINITION_FILES = ("Containerfile", "entrypoint.sh")
+
 
 def _compute_image_hash(project_dir: Path) -> str | None:
     """Compute a content hash of all files that affect the project-specific image.
@@ -183,15 +201,19 @@ def _compute_image_hash(project_dir: Path) -> str | None:
     - `.pi-container/dependencies/root/commands.sh` (if it exists and is non-empty)
     - `.pi-container/dependencies/pi/commands.sh` (if it exists and is non-empty)
 
+    The toolchain (`pi-coding-agent-builder/`) is deliberately NOT hashed. The
+    project image consumes it as a built image, not as source, so what matters is
+    when that image was last built — see ``_newest_shared_image_time()``.
+
     Returns None if no definition files exist (all dependency files are absent or
-    empty, and Containerfile/entrypoint.sh are absent at REPO_ROOT).
+    empty, and the image definition files are absent at REPO_ROOT).
     """
     deps_root = project_dir / ".pi-container" / "dependencies"
     agent_dir = REPO_ROOT / "pi-coding-agent"
     files_to_hash = []
 
     # Image definition files (always included — their changes require a rebuild)
-    for img_file in ("Containerfile", "entrypoint.sh"):
+    for img_file in _IMAGE_DEFINITION_FILES:
         img_path = agent_dir / img_file
         if img_path.exists():
             files_to_hash.append(img_file)
@@ -211,7 +233,7 @@ def _compute_image_hash(project_dir: Path) -> str | None:
     # Concatenate SHA-256 hashes of each file
     combined_hash = hashlib.sha256()
     for cmd_file in files_to_hash:
-        file_path = agent_dir / cmd_file if cmd_file in ("Containerfile", "entrypoint.sh") else deps_root / cmd_file
+        file_path = agent_dir / cmd_file if cmd_file in _IMAGE_DEFINITION_FILES else deps_root / cmd_file
         file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
         combined_hash.update(file_hash.encode())
 
@@ -352,6 +374,35 @@ def _get_image_build_time(image_tag: str) -> datetime | None:
         return None
 
 
+# Shared images a project-specific image copies content out of at build time:
+#   the proxy      → the mitmproxy CA certificate baked into its trust store
+#   the toolchain  → CPython, uv, podman-compose, podman, netavark, aardvark-dns
+# A project image older than either of them is carrying a stale copy.
+_SHARED_SOURCE_IMAGES = ("pi-coding-agent-proxy:local", "pi-coding-agent-builder:local")
+
+
+def _newest_shared_image_time() -> tuple[str, datetime] | None:
+    """Most recent build time among the images project images copy content from.
+
+    Returns (image_tag, timestamp) for whichever is newest, or None if any of them
+    cannot be dated — in which case a project image's contents cannot be judged
+    and the caller should stop rather than run something stale.
+    """
+    newest: tuple[str, datetime] | None = None
+    for tag in _SHARED_SOURCE_IMAGES:
+        ts = _get_image_build_time(tag)
+        if ts is None:
+            logger.error(
+                f"ERROR: Could not read build timestamp from shared image ({tag}). "
+                f"The project image may hold a stale mitmproxy CA certificate or "
+                f"toolchain. Rebuild with: build.sh"
+            )
+            return None
+        if newest is None or ts > newest[1]:
+            newest = (tag, ts)
+    return newest
+
+
 def _image_is_current(project_dir: Path, image_tag: str, current_hash: str | None) -> bool:
     """Check if the project-specific image is up-to-date by comparing labels.
 
@@ -380,21 +431,24 @@ def _project_image_build_reason(
     project_dir: Path,
     image_tag: str,
     content_hash: str | None,
-    proxy_ts: datetime,
+    shared_ts: datetime,
+    shared_tag: str = _SHARED_SOURCE_IMAGES[0],
 ) -> str | None:
     """Decide whether the project-specific image needs to be (re)built.
 
     Returns a short reason string to build, or None when the cached image can be
     reused as-is.
 
-    The proxy-vs-project timestamp comparison only applies to an image that is
-    actually present: on the first run in a workspace — or right after stale
-    images were pruned following a definition change — there is no image to
-    date, and the correct outcome is a build, not a hard failure.
+    ``shared_ts``/``shared_tag`` identify the most recently built of the images this
+    one copies content from (see ``_newest_shared_image_time()``). That comparison
+    only applies to an image that is actually present: on the first run in a
+    workspace — or right after stale images were pruned following a definition
+    change — there is no image to date, and the correct outcome is a build, not a
+    hard failure.
 
     An image that exists but carries no ``pi-container.build.time`` label was
-    built by an older pi-container; its baked-in mitmproxy CA cannot be dated,
-    so it is rebuilt rather than trusted.
+    built by an older pi-container; its baked-in content cannot be dated, so it is
+    rebuilt rather than trusted.
     """
     if not _image_exists(image_tag):
         return "image not built yet"
@@ -402,18 +456,19 @@ def _project_image_build_reason(
     project_ts = _get_image_build_time(image_tag)
     if project_ts is None:
         logger.warning(
-            f"Project image ({image_tag}) has no build timestamp; its mitmproxy CA "
-            f"certificate cannot be verified and it will be rebuilt."
+            f"Project image ({image_tag}) has no build timestamp; the mitmproxy CA "
+            f"certificate and toolchain it copied cannot be verified, so it will be rebuilt."
         )
         return "missing build timestamp"
 
-    if proxy_ts > project_ts:
+    if shared_ts > project_ts:
         logger.warning(
-            f"Proxy image has been rebuilt since the project image was built "
-            f"({(proxy_ts - project_ts).total_seconds():.0f}s ago). "
-            f"The project image has a stale mitmproxy CA certificate and will be rebuilt."
+            f"Shared image {shared_tag} has been rebuilt since the project image was built "
+            f"({(shared_ts - project_ts).total_seconds():.0f}s ago). "
+            f"The project image's copy of it (mitmproxy CA certificate, toolchain) is "
+            f"stale and will be refreshed."
         )
-        return "stale proxy certificate"
+        return "stale shared image"
 
     if not _image_is_current(project_dir, image_tag, content_hash):
         return "content hash mismatch"
@@ -599,6 +654,217 @@ def _cleanup_orphaned_project_images(runtime: str) -> list[str]:
     return removed
 
 
+# ─── Nested-container image store (a per-project named volume) ─────────────
+#
+# Nested image layers cannot live on the agent's default paths: /home/pi is
+# tmpfs (a multi-GB pull would land in RAM) and the container rootfs is overlayfs
+# (overlay-on-overlay is unsupported, so podman would fall back to the vfs driver
+# and copy every layer in full). A named volume mounted at
+# ~/.local/share/containers gives the nested podman a real filesystem, on which
+# it resolves to the native `overlay` driver.
+#
+# Persisting it across runs is a deliberate exception to the ephemeral-home rule:
+# without it every session re-pulls every base image through mitmproxy. The volume
+# carries the same project labels as project-specific images, so it is reclaimed
+# by the same path-no-longer-exists rule (see _cleanup_orphaned_nested_volumes).
+#
+# Concurrent runs in one workspace share the volume. That is intentional — it is
+# what makes the layer cache shared — and safe because containers/storage keeps
+# its layer/image lockfiles *inside* the graph root, i.e. on the shared volume, so
+# the two nested podmans do interlock. Only the run root (podman's pid/lock dir)
+# is per-run, under each container's own XDG_RUNTIME_DIR.
+
+
+def _volume_exists(runtime: str, volume_name: str) -> bool:
+    """Return True if the named volume is present in the local volume store."""
+    try:
+        result = subprocess.run(
+            [runtime, "volume", "inspect", volume_name],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _get_volume_label(runtime: str, volume_name: str, label_key: str) -> str | None:
+    """Read a label from a named volume, or None if absent/unreadable."""
+    try:
+        result = subprocess.run(
+            [runtime, "volume", "inspect", volume_name, "--format", f'{{{{index .Labels "{label_key}"}}}}'],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        value = result.stdout.strip()
+        # podman renders a missing key as the empty string (or "<no value>").
+        if result.returncode == 0 and value and value != "<no value>":
+            return value
+    except Exception:
+        pass
+    return None
+
+
+def _ensure_nested_volume(runtime: str, volume_name: str, project_hash: str, project_path: str) -> bool:
+    """Create the nested-container image-store volume if it does not exist yet.
+
+    The volume is labelled like project-specific images
+    (``pi-container.type=nested-storage`` plus the project hash and path) so the
+    orphan-cleanup pass can reclaim it with the same rule.
+
+    Returns True if the volume is available for mounting.
+    """
+    if _volume_exists(runtime, volume_name):
+        return True
+
+    logger.info(f"Creating nested-container image store volume: {volume_name}")
+    result = subprocess.run(
+        [
+            runtime,
+            "volume",
+            "create",
+            "--label",
+            "pi-container.type=nested-storage",
+            "--label",
+            f"pi-container.project.hash={project_hash}",
+            "--label",
+            f"pi-container.project.path={project_path}",
+            volume_name,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        logger.error(
+            f"Could not create nested-container volume {volume_name}: {result.stderr.strip()}. "
+            f"Set nested_containers.storage: tmpfs, or disable nested_containers."
+        )
+        return False
+    return True
+
+
+def _cleanup_orphaned_nested_volumes(runtime: str) -> list[str]:
+    """Remove nested-storage volumes whose source project no longer exists.
+
+    Mirrors :func:`_cleanup_orphaned_project_images`: a volume is orphaned when
+    its ``pi-container.project.path`` label points at a path that is gone, or when
+    it has no path label at all (unverifiable). A volume still in use by a running
+    container cannot be removed — that failure is logged and skipped, not fatal.
+    """
+    removed: list[str] = []
+    try:
+        result = subprocess.run(
+            [
+                runtime,
+                "volume",
+                "ls",
+                "--format",
+                "{{.Name}}",
+                "--filter",
+                "label=pi-container.type=nested-storage",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        logger.warning(f"Could not list nested-storage volumes for orphan cleanup: {e}")
+        return removed
+
+    for name in result.stdout.strip().splitlines():
+        name = name.strip()
+        if not name:
+            continue
+
+        stored_path = _get_volume_label(runtime, name, "pi-container.project.path")
+        if stored_path is None:
+            logger.info(f"Orphaned nested-storage volume (no path label): {name}")
+        elif not Path(stored_path).exists():
+            logger.info(f"Orphaned nested-storage volume (path gone): {name} ({stored_path})")
+        else:
+            continue
+
+        if _remove_volume(runtime, name):
+            removed.append(name)
+
+    return removed
+
+
+def _remove_volume(runtime: str, volume_name: str) -> bool:
+    """Remove a named volume. Returns True on success."""
+    try:
+        result = subprocess.run(
+            [runtime, "volume", "rm", volume_name],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            logger.info(f"Removed nested-storage volume: {volume_name}")
+            return True
+        logger.warning(f"Could not remove volume {volume_name}: {result.stderr.strip()}")
+        return False
+    except Exception as e:
+        logger.warning(f"Could not remove volume {volume_name}: {e}")
+        return False
+
+
+# ─── Registry allowlist preflight ──────────────────────────────────────────
+
+# Hostname fragments that indicate a container registry is reachable. The proxy's
+# allowlist ships default_action: block, so nesting is useless until one of these
+# is allowed — and the symptom (mitmproxy's 403 on `podman pull`, mid-session) is
+# confusing enough to be worth a startup hint.
+_REGISTRY_HOST_HINTS = (
+    "docker.io",
+    "ghcr.io",
+    "quay.io",
+    "gcr.io",
+    "registry.k8s.io",
+    "public.ecr.aws",
+    "mcr.microsoft.com",
+    "pkg-containers.githubusercontent.com",
+)
+
+
+def _warn_if_no_registry_allowlisted(config_dir: Path) -> None:
+    """Warn when nesting is on but no container registry is allowlisted.
+
+    Best-effort: an unreadable or malformed allowlist is the allowlist addon's
+    problem to report, not this preflight's.
+    """
+    allowlist_path = config_dir / "allowlist.yaml"
+    try:
+        import yaml
+
+        data = yaml.safe_load(allowlist_path.read_text()) or {}
+    except Exception:
+        return
+
+    hostnames = [
+        str(host)
+        for rule in (data.get("global") or {}).get("rules", []) or []
+        if str((rule or {}).get("mode", "allow")) == "allow"
+        for host in (rule or {}).get("hostnames", []) or []
+    ]
+    if any(hint in host for host in hostnames for hint in _REGISTRY_HOST_HINTS):
+        return
+
+    logger.warning(
+        f"nested_containers.enabled is true but no container registry hostname is allowed in "
+        f"{allowlist_path}; image pulls from nested containers will fail with mitmproxy's 403. "
+        f"Uncomment the 'container-registries-allow' rule (or add the registries you use)."
+    )
+
+
 # ─── Main ──────────────────────────────────────────────────────────────────
 
 
@@ -637,6 +903,14 @@ def main() -> None:
     ipv6_enabled = read_network_config(pi_container_dir)["ipv6"]
     llama_cfg = read_llama_config(pi_container_dir)
     agent_extras = read_agent_extras(pi_container_dir)
+    nested_cfg = read_nested_containers_config(pi_container_dir)
+    if nested_cfg["enabled"]:
+        logger.info(
+            f"Nested containers enabled (storage={nested_cfg['storage']}, security={nested_cfg['security']}): "
+            f"the agent can run its own rootless podman. Its traffic still egresses through the proxy, "
+            f"but the agent container's SELinux confinement is relaxed."
+        )
+        _warn_if_no_registry_allowlisted(pi_container_dir)
 
     with config_path.open("r") as file:
         data = json.load(file)
@@ -765,25 +1039,23 @@ def main() -> None:
                     if removed:
                         logger.info(f"Removed {len(removed)} stale project image(s): {', '.join(removed)}")
 
-                    # 3. Check whether the proxy image has been rebuilt more
+                    # 3. Check whether either shared image has been rebuilt more
                     #    recently than the project-specific image. The project
-                    #    image bakes in the mitmproxy CA certificate from the
-                    #    proxy image at build time; if the proxy image has a
-                    #    newer build timestamp, the project image's baked-in
-                    #    certificate is stale and must be refreshed.
+                    #    image copies the mitmproxy CA certificate out of the proxy
+                    #    image and its whole toolchain out of the builder image at
+                    #    build time; if either is newer, that copy is stale and
+                    #    must be refreshed.
                     #    A project image that is absent (first run here, or just
                     #    pruned by step 2 after a definition change) has no
                     #    timestamp to compare and is simply built.
-                    proxy_ts = _get_image_build_time("pi-coding-agent-proxy:local")
-                    if proxy_ts is None:
-                        logger.error(
-                            "ERROR: Could not read build timestamp from proxy image "
-                            "(pi-coding-agent-proxy:local). The project image may have a stale "
-                            "mitmproxy CA certificate. Rebuild with: build.sh"
-                        )
+                    newest_shared = _newest_shared_image_time()
+                    if newest_shared is None:
                         sys.exit(1)
+                    shared_tag, shared_ts = newest_shared
 
-                    reason = _project_image_build_reason(PROJECT_DIR, agent_image_tag, label_hash, proxy_ts)
+                    reason = _project_image_build_reason(
+                        PROJECT_DIR, agent_image_tag, label_hash, shared_ts, shared_tag
+                    )
                     if reason is not None:
                         logger.info(f"Building project-specific agent image: {agent_image_tag} ({reason})")
                         root_commands_path = str(
@@ -804,6 +1076,32 @@ def main() -> None:
                         logger.info(f"Using cached project-specific image: {agent_image_tag}")
                 else:
                     logger.info(f"Using shared image: {agent_image_tag}")
+
+                # ─── Nested-container image store ───────────────────────────
+                # Reclaim stores from deleted/moved workspaces first (same rule
+                # as project images), then make sure this workspace's own store
+                # exists. If it cannot be created, fall back to a tmpfs store
+                # rather than failing the launch — the agent still runs, it just
+                # re-pulls base images and needs the RAM.
+                nested_args: list[str] = []
+                if nested_cfg["enabled"]:
+                    project_key = _project_key(PROJECT_DIR)
+                    if nested_cfg["storage"] == "volume":
+                        orphaned_volumes = _cleanup_orphaned_nested_volumes(CONTAINER_RUNTIME)
+                        if orphaned_volumes:
+                            logger.info(
+                                f"Removed {len(orphaned_volumes)} orphaned nested-storage volume(s): "
+                                f"{', '.join(orphaned_volumes)}"
+                            )
+                        if not _ensure_nested_volume(
+                            CONTAINER_RUNTIME,
+                            RUNTIME.nested_volume_name(project_key),
+                            project_hash=proxy_name,
+                            project_path=str(PROJECT_DIR.resolve()),
+                        ):
+                            logger.warning("Falling back to a tmpfs nested image store for this run.")
+                            nested_cfg = {**nested_cfg, "storage": "tmpfs"}
+                    nested_args = RUNTIME.nested_container_args(nested_cfg, project_key)
 
                 # Transient tmpfs paths (config.yaml tmpfs.paths) — all under
                 # /workspace (the mounted PROJECT_DIR), so the config that declares
@@ -835,6 +1133,11 @@ def main() -> None:
                     f"{PROJECT_DIR}:/workspace",
                     *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
                     *RUNTIME.tmpfs_args("/workspace/.pi-container/exports"),
+                    # Nested-container support (config.yaml nested_containers):
+                    # devices, SELinux label, image store, XDG_RUNTIME_DIR. Empty
+                    # when disabled. Placed after the /home/pi tmpfs because the
+                    # image store mounts *underneath* it.
+                    *nested_args,
                     "--workdir",
                     "/workspace",
                     # Transient tmpfs mounts for build artifacts, caches, etc.

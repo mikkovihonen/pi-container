@@ -86,6 +86,13 @@ class EnvironmentError(Exception):
 
 
 def validate_environment(llama_bin: str | None) -> str:
+    """Check the host prerequisites and return the container runtime to use.
+
+    ``podman`` is the only supported runtime: the whole isolation model — and
+    especially nested containers — rests on the agent container running inside a
+    user namespace where container uid 0 maps to an unprivileged host user, which
+    stock Docker does not provide. See ``docs/design/nested-containers.md``.
+    """
     if llama_bin is None or not Path(llama_bin).exists():
         raise EnvironmentError("llama-server not found. Please install it or set LLAMA_BIN.")
 
@@ -94,7 +101,7 @@ def validate_environment(llama_bin: str | None) -> str:
 
     # Check for explicit CONTAINER_RUNTIME from .env first
     explicit_runtime = os.environ.get("CONTAINER_RUNTIME", "").strip()
-    supported_runtimes = ("docker", "podman")
+    supported_runtimes = ("podman",)
 
     if explicit_runtime:
         if explicit_runtime not in supported_runtimes:
@@ -112,7 +119,7 @@ def validate_environment(llama_bin: str | None) -> str:
             break
 
     if runtime is None:
-        raise EnvironmentError("No supported container runtime found (docker or podman).")
+        raise EnvironmentError("podman not found. Install it (macOS: brew install podman) or set CONTAINER_RUNTIME.")
 
     return runtime
 

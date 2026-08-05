@@ -94,10 +94,16 @@ Measured before designing anything, because the whole approach hinges on it:
 | `/dev/fuse`, `/dev/net/tun` | present in VM, mode `0666` | Passable via `--device` |
 | SELinux | **Enforcing** | Drives the security-option decision below |
 | VM RAM | **2 GiB** | tmpfs image storage is untenable (see [Storage](#3-storage-a-per-project-volume-not-tmpfs)) |
-| Nested userns as uid 1000 | `unshare -U -r id` → `uid=0(root)` | **Works with no extra flags** — no `--privileged`, no seccomp change |
+| Nested userns as uid 1000 | `unshare -U -r id` → `uid=0(root)` | Works with no extra flags — no `--privileged`, no seccomp change |
 
-That last row is the important one: creating a nested user namespace needs nothing
-special. Everything else is plumbing.
+That last row was originally read as the important one: creating a nested user namespace
+needs nothing special, and everything else is plumbing. Half right. The *namespace* is
+free, but **starting a container inside it is not** — podman's default seccomp profile
+gates `mount`/`sethostname` on `CAP_SYS_ADMIN`, and its read-only `/proc` binds are
+locked in the nested namespace. Both surfaced only when a real nested container was
+started from the built agent image, and both are now in
+[Host runtime flags](#1-host-runtime-flags) and [Appendix B](#appendix-b-implementation-time-verification-agent-image-not-the-reference-image).
+The lesson: verifying a primitive does not verify the feature.
 
 ---
 
@@ -129,7 +135,7 @@ flowchart TB
     pi --> pod
     pod --> inner
     pod -.-> store
-    inner -->|pasta/slirp userspace NAT<br/>into the agent's netns| eth0
+    inner -->|pasta userspace NAT<br/>into the agent's netns| eth0
     eth0 --> proxy
     proxy -->|verified: no bypass| internet["internet"]
 ```
@@ -141,26 +147,54 @@ Added to the agent `podman run` when nesting is enabled:
 | Flag | Why |
 |---|---|
 | `--device /dev/fuse` | `fuse-overlayfs` fallback when native rootless overlay is unavailable |
-| `--device /dev/net/tun` | `pasta`/`slirp4netns` need it to create the inner tap device |
+| `--device /dev/net/tun` | `pasta` needs it to create the inner tap device |
 | `--security-opt label=disable` | Required on an SELinux-enforcing host — see [SELinux](#5-selinux-the-one-real-concession) |
+| `--security-opt unmask=ALL` | **Correction, measured during implementation.** Podman bind-mounts parts of `/proc` read-only and masks others in the agent container; those mounts are *locked* in the nested user namespace. Without this, the inner runtime dies with `crun: open /proc/sys/net/ipv4/ping_group_range: Read-only file system`. |
+| `--cap-add SYS_ADMIN` | **Correction, measured during implementation.** Podman's default seccomp profile permits `mount`/`sethostname`/`umount2`/`pivot_root` only when `CAP_SYS_ADMIN` is in the container's capability set, and a seccomp filter cannot be relaxed from inside a nested userns. Without this, the inner runtime dies with `crun: sethostname: Operation not permitted`. |
 | `--volume pi-nested-<project-hash>:/home/pi/.local/share/containers` | Persistent nested image store |
 | `--env XDG_RUNTIME_DIR=/run/user/1000` | Rootless podman's lock/pid directory |
 | `--env NESTED_CONTAINERS=true` | Entrypoint gate (see below) |
 
-Notably **absent**: `--privileged`, `--security-opt seccomp=unconfined`, extra
-capabilities, `--userns` overrides. Verified unnecessary — nested userns creation as
-uid 1000 works under podman's default seccomp profile and default capability set. The
-agent keeps its existing `NET_ADMIN` and nothing more.
+The two corrections above replace this design's original claim that nesting needs no
+capability or seccomp relaxation. That claim came from testing only the *primitive*
+(`unshare -U -r id`, which does work unaided); starting an actual nested container
+needs both flags. Measured evidence, in the built agent image:
+
+```
+# inside podman's rootless userns as pi, the capability set IS full…
+CapEff: 000001ffffffffff   uid_map: 0 1000 1 / 1 1 999 / 1000 1001 64535
+# …yet the syscalls podman's seccomp profile gates on CAP_SYS_ADMIN are refused:
+sethostname=EPERM  mount-proc=EPERM
+# outer: label=disable                        → crun: sethostname: Operation not permitted
+# outer: label=disable + SYS_ADMIN            → crun: ping_group_range: Read-only file system
+# outer: label=disable + unmask=ALL           → crun: sethostname: Operation not permitted
+# outer: label=disable + unmask=ALL + SYS_ADMIN → INNER-STARTED-OK, CA mounted, HTTPS OK
+```
+
+`CAP_SYS_ADMIN` is **namespaced** here: the agent container's userns maps container
+uid 0 to an unprivileged host user, so the capability applies to what that namespace
+owns, not to the host. Still notably **absent**: `--privileged`,
+`--security-opt seccomp=unconfined` (the filter stays active for everything it does
+not gate on `CAP_SYS_ADMIN`), `--userns` overrides, and any host socket. The agent
+keeps its existing `NET_ADMIN`. This is a larger relaxation than this design
+originally promised, and it is the main reason nesting must stay opt-in.
 
 ### 2. Image additions
 
-Added to `pi-coding-agent/Containerfile` (Debian trixie packages):
+Added to `pi-coding-agent/Containerfile`. Debian trixie supplies the parts it ships
+at a version podman 6 accepts; `podman`, `netavark` and `aardvark-dns` are compiled
+in `pi-coding-agent-builder/` and copied in (see
+[Toolchain builder image](../architecture.md#toolchain-builder-image) — trixie's
+podman is 5.4.2 and its netavark 1.14.0, which podman 6 does not accept):
 
 ```dockerfile
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      podman crun netavark aardvark-dns containers-common \
-      passt slirp4netns fuse-overlayfs uidmap \
+      catatonit conmon crun fuse-overlayfs libcap2-bin libseccomp2 \
+      nftables passt uidmap \
  && rm -rf /var/lib/apt/lists/*
+
+# Node + CPython/uv/podman-compose + podman + netavark + aardvark-dns, prebuilt.
+COPY --from=pi-coding-agent-builder:local /out/ /
 
 # Nested subordinate ID ranges for `pi` (uid 1000). These must fall INSIDE the UID
 # range the outer user namespace maps (verified: container UIDs 1..1000000). The
@@ -168,16 +202,63 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # only the conventional 65536-wide subuid range.
 RUN printf 'pi:1:999\npi:1001:64535\n' > /etc/subuid \
  && cp /etc/subuid /etc/subgid \
- # newuidmap/newgidmap need CAP_SETUID/SETGID; file capabilities are unreliable
- # across nested user namespaces, so use setuid-root (root here is the mapped
- # unprivileged host user, not real root).
- && chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap
+ # newuidmap/newgidmap need CAP_SETUID/CAP_SETGID to write the nested namespace's
+ # id maps. File capabilities, NOT setuid-root — see the note below.
+ && chmod 0755 /usr/bin/newuidmap /usr/bin/newgidmap \
+ && setcap cap_setuid+ep /usr/bin/newuidmap \
+ && setcap cap_setgid+ep /usr/bin/newgidmap
 ```
 
-`~150 MB` on a `965 MB` image (≈15%). This goes in the **shared base image**, gated at
-runtime by config, rather than into a separate `-nested` image variant — one image, no
-build matrix, and `_compute_image_hash()` already covers `Containerfile` so project
-images rebuild automatically.
+Four corrections found while implementing this, all measured in the agent image
+(see [Appendix A](#appendix-a-verification-log)):
+
+- **`containers-common` does not exist on Debian.** The package is
+  `golang-github-containers-common` (a hard dependency of Debian's `podman`).
+  Moot in the end — see the last bullet — but `passt` and `uidmap` were only
+  *Recommends* of `podman`, so they always had to be listed by name.
+- **`chmod u+s` on `newuidmap` does not work; `setcap cap_setuid+ep` does.** A
+  setuid-root `newuidmap` run by `pi` *does* acquire `CAP_SETUID` (measured:
+  `CapEff: 00000000800405fb`, euid 0) and still fails the kernel's id-map
+  permission check — `newuidmap: write to uid_map failed: Operation not permitted`
+  — for both a single-extent and podman's full three-extent map. With
+  `cap_setuid=ep` (and the setuid bit removed) the identical map succeeds and the
+  nested `podman info` reports `rootless=true`, `overlay`. This is also what
+  `quay.io/podman/stable` does upstream, so the original reasoning here had it
+  backwards.
+- **`nftables` is required for `compose`.** A plain nested `podman run` reaches the
+  network through `pasta` and needs nothing extra, but `docker compose` creates a
+  user-defined network per project and netavark sets that bridge up itself — without
+  the `nft` binary the service fails to start with `netavark: nftables error: unable
+  to execute nft`. Verified: with `nftables` installed, `docker compose up` inside the
+  agent container runs a service, sees the injected CA at `/etc/pi-container-ca.crt`,
+  and — on the `--internal` network — still cannot reach the internet.
+- **A `docker` shim ships after all** (open question 5): several tools shell out to
+  `docker` by name, and the shim is a one-line `exec podman "$@"` at
+  `/usr/local/bin/docker`. A **compose provider** ships too: `podman-compose`,
+  pip-installed onto the base image's CPython (the apt package would pull in Debian's
+  separate `python3`). It is pinned via `[engine] compose_providers` because podman's
+  default list tries `docker-compose` first and would report it missing instead of
+  using the provider that is installed. This is what motivated moving the CPython
+  build out of each workspace's `root/commands.sh` and into the shared base image.
+- **Debian's podman is too old for this design, and its build tags are the wrong
+  ones.** trixie ships 5.4.2 (March 2025). podman 6 requires precisely what this
+  image already has and drops what it does not — cgroups v2 only, nftables only,
+  `pasta` only (no slirp4netns, no CNI) — and its release notes require
+  netavark/aardvark **2.0.0** against trixie's 1.14.0. Separately, podman's Makefile
+  *derives* `BUILDTAGS` from whichever `-dev` headers the packager happened to have,
+  which is how a distro build ends up with the `systemd` tag and therefore a journald
+  log-driver default in a container that has no journal. All three are now built from
+  source with an explicit tag set; `podman-docker` and
+  `golang-github-containers-common` are dropped, because both depend on the 5.4.2
+  package and would install it alongside. `/etc/containers/policy.json` and
+  `registries.conf` — which that package used to provide, and without which podman
+  refuses to run anything — are written by the Containerfile instead.
+
+The whole toolchain is `~700 MB` on a `1.63 GB` image, of which the nesting-specific
+part is `~150 MB`. It goes in the **shared base image**, gated at runtime by config,
+rather than into a separate `-nested` image variant — one image, no build matrix, and
+`_compute_image_hash()` already covers `Containerfile` so project images rebuild
+automatically.
 
 ### 3. Storage: a per-project volume, not tmpfs
 
@@ -219,7 +300,7 @@ wget: can't connect to remote host (1.1.1.1): Network unreachable
 ```
 
 `Network unreachable` comes from the kernel's routing layer in the *agent's* netns.
-Rootless podman connects its containers through `pasta`/`slirp4netns`, which perform
+Rootless podman connects its containers through `pasta`, which performs
 userspace NAT **into the parent namespace's stack** — so nested traffic is emitted from
 the agent's own interface, with the agent's source address, subject to the agent's routes.
 The proxy's existing `-i eth1` REDIRECT rules therefore match nested traffic with **no
@@ -266,10 +347,12 @@ workspaces that accept passing `--security-opt unmask=all` to their inner contai
 
 What `label=disable` actually costs: the agent container loses SELinux *type* confinement.
 It does **not** lose the user namespace (container uid 0 is still the unprivileged VM user
-`core`), rootlessness, seccomp, the capability bounding set, the routing dead end, or the
-absence of any host socket. SELinux here was defense-in-depth against a runtime/kernel
-escape; the primary boundaries are all intact. This is a genuine reduction and belongs in
-the docs as one — which is why nesting is **opt-in and off by default**.
+`core`), rootlessness, seccomp, the routing dead end, or the absence of any host socket.
+SELinux here was defense-in-depth against a runtime/kernel escape; the primary boundaries
+are all intact. Together with the two corrections above (`unmask=ALL` widens the agent's
+view of `/proc`/`/sys`; `SYS_ADMIN` widens its namespaced capability set) this is a
+genuine reduction and belongs in the docs as one — which is why nesting is **opt-in and
+off by default**.
 
 ### 6. Trusting the mitmproxy CA inside nested containers
 
@@ -351,9 +434,15 @@ above avoids a hard failure on the missing systemd/dbus; inner limit flags are t
 best-effort. Documented as a known limitation.
 
 One operational note surfaced by the baseline: the VM has 2 GiB of RAM while the default
-`resources.agent.memory` is `16g`. That mismatch is pre-existing and harmless today, but
-nested builds are the workload most likely to expose it. The docs should tell users to size
-`podman machine` before enabling nesting.
+`resources.agent.memory` is `16g`. That mismatch is pre-existing, but nested builds are the
+workload most likely to expose it.
+
+Since this design landed, **4 GB is the documented minimum** `podman machine` size — not for
+nesting but for building the images at all, because the CPython compile moved into the
+shared base image — and now into the toolchain image (`pi-coding-agent-builder/`), which also
+compiles podman and netavark. `build.sh` checks available memory
+in the VM before starting a build and refuses with the fix rather than OOM-killing the
+compiler minutes in. Enabling nesting warrants more again.
 
 ### 9. Entrypoint changes
 
@@ -493,7 +582,8 @@ Each phase leaves the tree working; the security-relevant surface all lands in 3
 | `src/run.py` | Call `read_nested_containers_config()`; splice `nested_container_args()` into `pi_container_cmd`. Add `_ensure_nested_volume()` (create + label) and `_cleanup_orphaned_nested_volumes()` mirroring `_cleanup_orphaned_project_images()`. |
 | `src/util.py` | `validate_environment()`: podman-only. |
 | `src/schema_common.py` | `SCHEMA` gains `nested_containers` (`enabled`, `storage`, `security`). |
-| `pi-coding-agent/Containerfile` | Nesting toolchain packages; `/etc/subuid`/`/etc/subgid`; setuid `newuidmap`/`newgidmap`; `/etc/containers/containers.conf.d/50-pi-container.conf`. |
+| `pi-coding-agent/Containerfile` | Nesting runtime packages; `COPY --from` the toolchain image; `/etc/subuid`/`/etc/subgid`; `setcap` on `newuidmap`/`newgidmap`; `docker` shim; `/etc/containers/{policy.json,registries.conf,containers.conf.d/50-pi-container.conf}`. |
+| `pi-coding-agent-builder/` | **New.** Builds podman 6 (explicit `BUILDTAGS`), netavark/aardvark-dns 2.0 and CPython/uv/podman-compose from source, and stages Node 26 (official tarball by default, `NODE_SOURCE=build` to compile) — one independent stage each, under `/out`. Every version, commit and sha256 is an `ARG` in its `Containerfile`; the scripts assert them via `require_env` and default nothing. |
 | `pi-coding-agent/entrypoint.sh` | `NESTED_CONTAINERS` block creating/chowning `/run/user/1000` and the store. |
 | `pi-coding-agent/default/config.yaml` | New `nested_containers` section; bump `schema_version`. |
 | `pi-coding-agent/default/allowlist.yaml` | Commented registry allow-rule block. |
@@ -526,9 +616,11 @@ Each phase leaves the tree working; the security-relevant surface all lands in 3
    containers addressable on the isolated network — a much larger change, and one that
    would reopen the sibling-sidecar tradeoff.
 5. **Does `pi` need a `docker` alias?** Many tools shell out to `docker` specifically.
-   A `docker → podman` shim (podman ships `podman-docker` on Debian) plus a
-   `DOCKER_HOST` pointing at a user socket would make `docker compose` work unmodified.
-   Small addition; worth confirming which the agent actually invokes.
+   *Answered: yes.* A one-line `exec podman "$@"` shim at `/usr/local/bin/docker`, plus
+   `podman-compose` pinned as the compose provider, makes `docker compose` work
+   unmodified with no `DOCKER_HOST` and no socket. Debian's `podman-docker` would have
+   provided the shim but depends on its own podman 5.4.2, so the shim is written in the
+   Containerfile instead.
 
 ---
 
@@ -586,3 +678,104 @@ podman run --rm --device /dev/fuse --security-opt label=disable --user podman \
 # named volume at /home/pi/.local/share/containers, mounted UNDER
 # --mount type=tmpfs,notmpcopyup,destination=/home/pi/ → content visible, WRITE-OK
 ```
+
+## Appendix B: implementation-time verification (agent image, not the reference image)
+
+Re-run against the real `pi-coding-agent` image once the toolchain landed. Everything
+below was measured, and three of the four findings contradict the design above.
+
+```bash
+# ── Image toolchain ────────────────────────────────────────────────────────
+# apt: containers-common does NOT exist on Debian → golang-github-containers-common
+# newuidmap/newgidmap present, /etc/subuid = pi:1:999 + pi:1001:64535
+# image size 965 MB → 1.08 GB (+117 MB)
+
+# ── newuidmap privilege mechanism ──────────────────────────────────────────
+# chmod u+s        → euid 0, CapEff 00000000800405fb, and STILL:
+#                    "newuidmap: write to uid_map failed: Operation not permitted"
+#                    (both a 1-extent and podman's 3-extent map)
+# setcap cap_setuid+ep (setuid bit removed) → map written, podman info reports
+#                    rootless=true, driver=overlay        ← this is what shipped
+
+# ── Nested store driver ────────────────────────────────────────────────────
+podman info --format '{{.Store.GraphDriverName}} {{.Store.GraphRoot}}'
+#   overlay /home/pi/.local/share/containers/storage   (native, not vfs) ✅
+
+# ── Outer flag set required to START an inner container ────────────────────
+# label=disable                          → crun: sethostname: Operation not permitted
+# label=disable + SYS_ADMIN              → crun: ping_group_range: Read-only file system
+# label=disable + unmask=ALL             → crun: sethostname: Operation not permitted
+# label=disable + unmask=ALL + SYS_ADMIN → INNER-STARTED-OK ✅
+#   inner container also confirmed: SSL_CERT_FILE set + /etc/pi-container-ca.crt
+#   readable (the containers.conf drop-in works), HTTPS OK on a routed network.
+
+# ── Compose, end to end in the agent image ─────────────────────────────────
+# `docker compose up` (podman-docker shim → podman → podman-compose):
+#   [hello] | COMPOSE-SERVICE-RAN in 73add0bfe5a8
+#   [hello] | COMPOSE-CA-PRESENT                     ← containers.conf drop-in ✅
+# First attempt failed with "netavark: nftables error: unable to execute nft"
+# → nftables added to the image (compose creates a user-defined network).
+
+# ── No-bypass proof, re-run with the FINAL flag set ────────────────────────
+# outer on `network create --internal --disable-dns`, no default route:
+#   outer egress: unreachable
+#   INNER-HTTPS-FAIL (no bypass)
+#   wget: can't connect to remote host (1.1.1.1): Network unreachable
+#   INNER-RAW-IP-FAIL (no bypass)                                          ✅
+# Same again through a compose-created bridge network:
+#   COMPOSE-HTTPS-FAIL (no bypass) / COMPOSE-RAW-IP-FAIL (no bypass)         ✅
+
+# ── Note on the SELinux matrix above ───────────────────────────────────────
+# `--security-opt unmask=...` is accepted by the podman *remote* client only as
+# unmask=ALL or an explicit path list (lowercase `all` is not special).
+```
+
+### Appendix B2: re-verification after the toolchain moved to a builder image
+
+The apt-installed podman 5.4.2 was replaced by podman 6.0.2 built from source (with
+netavark/aardvark-dns 2.0.0 and CPython/uv/podman-compose), copied in from
+`pi-coding-agent-builder:local`. Everything above was re-run against it, unchanged
+flags:
+
+```bash
+# ── Build tags actually present in the binary ──────────────────────────────
+go version -m bin/podman | grep -- -tags
+#   build -tags=seccomp,libsqlite3,containers_image_openpgp,
+#               exclude_graphdriver_btrfs,grpcnotrace                        ✅
+ldd bin/podman
+#   libsqlite3.so.0, libseccomp.so.2, libc.so.6, libm.so.6 — no gpgme        ✅
+
+# ── The nested runtime, same outer flags as before ─────────────────────────
+podman info --format '…'
+#   rootless=true driver=overlay netbackend=netavark runtime=crun
+#   logdriver=k8s-file cgroups=cgroupfs                                      ✅
+#   (k8s-file confirms the omitted `systemd` build tag: no journald default
+#    pointing at a socket that does not exist in this container.)
+
+# ── Plain run, docker shim, compose ────────────────────────────────────────
+podman run --rm alpine:3 …   → NESTED-RUN-OK / NESTED-CA-PRESENT             ✅
+docker --version             → podman version 6.0.2                          ✅
+docker compose up            → [probe] COMPOSE-SERVICE-RAN / COMPOSE-CA-PRESENT ✅
+
+# ── No-bypass proof, re-run on `network create --internal --disable-dns` ───
+#   AGENT-HTTPS-FAIL (expected)
+#   NESTED-HTTPS-FAIL (no bypass)      / NESTED-RAW-IP-FAIL (no bypass)      ✅
+#   COMPOSE-HTTPS-FAIL (no bypass)     / COMPOSE-RAW-IP-FAIL (no bypass)     ✅
+```
+
+Two incidental findings:
+
+- **A git tag is not a commit.** `git ls-remote <url> refs/tags/v6.0.2` returns the
+  *annotated tag object's* sha; the pin has to be the peeled commit
+  (`refs/tags/v6.0.2^{}`). The commit assertion in `clone_verified()` caught this on
+  the first build instead of silently accepting whatever the tag pointed at.
+- **The PGO profile run can fail the build.** `--enable-optimizations` makes `make`
+  run part of CPython's test suite; one test failed under memory pressure
+  (`make: *** [Makefile:1020: profile-run-stamp] Error 2`) and passed on a plain
+  retry. `build-python.sh` now says so when that specific step is what failed.
+- **Node's `configure` drops features with a warning, not an error.** Node 26 implements
+  the `Temporal` API in Rust; with no toolchain present it prints `WARNING: cargo not
+  found! Support for Temporal will be disabled.` and completes successfully, yielding a
+  Node with no `Temporal` global — which `node:26.3.1-trixie-slim` does have (measured).
+  Building Node here therefore needs the same pinned Rust as netavark, and the build
+  asserts `Temporal` both in the configure log and in the staged binary.

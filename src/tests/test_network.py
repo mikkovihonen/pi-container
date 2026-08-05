@@ -113,7 +113,7 @@ class TestScanConfigEnvRefs:
 class TestContainerNetworkManagerPullSecrets:
     def _make_manager(self, tmp_path):
         return ContainerNetworkManager(
-            container_runtime="docker",
+            container_runtime="podman",
             network_name="test-net",
             proxy_image="proxy:latest",
             config_dir=tmp_path,
@@ -159,7 +159,7 @@ class TestContainerNetworkManagerPullSecrets:
 class TestContainerNetworkManagerEnvFlags:
     def test_env_flags_sorted(self):
         mgr = ContainerNetworkManager(
-            container_runtime="docker",
+            container_runtime="podman",
             network_name="test-net",
             proxy_image="proxy:latest",
         )
@@ -169,7 +169,7 @@ class TestContainerNetworkManagerEnvFlags:
 
     def test_empty_secrets(self):
         mgr = ContainerNetworkManager(
-            container_runtime="docker",
+            container_runtime="podman",
             network_name="test-net",
             proxy_image="proxy:latest",
         )
@@ -187,7 +187,7 @@ class TestContainerNetworkManagerRefCount:
         lock_dir = tmp_path / ".locks"
         lock_dir.mkdir()
         mgr = ContainerNetworkManager(
-            container_runtime="docker",
+            container_runtime="podman",
             network_name="test-net",
             proxy_image="proxy:latest",
             config_dir=tmp_path,
@@ -301,7 +301,7 @@ class TestScanTmpfsPaths:
 class TestPerProjectProxy:
     def _make_manager(self, proxy_name):
         return ContainerNetworkManager(
-            container_runtime="docker",
+            container_runtime="podman",
             network_name="pi-isolated-net-abc",
             proxy_image="proxy:latest",
             proxy_name=proxy_name,
@@ -549,7 +549,7 @@ class TestReadProxyUiExpose:
 
     def test_publish_args_bind_scope(self, tmp_path):
         mgr = ContainerNetworkManager(
-            container_runtime="docker",
+            container_runtime="podman",
             network_name="net",
             proxy_image="proxy:latest",
             proxy_name="pi-proxy-x",
@@ -594,6 +594,72 @@ class TestReadAgentExtras:
 
 
 # ---------------------------------------------------------------------------
+# ReadNestedContainersConfig (config.yaml nested_containers)
+# ---------------------------------------------------------------------------
+
+
+class TestReadNestedContainersConfig:
+    def _write(self, tmp_path, body):
+        (tmp_path / "config.yaml").write_text(body)
+
+    def test_missing_file_is_off(self, tmp_path):
+        """Fail-safe: no config → nesting disabled, with the default modes."""
+        from network import read_nested_containers_config
+
+        assert read_nested_containers_config(tmp_path) == {
+            "enabled": False,
+            "storage": "volume",
+            "security": "disable",
+        }
+
+    def test_section_absent_is_off(self, tmp_path):
+        from network import read_nested_containers_config
+
+        self._write(tmp_path, "something_else: 1\n")
+        assert read_nested_containers_config(tmp_path)["enabled"] is False
+
+    def test_enabled_with_defaults(self, tmp_path):
+        from network import read_nested_containers_config
+
+        self._write(tmp_path, "nested_containers:\n  enabled: true\n")
+        assert read_nested_containers_config(tmp_path) == {
+            "enabled": True,
+            "storage": "volume",
+            "security": "disable",
+        }
+
+    def test_all_values_configured(self, tmp_path):
+        from network import read_nested_containers_config
+
+        self._write(tmp_path, "nested_containers:\n  enabled: true\n  storage: tmpfs\n  security: engine_t\n")
+        assert read_nested_containers_config(tmp_path) == {
+            "enabled": True,
+            "storage": "tmpfs",
+            "security": "engine_t",
+        }
+
+    def test_enabled_truthy_string(self, tmp_path):
+        from network import read_nested_containers_config
+
+        self._write(tmp_path, "nested_containers:\n  enabled: 'yes'\n")
+        assert read_nested_containers_config(tmp_path)["enabled"] is True
+
+    def test_unknown_modes_fall_back(self, tmp_path):
+        from network import read_nested_containers_config
+
+        self._write(tmp_path, "nested_containers:\n  enabled: true\n  storage: nfs\n  security: yolo\n")
+        cfg = read_nested_containers_config(tmp_path)
+        assert cfg["storage"] == "volume"
+        assert cfg["security"] == "disable"
+
+    def test_malformed_yaml_is_off(self, tmp_path):
+        from network import read_nested_containers_config
+
+        self._write(tmp_path, "nested_containers: [unclosed\n")
+        assert read_nested_containers_config(tmp_path)["enabled"] is False
+
+
+# ---------------------------------------------------------------------------
 # ContainerNetworkManager._preflight_ipv6_egress + warn_if_proxy_lacks_ipv6_egress
 # ---------------------------------------------------------------------------
 
@@ -614,7 +680,7 @@ class _LogCapture:
 class TestPreflightIpv6Egress:
     def _make_manager(self):
         mgr = ContainerNetworkManager(
-            container_runtime="docker",
+            container_runtime="podman",
             network_name="test-net",
             proxy_image="proxy:latest",
             proxy_name="pi-proxy-test",
@@ -656,7 +722,7 @@ class TestPreflightIpv6Egress:
 class TestWarnIfProxyLacksIpv6Egress:
     def _make_manager(self):
         mgr = ContainerNetworkManager(
-            container_runtime="docker",
+            container_runtime="podman",
             network_name="test-net",
             proxy_image="proxy:latest",
             proxy_name="pi-proxy-test",
