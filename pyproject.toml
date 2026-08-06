@@ -30,6 +30,8 @@ package = false
 override-dependencies = [
     "msgpack>=1.2.1",
     "tornado>=6.5.7",
+    "cryptography>=50.0.0",
+    "pyasn1>=0.6.4"
 ]
 
 [tool.pytest.ini_options]
