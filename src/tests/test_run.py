@@ -155,6 +155,76 @@ class TestEnsureProjectConfig:
     # in main() which calls validate_config() and exits on failure.
 
 
+class TestEnsureProjectConfigExistingAgentDir:
+    """Tests for the per-file seed of an existing ``agent/`` directory (D1)."""
+
+    def _make_template_with_extension(self, root):
+        """Build a template that ships an ``extensions/vale/index.js`` under agent/."""
+        template = root / "pi-coding-agent" / "default"
+        agent = template / "agent"
+        agent.mkdir(parents=True)
+        (agent / "models.json").write_text("{}")
+        ext_dir = agent / "extensions" / "vale"
+        ext_dir.mkdir(parents=True, exist_ok=True)
+        (ext_dir / "index.js").write_text("// vale extension\n")
+        return template
+
+    def test_seeds_extension_into_existing_agent_dir(self, tmp_path, monkeypatch):
+        """A workspace with an existing .pi-container/agent/ gains extensions/vale/index.js on the next run."""
+        repo = tmp_path / "repo"
+        project = tmp_path / "project"
+        project.mkdir()
+        self._make_template_with_extension(repo)
+        # Pre-existing agent/ with only models.json — no extensions/.
+        agent_dir = project / ".pi-container" / "agent"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        (agent_dir / "models.json").write_text("{}")
+        monkeypatch.setattr(run, "REPO_ROOT", repo)
+        monkeypatch.setattr(run, "PROJECT_DIR", project)
+
+        run._ensure_project_config()
+
+        assert (agent_dir / "extensions" / "vale" / "index.js").exists()
+
+    def test_does_not_overwrite_existing_extension(self, tmp_path, monkeypatch):
+        """A user-edited extension file is never overwritten by seeding."""
+        repo = tmp_path / "repo"
+        project = tmp_path / "project"
+        project.mkdir()
+        self._make_template_with_extension(repo)
+        agent_dir = project / ".pi-container" / "agent"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        ext_file = agent_dir / "extensions" / "vale" / "index.js"
+        ext_file.parent.mkdir(parents=True, exist_ok=True)
+        ext_file.write_text("// user edit\n")
+        monkeypatch.setattr(run, "REPO_ROOT", repo)
+        monkeypatch.setattr(run, "PROJECT_DIR", project)
+
+        run._ensure_project_config()
+
+        assert (agent_dir / "extensions" / "vale" / "index.js").read_text() == "// user edit\n"
+
+    def test_does_not_touch_unrelated_files(self, tmp_path, monkeypatch):
+        """Seeding only touches files from the template tree."""
+        repo = tmp_path / "repo"
+        project = tmp_path / "project"
+        project.mkdir()
+        self._make_template_with_extension(repo)
+        agent_dir = project / ".pi-container" / "agent"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        # User-created file not in the template.
+        (agent_dir / "custom.sh").write_text("#!/bin/bash\n")
+        monkeypatch.setattr(run, "REPO_ROOT", repo)
+        monkeypatch.setattr(run, "PROJECT_DIR", project)
+
+        run._ensure_project_config()
+
+        # The custom file must remain untouched.
+        assert (agent_dir / "custom.sh").read_text() == "#!/bin/bash\n"
+        # The extension must be seeded.
+        assert (agent_dir / "extensions" / "vale" / "index.js").exists()
+
+
 class TestComputeImageHash:
     """Tests for _compute_image_hash()."""
 
@@ -240,6 +310,62 @@ class TestComputeImageHash:
         repo.mkdir()
         result = run._compute_image_hash(repo)
         assert result is None
+
+    def test_vale_rule_edit_changes_hash(self, tmp_path, monkeypatch):
+        """Editing a Vale rule file changes _compute_image_hash."""
+        repo = tmp_path / "repo"
+        deps = repo / ".pi-container" / "dependencies"
+        deps.parent.mkdir(parents=True, exist_ok=True)
+        deps.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
+        # Create minimal pi-coding-agent/ with Containerfile + entrypoint.sh + vale/
+        pi_agent = repo / "pi-coding-agent"
+        pi_agent.mkdir(parents=True, exist_ok=True)
+        (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
+        (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+        vale_dir = pi_agent / "vale"
+        vale_dir.mkdir(parents=True, exist_ok=True)
+        (vale_dir / "fallback.ini").write_text("StylesPath = /usr/local/share/vale/styles\n")
+        ste100 = vale_dir / "styles" / "STE100"
+        ste100.mkdir(parents=True, exist_ok=True)
+        (ste100 / "SentenceLength.yml").write_text(
+            "extends: occurrence\nmessage: short\nlevel: suggestion\nscope: sentence\nmax: 20\ntoken: '\\w+'\n"
+        )
+        monkeypatch.setattr(run, "REPO_ROOT", repo)
+        project = tmp_path / "workspace"
+        project.mkdir()
+
+        hash1 = run._compute_image_hash(project)
+        # Edit the rule file.
+        (ste100 / "SentenceLength.yml").write_text(
+            "extends: occurrence\nmessage: longer message\nlevel: suggestion\nscope: sentence\nmax: 20\ntoken: '\\w+'\n"
+        )
+        hash2 = run._compute_image_hash(project)
+        assert hash1 != hash2
+
+    def test_empty_vale_dir_changes_hash(self, tmp_path, monkeypatch):
+        """Adding an empty vale/ directory to a repo without one changes the hash."""
+        repo = tmp_path / "repo"
+        deps = repo / ".pi-container" / "dependencies"
+        deps.parent.mkdir(parents=True, exist_ok=True)
+        deps.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
+        (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
+        pi_agent = repo / "pi-coding-agent"
+        pi_agent.mkdir(parents=True, exist_ok=True)
+        (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
+        (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+        monkeypatch.setattr(run, "REPO_ROOT", repo)
+        project = tmp_path / "workspace"
+        project.mkdir()
+
+        hash1 = run._compute_image_hash(project)
+        # Add vale/ directory.
+        (pi_agent / "vale").mkdir(parents=True, exist_ok=True)
+        (pi_agent / "vale" / "fallback.ini").write_text("minAlertLevel = warning\n")
+        hash2 = run._compute_image_hash(project)
+        assert hash1 != hash2
 
 
 class TestHasDependencyFiles:

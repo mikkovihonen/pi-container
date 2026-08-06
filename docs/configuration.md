@@ -3,14 +3,14 @@
 
 ## Environment Configuration
 
-The application uses a `.env` file for managing environment-specific settings. See `.env.example` for all available options.
+The application uses a `.env` file to store environment-specific settings. See `.env.example` for all available options.
 
 ### Security
 
 - **`ADMIN_PASSWORD`** MUST be changed from the default `CHANGEME` before running.
   The proxy's mitmweb UI will refuse to start with a default or empty password.
 - **Model integrity**: Set `sha256` in `models.json` to verify downloaded model files.
-  Without a checksum, downloads proceed without integrity verification.
+  The download skips integrity checks without a checksum.
 
 ### Run Configuration
 
@@ -25,37 +25,37 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 | `PROXY_UPSTREAM_NETWORK` | The upstream network the proxy connects to for internet access | `podman` |
 | `LOG_LEVEL` | Log level | `INFO` |
 | `ADMIN_PASSWORD` | Password for mitmproxy Web UI | `CHANGEME` |
-| `BUILDER_IMAGE_TAG` | The tag of the toolchain image the agent image copies node/python/podman from | `pi-coding-agent-builder:local` |
+| `BUILDER_IMAGE_TAG` | The tag of the toolchain image that the agent image copies node/python/podman from | `pi-coding-agent-builder:local` |
 | `NODE_SOURCE` | `build` compiles Node from source in the toolchain image (~1 hour) instead of staging the official tarball | `prebuilt` |
 | `PYTHON_OPTIMIZE` | `0` skips the PGO CPython build in the toolchain image: a fraction of the memory and time, ~10-20% slower Python | `1` (PGO on) |
 | `PI_MEMORY_PREFLIGHT` | `0` skips the pre-build memory check (see below) | `1` (check on) |
 
-`BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` have per-runtime defaults and rarely need setting; provide them only to override the default for your host.
+`BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` have per-runtime defaults. They rarely need setting. Provide them only to override the default for your host.
 
-`NODE_SOURCE` and `PYTHON_OPTIMIZE` are the two toolchain knobs `build.sh` forwards as build args. The **component versions themselves** are not environment variables — every version, git commit and SHA-256 the toolchain image builds from is an `ARG` in [`pi-coding-agent-builder/Containerfile`](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-builder/Containerfile), declared on the stage that uses it. Bumping podman, Node, CPython, Go, Rust, netavark or any pip pin is an edit in that one file. Overriding one for a one-off build means calling podman directly, since `build.sh` forwards only the two knobs above:
+`NODE_SOURCE` and `PYTHON_OPTIMIZE` are the two toolchain knobs that `build.sh` forwards as build args. The **component versions themselves** are not environment variables. Every version, git commit, and SHA-256 the toolchain image builds from is an `ARG` in [`pi-coding-agent-builder/Containerfile`](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-builder/Containerfile). The declaration lives on the stage that uses it. Bumping podman, Node, CPython, Go, Rust, netavark, or any pip pin is an edit in that one file. Overriding one for a one-off build means calling podman directly. `build.sh` forwards only the two knobs above:
 
 ```bash
 podman build --build-arg PODMAN_VERSION=v6.1.0 --build-arg PODMAN_COMMIT=<peeled-sha> \
     --tag pi-coding-agent-builder:local -f pi-coding-agent-builder/Containerfile .
 ```
 
-A version and its hashes must move together — the build refuses to start if any pin is unset or empty (naming the `ARG`), and a mismatched hash fails the download rather than building something unverified.
+A version and its hashes must move together. The build refuses to start if any pin is unset or empty (naming the `ARG`). A mismatched hash fails the download instead of building something unverified.
 
-> **Docker is not supported.** pi-container's isolation model rests on the agent container running inside a user namespace where container uid 0 maps to an unprivileged host user — stock Docker provides no such remap, so the same configuration would ship two materially different security guarantees. See [Nested containers](#nested-containers).
+> **Docker is not supported.** pi-container's isolation model depends on the agent container running inside a user namespace where container uid 0 maps to an unprivileged host user. Stock Docker provides no such remap. The same configuration would give two materially different security guarantees. See [Nested containers](#nested-containers).
 
-> Per-project settings (IPv6, proxy DNS, mitmweb UI exposure, llama-server startup tuning, resource limits, tmpfs, flow export, egress, nested containers, extra agent env/mounts) are **not** environment variables — they live in `.pi-container/config.yaml`, documented below.
+> Per-project settings (IPv6, proxy DNS, mitmweb UI exposure, llama-server startup tuning, resource limits, tmpfs, flow export, egress, nested containers, extra agent env or mounts) are **not** environment variables. They live in `.pi-container/config.yaml`, documented below.
 
 ## Per-workspace Configuration
 
 ### Introduction
 
-When launched, pi-container looks for workspace-specific overrides in `./.pi-container` and package dependencies in the directory it's launched in. Each workspace gets its own agent config, proxy, isolated network, and chat templates — all under that workspace's `.pi-container/` (seeded from the `pi-coding-agent/default/` template on first run).
+When you launch pi-container, it looks for workspace-specific overrides in `./.pi-container` and package dependencies in the directory you launched it from. Each workspace gets its own agent config, proxy, isolated network, and chat templates. They all live under that workspace's `.pi-container/` (seeded from the `pi-coding-agent/default/` template on first run).
 
-Orchestration settings live in a single **`config.yaml`**; the proxy addon configs (`allowlist.yaml`, `token_replacer.yaml`) stay in their own files because they're mounted into and parsed by the proxy container.
+Orchestration settings live in a single **`config.yaml`**. The proxy addon configs (`allowlist.yaml`, `token_replacer.yaml`) stay in their own files. The proxy container mounts and parses them.
 
 ### The `models.json` file and `serverCustomParameters`
 
-The LLM models that pi-container serves are configured in `.pi-container/agent/models.json`, which is pi-coding-agent's own `models.json` format with an extended `serverCustomParameters` block per provider. This block is the bridge between the pi-container orchestration layer and llama-server — it tells pi-container which model files to download, where they live on disk, and which `llama-server` command-line flags to pass when launching the model.
+You configure the LLM models that pi-container serves in `.pi-container/agent/models.json`. This file uses pi-coding-agent's own `models.json` format with an extended `serverCustomParameters` block per provider. This block bridges the pi-container orchestration layer and llama-server. It tells pi-container which model files to download, where they live on disk, and which `llama-server` command-line flags to pass when launching the model.
 
 The file structure looks like this:
 
@@ -78,7 +78,7 @@ The file structure looks like this:
 }
 ```
 
-Not all of pi-coding-agent's `models.json` fields are consumed by pi-container — only a subset is read, since most model metadata (IDs, context windows, tool-calling flags, etc.) is pi-coding-agent's concern, not llama-server's. At startup, `run.py` iterates `providers` and for each entry that has `serverCustomParameters` it extracts:
+pi-container reads only a subset of pi-coding-agent's `models.json` fields. pi-coding-agent handles most model metadata (IDs, context windows, tool-calling flags). llama-server does not need them. At startup, `run.py` iterates `providers`. For each entry that has `serverCustomParameters` it extracts:
 
 | Field | Used by pi-container? | Notes |
 |-------|----------------------|-------|
@@ -86,11 +86,11 @@ Not all of pi-coding-agent's `models.json` fields are consumed by pi-container �
 | `baseUrl` | **Yes** — port only | `run.py` parses `http://llama:9999/v1` and extracts the port (`9999`) so the agent container knows which llama-server port to target. The scheme/host/path are not validated. |
 | `serverCustomParameters.hfModels` | **Yes** | Model file download config + per-model additional flags. |
 | `serverCustomParameters.flags` | **Yes** | llama-server CLI flags, passed verbatim. |
-| `api`, `apiKey` | No | pi-coding-agent uses these for API negotiation; pi-container ignores them. |
-| `compat` | No | pi-coding-agent compatibility flags; pi-container ignores them. |
+| `api`, `apiKey` | No | pi-coding-agent uses these for API negotiation. pi-container ignores them. |
+| `compat` | No | pi-coding-agent compatibility flags. pi-container ignores them. |
 | `models[].id`, `models[].name`, `models[].contextWindow`, `models[].toolCalling`, `models[].vision`, `models[].reasoning`, `models[].options`, etc. | No | pi-coding-agent model metadata. pi-container does not read these. |
 
-In short, pi-container only needs `baseUrl` (for the port), the provider name, and `serverCustomParameters` — the rest of the `models.json` structure is for pi-coding-agent's model registry and is passed through untouched.
+In short, pi-container only needs `baseUrl` (for the port), the provider name, and `serverCustomParameters`. The rest of the `models.json` structure is for pi-coding-agent's model registry. pi-container passes it through untouched.
 
 The `serverCustomParameters` object has two fields:
 
@@ -129,20 +129,20 @@ The `serverCustomParameters` object has two fields:
 }
 ```
 
-Each `hfModels` entry requires:
+You must set each `hfModels` entry:
 
 | Field | Description |
 |-------|-------------|
-| `fileFlag` | The llama-server flag name (e.g. `--model`, `--model-draft`, `--mmproj`). This flag is emitted with the model's resolved path when launching llama-server. |
+| `fileFlag` | The llama-server flag name (e.g. `--model`, `--model-draft`, `--mmproj`). The system emits this flag with the model's resolved path when launching llama-server. |
 | `repo` | Hugging Face repository slug (e.g. `unsloth/gemma-4-26B-A4B-it-qat-GGUF`). |
 | `file` | Filename within the repository (e.g. `ornith-1.0-35b-Q6_K.gguf`). |
-| `dir` | Subdirectory under `llama-server/models/` where the file is cached. Files from different repos use different dirs to avoid collisions. |
-| `additionalServerFlags` | Extra flags appended after this model's `fileFlag` + path on the llama-server command line. Useful for per-model options like speculative decoding settings (`--spec-type`, `--spec-draft-n-max`). |
-| `sha256` | *(optional)* SHA-256 hex digest of the model file. If set, pi-container verifies the downloaded file before starting llama-server; a mismatch aborts startup. Without a checksum, downloads proceed without integrity verification. |
+| `dir` | Subdirectory under `llama-server/models/` where the system caches the file. Files from different repos use different dirs to avoid collisions. |
+| `additionalServerFlags` | Extra flags appended after this model's `fileFlag` and path on the llama-server command line. Use this for per-model options like speculative decoding settings (`--spec-type`, `--spec-draft-n-max`). |
+| `sha256` | *(optional)* SHA-256 hex digest of the model file. If you set it, pi-container verifies the downloaded file before starting llama-server. A mismatch aborts startup. Without a checksum, downloads proceed without integrity verification. |
 
-The `hfModels` entries are processed in sorted label order, but each entry's `additionalServerFlags` preserve their specified order — and the overall `flags` list is passed to llama-server verbatim, in the order defined.
+The system processes `hfModels` entries in sorted label order. Each entry's `additionalServerFlags` keep their specified order. The system passes the overall `flags` list to llama-server verbatim and in the order defined.
 
-Multiple labels are common: `main` for the base model, `draft` for a speculative decoding draft model, `mmproj` for a multi-modal projection head, or additional labels for LoRA adapters and other llama-server features. A provider **must** have at least one entry (the "main" model), and at minimum the `main` label should point to the primary model file.
+Multiple labels are common. Use `main` for the base model, `draft` for a speculative decoding draft model, `mmproj` for a multi-modal projection head, or additional labels for LoRA adapters and other llama-server features. A provider **must** have at least one entry (the "main" model). At minimum the `main` label must point to the primary model file.
 
 #### `flags` — llama-server command-line flags
 
@@ -174,7 +174,7 @@ Multiple labels are common: `main` for the base model, `draft` for a speculative
 ]
 ```
 
-Each item is a single CLI token — strings are flag names or values, numbers are emitted as their numeric string. The list is passed to llama-server in order; flag ordering matters for some llama-server options.
+Each item is a single CLI token. Strings are flag names or values. The system emits numbers as their numeric string. The system passes the list to llama-server in order. Flag ordering matters for some llama-server options.
 
 Common categories:
 
@@ -185,11 +185,11 @@ Common categories:
 - **GPU**: `--n-gpu-layers` (999 = offload all layers to GPU)
 - **Chat template**: `--jinja`, `--chat-template-file`, `--chat-template-kwargs`
 
-The `--chat-template-file` path is resolved relative to the workspace directory (since llama-server runs on the host from the workspace), so `.pi-container/chat-templates/<model>/chat_template.jinja` is the typical pattern.
+The `--chat-template-file` path resolves relative to the workspace directory. llama-server runs on the host from the workspace. So `.pi-container/chat-templates/<model>/chat_template.jinja` is the typical pattern.
 
 #### Server sharing and fingerprints
 
-A llama-server process is a **host-wide shared resource**, keyed by provider name plus a stable fingerprint of its `serverCustomParameters`. Two projects with the same provider name and identical `serverCustomParameters` (model files, flags) share one llama-server process — saving RAM by avoiding double-loading a model. A same-named provider with different parameters gets its own server, ensuring a project never silently attaches to a llama-server running the wrong model.
+A llama-server process is a **host-wide shared resource**. It uses the provider name plus a stable fingerprint of its `serverCustomParameters` as its key. Two projects with the same provider name and identical `serverCustomParameters` (model files, flags) share one llama-server process. This saves RAM by avoiding double-loading a model. A same-named provider with different parameters gets its own server. This ensures a project never silently attaches to a llama-server running the wrong model.
 
 This means:
 - Identical `serverCustomParameters` across projects → one process (efficient).
@@ -270,30 +270,30 @@ egress:
   allow: { ssh: false, smtp: false, git: false, ntp: false, tcp_ports: [], udp_ports: [] }
 ```
 
-Any missing section falls back to a safe default (values above; egress → deny-all; flow_export → off). Each subsection is documented below.
+Any missing section falls back to a safe default (values above). The system treats egress as deny-all. It treats flow_export as off. Each subsection is documented below.
 
 ### Resource limits
 
-`resources.agent` and `resources.proxy` set CPU/memory caps on the two containers this workspace launches (`--memory` / `--cpus`). A `null` (or omitted) value drops the corresponding flag → **no limit** for that dimension. Defaults are `agent: 16g/8`, `proxy: 4g/4`.
+`resources.agent` and `resources.proxy` set CPU and memory caps on the two containers this workspace launches (`--memory` / `--cpus`). A `null` (or omitted) value drops the corresponding flag. The dimension has **no limit**. Defaults are `agent: 16g/8`, `proxy: 4g/4`.
 
 ### llama-server startup tuning
 
-`llama.startup_timeout` (seconds) is how long to wait for each model's `/health` before treating the launch as failed; `llama.startup_attempts` is how many times to relaunch before giving up. Raise both for large models that are slow to load. Defaults: `180` / `2`.
+`llama.startup_timeout` (seconds) sets how long to wait for each model's `/health`. The launch fails after this wait. `llama.startup_attempts` is how many times to relaunch before giving up. Raise both for large models that load slowly. Defaults: `180` / `2`.
 
 ### Network
 
-`network.ipv6` toggles IPv6 for this project's isolated network + proxy (only works if the runtime **and** host route IPv6 — leave `false` on macOS; see [Network topology](architecture.md#network-topology)). `network.dns` is the upstream resolver the proxy uses for the agent's DNS lookups (default `1.1.1.1`) — set it to a corporate/internal resolver when needed.
+`network.ipv6` toggles IPv6 for this project's isolated network and proxy (only works if the runtime **and** host route IPv6). Leave `false` on macOS (see [Network topology](architecture.md#network-topology)). `network.dns` is the upstream resolver the proxy uses for the agent's DNS lookups (default `1.1.1.1`). Set it to a corporate or internal resolver when needed.
 
 ### Proxy UI exposure
 
 `proxy.expose_ui` controls where the proxy's mitmweb UI (on its auto-assigned port) is published:
 
-- `localhost` (default) — bound to `127.0.0.1` only; not reachable from other machines.
-- `lan` — bound to `0.0.0.0`; reachable across the network (still password-gated by `ADMIN_PASSWORD`).
+- `localhost` (default) — bound to `127.0.0.1` only. Not reachable from other machines.
+- `lan` — bound to `0.0.0.0`. Reachable across the network (still password-gated by `ADMIN_PASSWORD`).
 
 ### Extra agent env / mounts
 
-`agent.env` (a map) adds environment variables to the agent container, and `agent.mounts` (a list of `host:container[:ro]` specs, absolute host paths) adds bind mounts — for one-off tools, caches, or credentials a project needs:
+`agent.env` (a map) adds environment variables to the agent container. `agent.mounts` (a list of `host:container[:ro]` specs, absolute host paths) adds bind mounts for one-off tools, caches, or credentials a project needs:
 
 ```yaml
 agent:
@@ -343,12 +343,12 @@ agent:
     - /dev/ttyUSB0:/dev/ttyUSB0            # Serial port
 ```
 
-Device entries support the optional `mode` suffix (`r` for read-only, `w` for write-only, `rw` for read-write; default is `rw` if omitted).
+Device entries support the optional `mode` suffix (`r` for read-only, `w` for write-only, `rw` for read-write). The default is `rw` if omitted.
 
 <a name="upgrading-a-workspace"></a>
 ### Upgrading an existing workspace
 
-`.pi-container/` is seeded on first run and then **never edited again** — the seeder only writes files that are absent, so your changes are never overwritten. The cost is that a workspace does not pick up new config fields on its own. When a release adds one, the next launch stops with:
+`.pi-container/` is seeded on first run and then **never edited again**. The seeder only writes files that are absent, so your changes are never overwritten. The cost is that a workspace does not pick up new config fields on its own. When a release adds one, the next launch stops with:
 
 ```
 Configuration incompatible with this version of pi-container:
@@ -371,13 +371,13 @@ Your own edits to `config.yaml` are not merged into the fresh copy, so note your
 <a name="pi-container-environment"></a>
 ### The `PI_CONTAINER_*` environment contract
 
-A project's own scripts often need to behave differently inside the agent — pick a different compose overlay, skip a test that wants host networking, point a tool at an address that only exists here. The agent injects a small, stable set of variables for exactly that, so nothing has to probe for it. Every variable pi-container sets shares the `PI_CONTAINER` prefix.
+A project's own scripts often need to behave differently inside the agent. They may pick a different compose overlay, skip a test that wants host networking, or point a tool at an address that only exists here. The agent injects a small, stable set of variables for exactly that. Nothing has to probe for it. Every variable pi-container sets shares the `PI_CONTAINER` prefix.
 
 | Variable | Value | Set by |
 |----------|-------|--------|
-| `PI_CONTAINER` | `1`, always | The image. Present for every process — login shells, `podman exec`, anything the entrypoint never touches. |
+| `PI_CONTAINER` | `1`, always | The image. Present for every process (login shells, `podman exec`, anything the entrypoint never touches). |
 | `PI_CONTAINER_VERSION` | The running pi-container version, e.g. `0.4.2` | `run.py`, from the validated `schema_version`. Absent if the workspace has none. |
-| `PI_CONTAINER_HOST_IP` | `169.254.1.2` | The image. Where the **agent** is reachable from inside a nested container — see [Nested containers](#nested-containers). |
+| `PI_CONTAINER_HOST_IP` | `169.254.1.2` | The image. Where the **agent** is reachable from inside a nested container (see [Nested containers](#nested-containers)). |
 | `PI_CONTAINER_NESTED` | `true` | `run.py`, only when `nested_containers.enabled` is true. |
 
 Test the marker, not a side effect:
@@ -394,14 +394,14 @@ endif
 if [ -n "$PI_CONTAINER" ]; then …; fi
 ```
 
-`PI_CONTAINER` is deliberately **not** a general "am I in a container" test — `/run/.containerenv` and `/.dockerenv` answer that, and they are true inside nested containers too. This one means *this* container: the agent, with its isolated network, its proxy-only egress, and the workspace bind-mounted at `/workspace`.
+The system deliberately makes `PI_CONTAINER` **not** a general "am I in a container" test. `/run/.containerenv` and `/.dockerenv` answer that. They are true inside nested containers too. `PI_CONTAINER` means *this* container: the agent, with its isolated network, its proxy-only egress, and the workspace bind-mounted at `/workspace`.
 
-Two properties worth relying on. The variables are set at the image and `run` layers, so they survive `podman exec` and any shell the agent spawns. And they do **not** propagate into nested containers — a container the agent starts gets a clean environment, which is what makes `PI_CONTAINER` mean "I am the agent" rather than "I am somewhere under it".
+Two properties worth relying on. The variables are set at the image and `run` layers. They survive `podman exec` and any shell the agent spawns. They do **not** propagate into nested containers. A container the agent starts gets a clean environment. This makes `PI_CONTAINER` mean "I am the agent" rather than "I am somewhere under it".
 
 <a name="nested-containers"></a>
 ### Nested containers
 
-`nested_containers` lets the agent run its own containers **inside** the agent container — `podman build`, `podman run`, `docker compose up`, testcontainers-style integration tests — as rootless podman. It is **off by default**: enabling it is a genuine (small, bounded) reduction in the agent container's confinement.
+`nested_containers` lets the agent run its own containers **inside** the agent container as rootless podman. It supports `podman build`, `podman run`, `docker compose up`, and testcontainers-style integration tests. It is **off by default**. Enabling it is a genuine (small, bounded) reduction in the agent container's confinement.
 
 ```yaml
 # .pi-container/config.yaml
@@ -416,18 +416,18 @@ nested_containers:
 
 | Key | Values | Meaning |
 |-----|--------|---------|
-| `enabled` | `false` (default) / `true` | When false, no extra run flags, no volume, no entrypoint work — the only cost is the toolchain's ~150 MB in the image. |
-| `storage` | `volume` (default) / `tmpfs` | Where nested image layers live. `volume` is a persistent per-project named volume (`pi-nested-<project-hash>`) that survives runs, so base images are not re-pulled every session. `tmpfs` is a volatile RAM disk — it needs a large `podman machine` and re-pulls each run. |
+| `enabled` | `false` (default) / `true` | When false, no extra run flags, no volume, and no entrypoint work. The only cost is the toolchain's ~150 MB in the image. |
+| `storage` | `volume` (default) / `tmpfs` | Where nested image layers live. `volume` is a persistent per-project named volume (`pi-nested-<project-hash>`) that survives runs. This avoids re-pulling base images every session. `tmpfs` is a volatile RAM disk. It needs a large `podman machine` and re-pulls each run. |
 | `security` | `disable` (default) / `engine_t` | The agent container's SELinux label (see below). |
 | `ports.publish` | `[]` (default) | Host ports for UIs served by nested containers (see below). |
 | `ports.expose` | `localhost` (default) / `lan` | Whether those ports bind `127.0.0.1` only, or every interface. |
 
-**Egress is still intercepted.** Containers the agent starts are *children* — in its mount and network namespaces — so rootless podman NATs their traffic into the agent's own network stack, subject to the agent's routes. The agent's only route out is the proxy, and the proxy's `FORWARD` policy is `DROP`. Verified: with the agent on the `--internal` isolated network, a nested container reaching for a raw IP gets `Network unreachable` from the kernel. Nesting is **not** a bypass, and the proxy needs no changes.
+**Egress is still intercepted.** Containers the agent starts are *children* in its mount and network namespaces. Rootless podman NATs their traffic into the agent's own network stack, subject to the agent's routes. The agent's only route out is the proxy. The proxy's `FORWARD` policy is `DROP`. Verified: with the agent on the `--internal` isolated network, a nested container reaching for a raw IP gets `Network unreachable` from the kernel. Nesting is **not** a bypass. The proxy needs no changes.
 
 Two honest consequences:
 
-- **Flow attribution coarsens.** `flow_export` partitions captured flows by client IP, and nested-container traffic carries the agent's IP — so nested flows are indistinguishable from the agent's own.
-- **Per-inner-container resource limits are best-effort.** Rootless podman in a container has no delegated cgroup subtree, so `podman run --memory=…` *inside* the agent does not enforce. `resources.agent` still bounds the whole tree in aggregate — a nested workload cannot exceed the agent's budget.
+- **Flow attribution coarsens.** `flow_export` partitions captured flows by client IP. Nested-container traffic carries the agent's IP. Nested flows are indistinguishable from the agent's own.
+- **Per-inner-container resource limits are best-effort.** Rootless podman in a container has no delegated cgroup subtree. `podman run --memory=…` *inside* the agent does not enforce. `resources.agent` still bounds the whole tree in aggregate. A nested workload cannot exceed the agent's budget.
 
 **What `enabled: true` actually changes.** The agent container gains, *only* while nesting is enabled:
 
@@ -436,14 +436,14 @@ Two honest consequences:
 | `--device /dev/fuse` | `fuse-overlayfs` fallback when native rootless overlay is unavailable. |
 | `--device /dev/net/tun` | `pasta` creates the inner tap device. Grants no egress — the only route off the isolated network is still the proxy. |
 | `--security-opt label=disable` | `/dev/net/tun` is inaccessible under the default SELinux label (see below). |
-| `--security-opt unmask=ALL` | Podman bind-mounts parts of `/proc` read-only and masks others in the agent container; those mounts are **locked** in the nested user namespace, so without this the inner runtime fails with `crun: open /proc/sys/net/ipv4/ping_group_range: Read-only file system`. |
+| `--security-opt unmask=ALL` | Podman bind-mounts parts of `/proc` read-only and masks others in the agent container. Those mounts are **locked** in the nested user namespace. Without this the inner runtime fails with `crun: open /proc/sys/net/ipv4/ping_group_range: Read-only file system`. |
 | `--cap-add SYS_ADMIN` | Podman's default seccomp profile permits `mount`/`sethostname`/`umount2`/`pivot_root` **only** when `CAP_SYS_ADMIN` is in the container's capability set, and a seccomp filter cannot be relaxed from inside a nested user namespace. Without it the inner runtime fails with `crun: sethostname: Operation not permitted`. |
 
-`CAP_SYS_ADMIN` sounds alarming and deserves the plain reading: inside a user namespace it is **namespaced**. The agent container's userns maps container uid 0 to an unprivileged host user, so the capability confers power over what that namespace owns — not over the host, the host kernel's global state, or other containers. It is nonetheless the broadest capability there is, and it is the main reason nesting is opt-in.
+`CAP_SYS_ADMIN` sounds alarming, so it deserves the plain reading. Inside a user namespace it is **namespaced**. The agent container's userns maps container uid 0 to an unprivileged host user. The capability confers power over what that namespace owns, not over the host, the host kernel's global state, or other containers. It is nonetheless the broadest capability there is. It is the main reason nesting is opt-in.
 
-Still **absent**, with nesting on: `--privileged`, `seccomp=unconfined` (the filter stays active for everything the profile does not gate on `CAP_SYS_ADMIN`), `--userns` overrides, and any container-runtime socket. Mounting the host runtime socket (`/var/run/docker.sock`) is **never** offered — that socket is a full-privilege API to the host runtime and would delete the isolation model, not weaken it.
+Still **absent** with nesting on: `--privileged`, `seccomp=unconfined` (the filter stays active for everything the profile does not gate on `CAP_SYS_ADMIN`), `--userns` overrides, and any container-runtime socket. Mounting the host runtime socket (`/var/run/docker.sock`) is **never** offered. That socket is a full-privilege API to the host runtime. It would break the isolation model, not weaken it.
 
-Egress interception is unaffected by any of this. Verified with the final flag set: with the agent attached only to the `--internal` isolated network, an inner container gets `Network unreachable` from the kernel for a raw IP, and no HTTPS connection succeeds.
+Egress interception is unaffected by any of this. Verified with the final flag set: with the agent attached only to the `--internal` isolated network, an inner container gets `Network unreachable` from the kernel for a raw IP. No HTTPS connection succeeds.
 
 **SELinux posture.** On an SELinux-enforcing host, `/dev/net/tun` is inaccessible under the default `container_t` label, so one of two labels is required:
 
@@ -465,20 +465,20 @@ nested_containers:
       - "18080:8080"    # host 18080 → agent 8080
 ```
 
-Two things then have to line up, because pi-container only builds the outer hop:
+Two things then have to line up. pi-container only builds the outer hop:
 
 1. **The nested container must publish the agent-side port itself** — `podman run -p 3000:3000 …`, or a compose `ports:` entry. Listing `3000` here does not reach into a nested container that only listens on its own internal port.
 2. **The service must listen on all interfaces inside the nested container**, not `127.0.0.1`. A dev server bound to loopback is unreachable from outside its own container, whatever is published in front of it. (Vite: `--host`. `next dev`: `-H 0.0.0.0`.)
 
-Ports must be **declared in config** rather than discovered: a container's published ports are fixed when it starts, so pi-container cannot add one to a running agent. Changing this list takes effect on the next `pi` launch. If a host port is already taken the launch **fails immediately**, naming the port — rather than letting podman reject it after the images are built and the proxy is up. Use the `"HOSTPORT:AGENTPORT"` form to move a collision out of the way without changing what the nested container publishes.
+Ports must be **declared in config** rather than discovered. You fix a container's published ports at start. pi-container cannot add one to a running agent. Changing this list takes effect on the next `pi` launch. If a host port is already taken the launch **fails immediately**. It names the port instead of letting podman reject it after the images are built and the proxy is up. Use the `"HOSTPORT:AGENTPORT"` form to move a collision out of the way without changing what the nested container publishes.
 
-This is **inbound only and creates no egress.** The agent's only route out is still the proxy, and a published port does not change that (verified: a nested container on the isolated network still cannot reach HTTPS or a raw IP). What it does change is that something outside can now reach a service the agent controls, so `expose: localhost` — the default — keeps that to processes on your own machine. `expose: lan` binds `0.0.0.0`, which makes an unauthenticated dev server reachable by anything that can route to your machine; the mitmweb UI is at least password-gated, and this is not. Prefer an SSH tunnel to opening it to the network.
+This is **inbound only and creates no egress.** The agent's only route out is still the proxy. A published port does not change that (verified: a nested container on the isolated network still cannot reach HTTPS or a raw IP). What it does change is that something outside can now reach a service the agent controls. `expose: localhost` (the default) keeps that to processes on your own machine. `expose: lan` binds `0.0.0.0`. That makes an unauthenticated dev server reachable by anything that can route to your machine. The mitmweb UI is at least password-gated. This is not. Prefer an SSH tunnel to opening it to the network.
 
-Under the hood, this is also why the image sets `netns = "bridge"` in its `containers.conf` drop-in (a documented `containers.conf` key that takes the same values as `--network`), overriding podman 6's rootless default of `pasta`. Measured with the agent on the isolated network and the same outer `-p` in both cases: under `pasta` the forward reaches the agent's netns and the TCP handshake even completes, then stalls — the connection arrives carrying the agent's own address as its source, which is also the address pasta hands the nested guest, so the flow never resolves. Giving the guest the host's address is pasta's deliberate way of avoiding NAT, so this is a consequence of its design rather than a defect. Under `bridge`, `rootlessport` binds a real socket in the agent's netns, the agent's `-p` publishes it, and the host reaches the UI. Bridge is also what `docker compose` already got, since it creates a user-defined network per project, so a plain `podman run -p` now behaves like the compose path instead of differently from it.
+Under the hood, this is also why the image sets `netns = "bridge"` in its `containers.conf` drop-in (a documented `containers.conf` key that takes the same values as `--network`). This overrides podman 6's rootless default of `pasta`. Measured with the agent on the isolated network and the same outer `-p` in both cases: under `pasta` the forward reaches the agent's netns and the TCP handshake even completes, then stalls. The connection arrives carrying the agent's own address as its source. This is also the address pasta hands the nested guest, so the flow never resolves. Giving the guest the host's address is pasta's deliberate way of avoiding NAT. This is a consequence of its design rather than a defect. Under `bridge`, `rootlessport` binds a real socket in the agent's netns. The agent's `-p` publishes it. The host reaches the UI. Bridge is also what `docker compose` already got, since it creates a user-defined network per project. A plain `podman run -p` now behaves like the compose path instead of differently from it.
 
-**`host.docker.internal` does not reach the agent from inside a nested container.** This is the mirror image of the outbound hop above, and it bites any project that runs a sidecar on the agent — an exporter, a mock API, a language server — and has a nested container talk to it. Inside a nested container, both `host.containers.internal` and `host.docker.internal` resolve to the podman machine's gvproxy address (`192.168.127.254` on macOS), which is **your Mac, not the agent**. The service isn't there, and the agent's isolated network has no route to it either, so the connection times out rather than being refused — which reads like a slow service instead of a wrong address.
+**`host.docker.internal` does not reach the agent from inside a nested container.** This is the mirror image of the outbound hop above. It bites any project that runs a sidecar on the agent (an exporter, a mock API, a language server) and has a nested container talk to it. Inside a nested container, both `host.containers.internal` and `host.docker.internal` resolve to the podman machine's gvproxy address (`192.168.127.254` on macOS). That is **your Mac, not the agent**. The service isn't there. The agent's isolated network has no route to it either. The connection times out instead of being refused. This reads like a slow service instead of a wrong address.
 
-The address that does work is **`169.254.1.2`**. That is not a value pi-container picks; podman assigns it when it builds the rootless network namespace, visible in the `pasta` command line inside the agent:
+The address that does work is **`169.254.1.2`**. That is not a value pi-container picks. podman assigns it when it builds the rootless network namespace. You can see it in the `pasta` command line inside the agent:
 
 ```
 /usr/bin/pasta --config-net … --no-map-gw --map-guest-addr 169.254.1.2
@@ -488,21 +488,21 @@ Measured from inside a nested container, against a listener on `0.0.0.0:9100` in
 
 | target | result |
 |--------|--------|
-| `192.168.127.254` (`host.docker.internal`) | times out — gvproxy, i.e. the host, and unreachable from the isolated network |
-| `10.89.1.1` (nested bridge gateway) | connection refused — `--no-map-gw` |
-| `10.89.0.2` (agent's own bridge address) | connection refused — wrong netns |
+| `192.168.127.254` (`host.docker.internal`) | times out (gvproxy, i.e. the host, unreachable from the isolated network) |
+| `10.89.1.1` (nested bridge gateway) | connection refused (`--no-map-gw`) |
+| `10.89.0.2` (agent's own bridge address) | connection refused (wrong netns) |
 | **`169.254.1.2`** | **serves** |
 
-**Configure the address, not the name.** The obvious fix — `--add-host host.docker.internal:169.254.1.2`, or a compose `extra_hosts:` entry — **does not work**, and fails in a way that looks like it worked. Podman keeps its own entry for that name, so `/etc/hosts` ends up listing it twice:
+**Configure the address, not the name.** The obvious fix (`--add-host host.docker.internal:169.254.1.2`, or a compose `extra_hosts:` entry) **does not work**. It fails in a way that looks like it worked. Podman keeps its own entry for that name. `/etc/hosts` ends up listing it twice:
 
 ```
 169.254.1.2      host.docker.internal          ← from --add-host
 192.168.127.254  host.containers.internal host.docker.internal
 ```
 
-busybox `wget` takes the first match and succeeds, so a quick check from inside the container passes. Go's resolver sorts multi-address results by RFC 6724 destination-address selection, which ranks a global-scope address above a link-local one — so a Go client dials `192.168.127.254` first and a short timeout expires before any fallback. Prometheus stayed `down` with `context deadline exceeded` until the podman line was deleted from `/etc/hosts` by hand, at which point it went `up` on the next scrape. Anything else with RFC 6724-aware resolution (Go, glibc `getaddrinfo`) behaves the same way.
+busybox `wget` takes the first match and succeeds. A quick check from inside the container passes. Go's resolver sorts multi-address results by RFC 6724 destination-address selection. It ranks a global-scope address above a link-local one. A Go client dials `192.168.127.254` first. A short timeout expires before any fallback. Prometheus stayed `down` with `context deadline exceeded` until the podman line was deleted from `/etc/hosts` by hand. It went `up` on the next scrape. Anything else with RFC 6724-aware resolution (Go, glibc `getaddrinfo`) behaves the same way.
 
-Podman will not omit its own entry: `--no-hosts` suppresses it but is mutually exclusive with `--add-host`. So put the literal address wherever the target is configured. For a compose stack, that fits in a **named overlay** — a tracked file that only applies when it is asked for, because an explicit `-f` list replaces compose's auto-discovery:
+Podman will not omit its own entry. `--no-hosts` suppresses it but is mutually exclusive with `--add-host`. Put the literal address wherever the target is configured. For a compose stack, that fits in a **named overlay**. It is a tracked file that only applies when you ask for it. An explicit `-f` list replaces compose's auto-discovery:
 
 ```yaml
 # docker-compose.pi-container.yml — tracked, and inert unless named
@@ -521,15 +521,15 @@ services:
       - "8080:8080"
 ```
 
-That asymmetry is worth knowing before writing an overlay: **volumes merge by target and supersede; ports append.** Measured with podman-compose 1.6.0 — a base `127.0.0.1:8080:8080` plus an overlay `8080:8080` yields both, and podman then rejects the duplicate publish. `!override` is the Compose-spec tag for replacing a list outright.
+That asymmetry is worth knowing before writing an overlay. **volumes merge by target and supersede**. **ports append.** Measured with podman-compose 1.6.0: a base `127.0.0.1:8080:8080` plus an overlay `8080:8080` yields both. podman then rejects the duplicate publish. `!override` is the Compose-spec tag for replacing a list outright.
 
-The same overlay is where a loopback bind gets relaxed. A service bound to `127.0.0.1` inside a nested container is unreachable from the host whatever the agent publishes (see the two conditions above), so it has to bind `0.0.0.0` — but only inside the agent. Doing that in the committed compose file would widen every other operator's exposure to fix an environment they are not in; doing it in the overlay confines it to the agent, where `0.0.0.0` is bounded by the isolated network and the real control is `nested_containers.ports.expose`.
+The same overlay is where a loopback bind gets relaxed. A service bound to `127.0.0.1` inside a nested container is unreachable from the host whatever the agent publishes (see the two conditions above). It has to bind `0.0.0.0`, but only inside the agent. Doing that in the committed compose file would widen every other operator's exposure to fix an environment they are not in. Doing it in the overlay confines it to the agent. Inside the agent, `0.0.0.0` is bounded by the isolated network and the real control is `nested_containers.ports.expose`.
 
 ```
 compose -f docker-compose.yml -f docker-compose.pi-container.yml up -d
 ```
 
-The name matters: `docker-compose.override.yml` is loaded automatically, so an agent-only address placed there reaches every operator and has to be gitignored to stay out of their way. Any other filename is inert until passed with `-f`, which is what makes the fix safe to commit and review rather than something each operator rediscovers.
+The name matters. `docker-compose.override.yml` is loaded automatically. An agent-only address placed there reaches every operator. You must gitignore it to keep it out of their way. Any other filename is inert until you pass it with `-f`. This is what makes the fix safe to commit and review rather than something each operator rediscovers.
 
 Selecting it is what [`PI_CONTAINER`](#pi-container-environment) is for — no probing, and no way to forget:
 
@@ -539,17 +539,17 @@ ifdef PI_CONTAINER
 endif
 ```
 
-The address itself is available as `PI_CONTAINER_HOST_IP`, so a generated config or a tool invocation can substitute it instead of hardcoding. Prometheus is the awkward case — its config file has no environment substitution, so the literal has to be written down somewhere. That makes the caveat worth repeating: `169.254.1.2` is **coupled to podman's rootless-netns layout**, not to a documented interface. Treat it as a version-pinned constant that a podman upgrade in the agent image can invalidate, and whose failure mode is a silently empty dashboard.
+The address itself is available as `PI_CONTAINER_HOST_IP`. A generated config or a tool invocation can substitute it instead of hardcoding. Prometheus is the awkward case. Its config file has no environment substitution. The literal has to be written down somewhere. That makes the caveat worth repeating: `169.254.1.2` is **coupled to podman's rootless-netns layout**, not to a documented interface. Treat it as a version-pinned constant that a podman upgrade in the agent image can invalidate. Its failure mode is a silently empty dashboard.
 
-This is **not** fixable in the image's `containers.conf` drop-in, which is where the `netns` default above lives. `host_containers_internal_ip` is ignored there, under `[containers]` and under `[network]` alike — verified with an override file proven to be read (a marker `env` entry in the same file reached the container while the `/etc/hosts` line stayed unchanged). The agent has `/run/.containerenv`, so the nested podman detects that it is itself inside a container and propagates the agent's own `host.containers.internal` entry, which outranks the config key. Hence a per-project fix rather than a transparent default.
+This is **not** fixable in the image's `containers.conf` drop-in, which is where the `netns` default above lives. `host_containers_internal_ip` is ignored there, under `[containers]` and under `[network]` alike (verified with an override file proven to be read: a marker `env` entry in the same file reached the container while the `/etc/hosts` line stayed unchanged). The agent has `/run/.containerenv`. The nested podman detects that it is itself inside a container. It propagates the agent's own `host.containers.internal` entry. That entry outranks the config key. Hence a per-project fix rather than a transparent default.
 
-**Registries must be allowlisted.** The proxy's allowlist is `default_action: block`, so image pulls 403 until a registry is permitted. `allowlist.yaml` ships a commented-out `container-registries-allow` rule (Docker Hub, GHCR, Quay, GCR) — uncomment it, or add the registries you use. `run.py` logs a warning at startup when nesting is enabled and no registry hostname is allowed.
+**Registries must be allowlisted.** The proxy's allowlist is `default_action: block`. Image pulls return 403 until you permit a registry. `allowlist.yaml` ships a commented-out `container-registries-allow` rule (Docker Hub, GHCR, Quay, GCR). Uncomment it, or add the registries you use. `run.py` logs a warning at startup when nesting is enabled and no registry hostname is allowed.
 
-**TLS inside nested containers.** The image ships `/etc/containers/containers.conf.d/50-pi-container.conf`, which mounts the agent's full CA bundle (system CAs *plus* the mitmproxy CA) into every nested container and points `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `GIT_SSL_CAINFO` at it. That covers tools honouring those variables (OpenSSL, Go, Node, Python-requests, curl, git). A tool that only reads a hardcoded path inside its own image still fails — the fix is per-image (`COPY` the CA in a build stage).
+**TLS inside nested containers.** The image ships `/etc/containers/containers.conf.d/50-pi-container.conf`. It mounts the agent's full CA bundle (system CAs *plus* the mitmproxy CA) into every nested container. It points `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, and `GIT_SSL_CAINFO` at it. That covers tools honouring those variables (OpenSSL, Go, Node, Python-requests, curl, git). A tool that only reads a hardcoded path inside its own image still fails. The fix is per-image (`COPY` the CA in a build stage).
 
-**Machine sizing.** A podman machine of **at least 4 GB is required** to build the agent image at all (see [Getting Started](getting-started.md#prerequisites)), and nesting is the workload most likely to expose anything smaller than that: the default `resources.agent.memory` is `16g`, which a 4 GB VM cannot honour. Raise the machine (`podman machine set --memory 8192` or more) before enabling nesting, and especially before choosing `storage: tmpfs`, where the first sizeable image pull lands in RAM.
+**Machine sizing.** A podman machine of **at least 4 GB is required** to build the agent image at all (see [Getting Started](getting-started.md#prerequisites)). Nesting is the workload most likely to expose anything smaller than that. The default `resources.agent.memory` is `16g`, which a 4 GB VM cannot honour. Raise the machine (`podman machine set --memory 8192` or more) before enabling nesting. Do this especially before choosing `storage: tmpfs`, where the first sizeable image pull lands in RAM.
 
-The same limit bites at **image build** time, because the [toolchain image](architecture.md#toolchain-builder-image) compiles CPython, podman and netavark (and Node too, with `NODE_SOURCE=build`): one PGO compile job peaks near 900 MiB, and anything already running in the VM (other containers, a live `pi` session) eats into the total — which is why 2 GiB is not enough and 4 GB is the documented minimum. `build.sh` therefore checks available memory in the builder **before starting the build** and refuses with the fix options rather than dying minutes later at `gcc: fatal error: Killed signal terminated program cc1`:
+The same limit bites at **image build** time. The [toolchain image](architecture.md#toolchain-builder-image) compiles CPython, podman, and netavark (and Node too, with `NODE_SOURCE=build`). One PGO compile job peaks near 900 MiB. Anything already running in the VM (other containers, a live `pi` session) eats into the total. This is why 2 GiB is not enough and 4 GB is the documented minimum. `build.sh` checks available memory in the builder **before starting the build**. It refuses with the fix options instead of dying minutes later at `gcc: fatal error: Killed signal terminated program cc1`:
 
 ```
 ERROR: Only 276 MiB of memory is available where images are built, but compiling
@@ -561,15 +561,15 @@ Fix one of:
   * already-cached Python:    PI_MEMORY_PREFLIGHT=0 ./build.sh  (skips this check)
 ```
 
-The check reads `MemAvailable` (reclaimable page cache counts — on a warm builder it is an order of magnitude above `MemFree`) from inside the podman VM, since that is where the build runs. It applies to `build.sh` only: `run.py`'s project-image build compiles nothing, because the toolchain arrives as a `COPY` from a prebuilt image.
+The check reads `MemAvailable` (reclaimable page cache counts). On a warm builder it is an order of magnitude above `MemFree`. The check runs inside the podman VM. It applies to `build.sh` only. `run.py`'s project-image build compiles nothing. The toolchain arrives as a `COPY` from a prebuilt image.
 
-The compilers are also capped by *memory* rather than core count — `make -j`, `go build -p` and `cargo --jobs` each get `MemAvailable / peak-RSS-per-job` jobs, never more than `nproc`. Giving the VM more memory automatically raises the cap; `MAKE_JOBS` overrides it for CPython.
+The compilers are also capped by *memory* rather than core count. `make -j`, `go build -p`, and `cargo --jobs` each get `MemAvailable / peak-RSS-per-job` jobs. They never get more than `nproc`. Giving the VM more memory automatically raises the cap. `MAKE_JOBS` overrides it for CPython.
 
-**Storage lifecycle.** The `pi-nested-<project-hash>` volume carries the same labels as project-specific images (`pi-container.type=nested-storage`, `pi-container.project.hash`, `pi-container.project.path`), so the same orphan-cleanup pass reclaims it when the project directory is deleted or moved — see [Orphan detection](#orphan-detection). As with images, a volume any container still holds open is skipped rather than removed, and reclaimed by a later run once that container is gone. Concurrent runs in one workspace share the volume (that is what makes the layer cache shared); they interlock through containers/storage's own lockfiles, which live inside the shared graph root, while each run keeps its own podman run root under its private `XDG_RUNTIME_DIR`.
+**Storage lifecycle.** The `pi-nested-<project-hash>` volume carries the same labels as project-specific images (`pi-container.type=nested-storage`, `pi-container.project.hash`, `pi-container.project.path`). The same orphan-cleanup pass reclaims it when the project directory is deleted or moved (see [Orphan detection](#orphan-detection)). As with images, a volume any container still holds open is skipped rather than removed. A later run reclaims it once that container is gone. Concurrent runs in one workspace share the volume (that is what makes the layer cache shared). They interlock through containers/storage's own lockfiles (which live inside the shared graph root). Each run keeps its own podman run root under its private `XDG_RUNTIME_DIR`.
 
-**`docker` and `compose` both work out of the box.** A `docker` → `podman` shim is installed at `/usr/local/bin/docker`, so tools that shell out to `docker` by name work (`docker build`, `docker run`, `docker ps`, …), and **`podman-compose`** ships as the compose provider — so `docker compose up` and `podman compose up` work with no per-project setup. The provider is pinned in `containers.conf` (`compose_providers = ["podman-compose"]`); without that pin podman would try `docker-compose` first and report it missing instead of using the provider that is installed.
+**`docker` and `compose` both work out of the box.** A `docker` to `podman` shim is installed at `/usr/local/bin/docker`. Tools that shell out to `docker` by name work (`docker build`, `docker run`, `docker ps`, …). **`podman-compose`** ships as the compose provider. `docker compose up` and `podman compose up` work with no per-project setup. The provider is pinned in `containers.conf` (`compose_providers = ["podman-compose"]`). Without that pin podman would try `docker-compose` first and report it missing instead of using the provider that is installed.
 
-For the full design — including the rejected alternatives (host socket, privileged DinD, sibling sidecar) and the verification log — see `docs/design/nested-containers.md`.
+For the full design (including the rejected alternatives: host socket, privileged DinD, sibling sidecar) and the verification log, see `docs/design/nested-containers.md`.
 
 ### Dependency definition files
 
@@ -577,8 +577,8 @@ Project-specific setup is defined in two files under `.pi-container/dependencies
 
 | File | Privilege | Runs | Purpose |
 |------|-----------|------|---------|
-| `.pi-container/dependencies/root/commands.sh` | root | **Build time** | Install system packages (`apt-get`), npm globals, system config — baked into image |
-| `.pi-container/dependencies/pi/commands.sh` | pi | **Runtime** (via entrypoint) | Init venvs, clone repos, workspace setup — runs against bind-mounted workspace |
+| `.pi-container/dependencies/root/commands.sh` | root | **Build time** | Install system packages (`apt-get`), npm globals, and system config (baked into image) |
+| `.pi-container/dependencies/pi/commands.sh` | pi | **Runtime** (via entrypoint) | Init venvs, clone repos, and workspace setup (runs against bind-mounted workspace) |
 
 **Example `root/commands.sh`:**
 ```bash
@@ -614,7 +614,7 @@ git clone https://github.com/example/repo.git
 
 **Why two execution times?**
 
-- `root/commands.sh` runs at **build time** because it installs system-wide packages (apt, npm globals) that should be baked into the image. These persist across container runs.
+- `root/commands.sh` runs at **build time** because it installs system-wide packages (apt, npm globals) that belong in the image. These persist across container runs.
 - `pi/commands.sh` runs at **runtime** because it creates workspace-local artifacts (venvs, cloned repos) in the bind-mounted workspace. If these were created at build time, they would be hidden by the bind mount at runtime.
 
 **Image caching and cleanup:**
@@ -625,7 +625,7 @@ Project-specific images are cached and reused across runs. pi-container computes
 - `pi-coding-agent/Containerfile` (always)
 - `pi-coding-agent/entrypoint.sh` (always)
 
-The toolchain (`pi-coding-agent-builder/`) is deliberately **not** hashed: the project image consumes it as a built image, not as source. What invalidates a project image there is the builder image's **build time** — see below.
+The toolchain (`pi-coding-agent-builder/`) is deliberately **not** hashed. The project image consumes it as a built image, not as source. What invalidates a project image there is the builder image's **build time** (see below).
 
 The hash is stored as the `pi-container.hash` label on the image. The image tag is `pi-container-project-<project-hash>-<image-hash>.local`, where:
 - `<project-hash>` is the first 10 characters of `SHA-256(str(project_dir.resolve()))` — the same hash used for proxy and network naming (`pi-proxy-<hash>`, `pi-isolated-net-<hash>`).
@@ -634,7 +634,7 @@ The hash is stored as the `pi-container.hash` label on the image. The image tag 
 On each run, pi-container:
 1. Enumerates all existing project-specific images (those with the `pi-container.type=project` label).
 2. Removes any images whose `pi-container.project.hash` matches this project but whose `pi-container.hash` differs from the current content hash.
-3. Compares the image's `pi-container.build.time` against the newest build time of the two images it copies content from — `pi-coding-agent-proxy:local` (the mitmproxy CA certificate) and `pi-coding-agent-builder:local` (the toolchain). If either is newer, the copy is stale and the image is rebuilt.
+3. Compares the image's `pi-container.build.time` against the newest build time of the two images it copies content from. These are `pi-coding-agent-proxy:local` (the mitmproxy CA certificate) and `pi-coding-agent-builder:local` (the toolchain). If either is newer, the copy is stale and the image is rebuilt.
 4. If no image matches the current hash, builds a new one.
 5. If an image already matches and is not stale, uses it (no rebuild).
 
@@ -651,16 +651,16 @@ Each project-specific image stores the absolute path of its source project direc
 - Its `pi-container.project.path` label points to a path that no longer exists (deleted project), OR
 - Its `pi-container.project.path` label is missing or blank (older images from before this feature — unverifiable).
 
-Only images with a path label pointing to an **existing** directory are kept, plus the shared images (`pi-coding-agent:local`, `pi-coding-agent-proxy:local`, `pi-coding-agent-builder:local`), which are never cleanup candidates whatever their labels say — they belong to no project and are rebuilt only by `build.sh`.
+The system keeps only images with a path label pointing to an **existing** directory. The shared images (`pi-coding-agent:local`, `pi-coding-agent-proxy:local`, `pi-coding-agent-builder:local`) are never cleanup candidates whatever their labels say. They belong to no project and are rebuilt only by `build.sh`.
 
-Images are enumerated and removed **by image ID**, not by tag. A rebuild that moves a tag leaves the previous image untagged, and an untagged image has no usable name — podman renders it as the literal `<none>:<none>`, which is not a valid image reference. Identifying by ID is what lets those images be reclaimed.
+The system enumerates and removes images **by image ID**, not by tag. A rebuild that moves a tag leaves the previous image untagged. An untagged image has no usable name. podman renders it as the literal `<none>:<none>`, which is not a valid image reference. Identifying by ID is what lets those images be reclaimed.
 
-**Images and volumes in use are never removed.** Every cleanup pass skips anything a container — running, stopped, or merely created — still holds open, and logs it at INFO rather than attempting the removal. This is the normal case when two sessions share a workspace: a session started before a definition-file change keeps running on its now-stale image, which is reclaimed by a later run once that session exits. The same applies to a session whose project directory was deleted mid-run, and to its nested-storage volume.
+**The system never removes images and volumes in use.** Every cleanup pass skips anything a container (running, stopped, or merely created) still holds open. It logs it at INFO rather than attempting the removal. This is the normal case when two sessions share a workspace. A session started before a definition-file change keeps running on its now-stale image. A later run reclaims it once that session exits. The same applies to a session whose project directory was deleted mid-run, and to its nested-storage volume.
 
 This handles:
 
 - **Deleted projects**: Images from removed workspaces are cleaned up automatically.
-- **Moved projects**: Images retain the old path label → detected as orphaned and removed. New builds use the new path.
+- **Moved projects**: Images retain the old path label. The system detects them as orphaned and removes them. New builds use the new path.
 - **Legacy images**: Images without a path label (from older versions) are removed as unverifiable.
 
 **Build function parameters:**
@@ -682,24 +682,24 @@ The `build_project_image()` function in `src/build.py` accepts the following par
 
 | Label | Purpose | How it's calculated |
 |-------|---------|---------------------|
-| `pi-container.hash` | Content hash for cache invalidation. Compares against current definition files. | SHA-256 of concatenated hashes of: `.pi-container/dependencies/root/commands.sh` and `pi/commands.sh` (each if non-empty), `pi-coding-agent/Containerfile`, `pi-coding-agent/entrypoint.sh` → 16-char hex digest |
-| `pi-container.project.hash` | Project identity hash. Links the image to its source workspace. | First 10 chars of SHA-256 of the absolute project directory path → 10-char hex digest |
-| `pi-container.project.path` | **Absolute path of the project directory at build time.** Used for orphan detection — if the path no longer exists, the image is automatically removed on the next run. | Stored as-is from `PROJECT_DIR.resolve()` at build time |
-| `pi-container.build.time` | ISO 8601 timestamp of the build. Used for age-based discovery. | UTC timestamp at build time in ISO 8601 format (e.g., `2024-01-15T12:30:45Z`) |
+| `pi-container.hash` | Content hash for cache invalidation (compares against current definition files). | SHA-256 of concatenated hashes of: `.pi-container/dependencies/root/commands.sh` and `pi/commands.sh` (each if non-empty), `pi-coding-agent/Containerfile`, `pi-coding-agent/entrypoint.sh` (16-char hex digest) |
+| `pi-container.project.hash` | Project identity hash (links the image to its source workspace). | First 10 chars of SHA-256 of the absolute project directory path (10-char hex digest) |
+| `pi-container.project.path` | **Absolute path of the project directory at build time** (used for orphan detection). If the path no longer exists, the image is automatically removed on the next run. | Stored as-is from `PROJECT_DIR.resolve()` at build time |
+| `pi-container.build.time` | ISO 8601 timestamp of the build (used for age-based discovery). | UTC timestamp at build time in ISO 8601 format (e.g., `2024-01-15T12:30:45Z`) |
 | `pi-container.type` | Set to `"project"` for project-specific images (enables system-wide discovery via `podman image ls --filter label=pi-container.type=project`). | Always set to `"project"` by `build_project_image()` |
 
 **Key principles:**
 
-- The shared base image carries the language runtimes and tooling every workspace needs: **Node 26**, **CPython 3.14 with `uv`**, the nested-container toolchain (**podman**, `netavark`, `aardvark-dns`) and `podman-compose`. All of those are compiled in the [toolchain builder image](architecture.md#toolchain-builder-image) and copied in. Anything beyond that is project-specific and belongs in `root/commands.sh`.
-- None of it is per-project. Building Python in `root/commands.sh` meant a workspace that left the file at its no-op default had no interpreter at all, and every project-image rebuild recompiled CPython — the slowest and most OOM-prone step in the build. A project-image rebuild now compiles nothing; it copies a prebuilt tree.
-- Both files are optional — if absent, the workspace uses the shared image.
-- Changes to definition files trigger a rebuild on the next `run.sh` invocation (detected via image label comparison), and old images are removed automatically.
+- The shared base image carries the language runtimes and tooling every workspace needs: **Node 26**, **CPython 3.14 with `uv`**, the nested-container toolchain (**podman**, `netavark`, `aardvark-dns`), and `podman-compose`. All of those are compiled in the [toolchain builder image](architecture.md#toolchain-builder-image) and copied in. Anything beyond that is project-specific and belongs in `root/commands.sh`.
+- None of it is per-project. Building Python in `root/commands.sh` meant a workspace that left the file at its no-op default had no interpreter at all. Every project-image rebuild recompiled CPython (the slowest and most OOM-prone step in the build). A project-image rebuild now compiles nothing. It copies a prebuilt tree.
+- Both files are optional. If absent, the workspace uses the shared image.
+- Changes to definition files trigger a rebuild on the next `run.sh` invocation (detected via image label comparison). Old images are removed automatically.
 
 ### Allowlist
 
-The `allowlist.yaml` config in the project's `.pi-container/` defines hostname rules for the [allowlist addon](proxy/allowlist.md) running on that project's mitmproxy transparent proxy. It is **per-project** — each workspace's proxy mounts its own allowlist (seeded from a generic pypi/npm/github/apt template on first run; edit it per project). Traffic from the agent container to non-allowlisted hosts is **blocked with HTTP 403**. If the file is missing entirely, the image's fail-closed default blocks all hosts.
+The `allowlist.yaml` config in the project's `.pi-container/` defines hostname rules for the [allowlist addon](proxy/allowlist.md) running on that project's mitmproxy transparent proxy. It is **per-project**. Each workspace's proxy mounts its own allowlist (seeded from a generic pypi/npm/github/apt template on first run). Edit it per project. Traffic from the agent container to non-allowlisted hosts is **blocked with HTTP 403**. If the file is missing entirely, the image's fail-closed default blocks all hosts.
 
-Each rule has a `name`, `mode` (`allow`), a list of `hostnames` (supporting `*` wildcards), and optional `ip_ranges`. Traffic matching any rule is permitted; all other traffic is denied. The default mode is `allow` with a `block` default action.
+Each rule has a `name`, `mode` (`allow`), a list of `hostnames` (supporting `*` wildcards), and optional `ip_ranges`. Traffic matching any rule is permitted. All other traffic is denied. The default mode is `allow` with a `block` default action.
 
 Current default rules allow:
 - **PyPI**: `pypi.org`, `files.pythonhosted.org`
@@ -712,7 +712,7 @@ Add new rules for any additional hostnames the agent needs to reach (e.g. intern
 
 ### Token Replacer Secrets
 
-The `token_replacer.yaml` config in `.pi-container/` may reference `${ENV:VAR}` values that must be set in the host environment before running. `run.py` scans this config and injects the values as environment variables into the proxy container. Override `ContainerNetworkManager._pull_secrets_from_config()` (in [`src/network.py`](https://github.com/mikkovihonen/pi-container/blob/main/src/network.py)) to integrate with a secret store (Vault, AWS Secrets Manager, etc.).
+The `token_replacer.yaml` config in `.pi-container/` may reference `${ENV:VAR}` values. You must set those values in the host environment before running. `run.py` scans this config and injects the values as environment variables into the proxy container. Override `ContainerNetworkManager._pull_secrets_from_config()` (in [`src/network.py`](https://github.com/mikkovihonen/pi-container/blob/main/src/network.py)) to integrate with a secret store (Vault, AWS Secrets Manager, etc.).
 
 ### Transient tmpfs Mounts
 
@@ -727,7 +727,7 @@ tmpfs:
     - /workspace/node_modules/.cache
 ```
 
-Each path is mounted at the same absolute location inside the container. Mounts use podman's `notmpcopyup` flag so they start empty rather than copying the host's bind-mounted content into the tmpfs. Paths are deduplicated and sorted for deterministic output.
+The system mounts each path at the same absolute location inside the container. Mounts use podman's `notmpcopyup` flag. This starts them empty instead of copying the host's bind-mounted content into the tmpfs. The system deduplicates and sorts paths for deterministic output.
 
 ### Flow export
 
@@ -739,11 +739,60 @@ flow_export:
   enabled: true
 ```
 
-When enabled, `run.py` reads the flows the proxy staged for this session and writes a merged snapshot bucketed by UTC date under `.pi-container/exports/flows/<YYYY-MM-DD>/<HH-MM-SS-mmm>_<session-id>.jsonl`. When the section is absent or malformed, export is **off** (fail-safe). The export contains full request/response bodies and headers — see [Version control](#version-control-gitignore) for why `.pi-container/exports/` must never be committed.
+When enabled, `run.py` reads the flows the proxy staged for this session. It writes a merged snapshot bucketed by UTC date under `.pi-container/exports/flows/<YYYY-MM-DD>/<HH-MM-SS-mmm>_<session-id>.jsonl`. When the section is absent or malformed, export is **off** (fail-safe). The export contains full request and response bodies and headers — see [Version control](#version-control-gitignore) for why `.pi-container/exports/` must never be committed.
+
+### Prose linting (Vale)
+
+The shared agent image ships **[Vale](https://vale.sh)** (errata-ai/vale v3.17.1) for ASD-STE100 prose checks. Vale installs from the official release tarball with SHA-256 verification (`Containerfile`, D2). A fallback config lives at `$XDG_CONFIG_HOME/vale/.vale.ini` and points at the bundled ASD-STE100 style (`/usr/local/share/vale/styles/STE100/`). Vale exits 2 only when no config is reachable — the fallback prevents that. A project `.vale.ini` still wins over the fallback by Vale's own search rules.
+
+**Rules (version 1):**
+
+| Rule | Extension point | What it checks |
+|------|----------------|----------------|
+| `SentenceLength` | `occurrence` | Sentences of 20+ words (the stricter ASD-STE100 procedural limit; Vale cannot tell procedural from descriptive sentences) |
+| `PassiveVoice` | `existence` | `is/was/are/were/be/been` + past participle (with `exceptions:` to skip intransitive uses) |
+| `Contractions` | `substitution` | `isn't`, `don't`, `can't`, `it's`, `they're`, etc. → full form |
+| `Shall` | `substitution` | `shall` → `must`; `should` / `may` → `can` (case-sensitive so the month "May" is not flagged) |
+| `IngForms` | `substitution` | `is running` → `does run`, `was going` → `did go`, etc. |
+
+**Tool: `vale_lint`**
+
+```
+vale_lint(path?: string, minAlertLevel?: "suggestion" | "warning" | "error", outputFormat?: "text" | "json", steOnly?: boolean)
+```
+
+- `path` — file or directory to lint. Resolved against `ctx.cwd`.
+- `minAlertLevel` — `"suggestion"` (default), `"warning"`, or `"error"`.
+- `outputFormat` — `"text"` (Vale `--output=line`) or `"json"`.
+- `steOnly` — `true` adds `--filter='.Name matches "^STE100"'`.
+
+**Command: `/vale`**
+
+```
+/vale [path] [--minAlertLevel=suggestion|warning|error] [--ste-only]
+```
+
+Both entry points share one implementation. The command shows a summary in `ctx.ui.notify` and a count in `ctx.ui.setStatus`. Long output caps at 20 lines; call the tool for the rest.
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | No **error**-severity alert. Suggestions and warnings still appear in stdout. |
+| 1 | At least one error-severity alert. |
+| 2 | Vale failed (bad flag, missing config, unreadable path). |
+
+Never treat exit 0 as empty output — suggestions and warnings still land on stdout.
+
+**Caveats:**
+
+- `Vale.Spelling` is deliberately absent. The repo's prose is full of identifiers and command names, and the built-in spell check reports them as errors.
+- The `pi-coding-agent/vale/` tree enters the image content hash. Editing any Vale rule or the fallback config invalidates the project-specific image.
+- The extension seeds into `.pi-container/agent/extensions/vale/index.js` even on workspaces with an existing `agent/` directory.
 
 ### Egress policy
 
-`config.yaml`'s `egress.allow` is the **per-project** proxy egress policy. Only HTTP/HTTPS/DNS are intercepted by mitmproxy; every other protocol is denied by default. Opt a protocol in here to let the agent use it — but note these are forwarded **uninspected** (plain NAT); mitmproxy and the allowlist do not see them.
+`config.yaml`'s `egress.allow` is the **per-project** proxy egress policy. Only HTTP/HTTPS/DNS are intercepted by mitmproxy. Every other protocol is denied by default. Opt a protocol in here to let the agent use it. Note that these are forwarded **uninspected** (plain NAT). mitmproxy and the allowlist do not see them.
 
 ```yaml
 # .pi-container/config.yaml
@@ -757,17 +806,17 @@ egress:
     udp_ports: []         # arbitrary extra UDP ports, e.g. [51820]
 ```
 
-`run.py` translates truthy flags and non-empty port lists into the proxy container's `PROXY_ALLOW_*` env vars, which its entrypoint uses to open the matching `iptables` FORWARD rules. An absent or malformed section means **deny-all** (fail-safe). See [Proxy egress policy](architecture.md#proxy-egress-policy) for the full protocol/port reference.
+`run.py` translates truthy flags and non-empty port lists into the proxy container's `PROXY_ALLOW_*` env vars. The entrypoint uses them to open the matching `iptables` FORWARD rules. An absent or malformed section means **deny-all** (fail-safe). See [Proxy egress policy](architecture.md#proxy-egress-policy) for the full protocol/port reference.
 
 ### Chat templates
 
-Some models need an explicit Jinja chat template. Place them under `.pi-container/chat-templates/<model>/` and reference them from a model's `serverCustomParameters.flags` with a path **relative to the workspace**:
+Some models need an explicit Jinja chat template. Place them under `.pi-container/chat-templates/<model>/`. Reference them from a model's `serverCustomParameters.flags` with a path **relative to the workspace**:
 
 ```json
 "--chat-template-file", ".pi-container/chat-templates/Ornith-1.0-35B-FP8/chat_template.jinja"
 ```
 
-`llama-server` runs on the host from the workspace directory, so the relative path resolves against `.pi-container/chat-templates/` in whichever project you launched `pi` from — the templates are seeded there on first run alongside the rest of the config. (Model *weights* are shared across projects under `llama-server/models/`; only the small chat-template files are per-project.)
+`llama-server` runs on the host from the workspace directory, so the relative path resolves against `.pi-container/chat-templates/` in whichever project you launched `pi` from. The templates are seeded there on first run alongside the rest of the config. (Model *weights* are shared across projects under `llama-server/models/`. Only the small chat-template files are per-project.)
 
 ### Version control (.gitignore)
 
@@ -782,4 +831,4 @@ The one directory you **must ignore** is the flow-export output:
 .pi-container/exports/
 ```
 
-`.pi-container/exports/` holds the proxy's captured HTTP/HTTPS traffic — full request/response bodies and headers, including any `Authorization`/cookie values the [token_replacer](proxy/token-replacer.md) did not redact — as raw `flows-<ip>.jsonl` files and date-bucketed snapshots under `exports/flows/<YYYY-MM-DD>/<HH-MM-SS-mmm>_<session-id>.jsonl`. Treat it as sensitive. It is also where run-time shadows an empty tmpfs (so the agent can't read prior captures), which can leave an empty `exports/` dir in a workspace even when no traffic was captured. This repo already ignores it; add the entry above to **your** project's `.gitignore` when you run pi-container inside it.
+`.pi-container/exports/` holds the proxy's captured HTTP/HTTPS traffic. It stores full request and response bodies and headers, including any `Authorization` and cookie values the [token_replacer](proxy/token-replacer.md) did not redact. It stores them as raw `flows-<ip>.jsonl` files and date-bucketed snapshots under `exports/flows/<YYYY-MM-DD>/<HH-MM-SS-mmm>_<session-id>.jsonl`. Treat it as sensitive. It is also where run-time shadows an empty tmpfs (so the agent can't read prior captures). This can leave an empty `exports/` dir in a workspace even when no traffic was captured. This repo already ignores it. Add the entry above to **your** project's `.gitignore` when you run pi-container inside it.

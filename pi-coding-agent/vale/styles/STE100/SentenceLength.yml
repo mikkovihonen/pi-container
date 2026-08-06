@@ -1,0 +1,9 @@
+extends: occurrence
+message: 'Keep sentences short. Aim for 20 words or fewer.'
+level: suggestion
+scope: sentence
+# ASD-STE100 Section 2.1.1: descriptive sentences must not exceed 25 words;
+# procedural (command) sentences must not exceed 20 words. Vale cannot tell the
+# two apart, so version 1 picks the stricter limit for all prose.
+max: 20
+token: '\w+'

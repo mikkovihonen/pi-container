@@ -1,0 +1,12 @@
+extends: substitution
+message: "Avoid the '-ing' form of a verb. Use the base form."
+level: suggestion
+scope: sentence
+swap:
+  "is (\\w+ing)": "does $1"
+  "are (\\w+ing)": "do $1"
+  "was (\\w+ing)": "did $1"
+  "were (\\w+ing)": "did $1"
+  "be (\\w+ing)": "$1"
+  "being (\\w+ing)": "$1"
+ignorecase: false

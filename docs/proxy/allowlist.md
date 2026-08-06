@@ -1,8 +1,8 @@
 # Allowlist Addon
 
-Filters HTTP traffic so that only requests to allowlisted domains and IP address ranges pass through the proxy. All other connections are blocked (HTTP 403 by default, or connection closed via status 444).
+The addon filters HTTP traffic. Only requests to allowlisted domains and IP address ranges pass through the proxy. The addon blocks all other connections (HTTP 403 by default, or connection closed via status 444).
 
-This addon also works in reverse: in `block` mode, only blocked hosts/IPs are denied and everything else is allowed.
+The addon also works in reverse. In `block` mode, it denies only blocked hosts/IPs and allows everything else.
 
 ## Features
 
@@ -10,21 +10,21 @@ This addon also works in reverse: in `block` mode, only blocked hosts/IPs are de
 - **IP range allowlisting** — allow or block IP addresses and CIDR ranges (IPv4 and IPv6)
 - **Dual mode** — `allow` (whitelist) and `block` (blacklist)
 - **mitmweb visual indicators** — blocked flows show a 🚫 marker and comment in the flow list
-- **Configurable status code** — return 403, or close the connection with 444
+- **Configurable status code** — return 403 or close the connection with 444
 - **Dry-run mode** — log blocked requests without actually blocking them
 - **Localhost always allowed** — loopback and private IP connections bypass all rules
 
 ## Quick Start
 
 > **In this project the allowlist is already wired in and active.** The
-> `pi-coding-agent-proxy` image bakes the script and a fail-closed default config,
-> and `run.py` mounts the host's [`.pi-container/allowlist.yaml`](https://github.com/mikkovihonen/pi-container/blob/main/.pi-container/allowlist.yaml)
-> over it at runtime. Edit that host file to change the policy — you don't need
+> `pi-coding-agent-proxy` image bakes the script and a fail-closed default config.
+> `run.py` mounts the host's [`.pi-container/allowlist.yaml`](https://github.com/mikkovihonen/pi-container/blob/main/.pi-container/allowlist.yaml)
+> over it at runtime. Edit that host file to change the policy. You do not need
 > the manual steps below unless you're wiring the addon into a different proxy.
 
 ### In this project
 
-The addon is loaded as part of the mitmproxy startup in the [entrypoint](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/entrypoint.sh), alongside the `token_replacer` and `flow_export` addons:
+The addon loads as part of the mitmproxy startup in the [entrypoint](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/entrypoint.sh). It loads alongside the `token_replacer` and `flow_export` addons:
 
 ```bash
 exec gosu mitmproxy /home/mitmproxy/.venv/bin/mitmweb \
@@ -35,9 +35,9 @@ exec gosu mitmproxy /home/mitmproxy/.venv/bin/mitmweb \
     --set web_password="$ADMIN_PASSWORD"
 ```
 
-The venv's own `mitmweb` is invoked directly rather than through `uv run`: `uv
+The venv's own `mitmweb` is invoked directly rather than through `uv run`. `uv
 run` would re-resolve the environment against the project's default dependency
-groups on every container start, which meant downloading packages from PyPI
+groups on every container start. This meant downloading packages from PyPI
 before mitmproxy existed to inspect the traffic.
 
 The config file path is set via the `ALLOWLIST_CONFIG_PATH` environment
@@ -143,15 +143,15 @@ global:
 
 ### Flat vs. Named Rules
 
-The addon supports two mutually exclusive configuration styles, determined by what is present in the config:
+The addon supports two mutually exclusive configuration styles. The config determines which style:
 
 | Style | Trigger | Behaviour |
 |-------|---------|-----------|
 | **Flat allowlist** | `global.rules` is absent or empty, and `global.hostnames`/`global.ip_ranges` are defined | A single implicit rule is created from the flat lists. |
-| **Named rules** | `global.rules` contains one or more rule objects | Each rule is evaluated in order; the first match wins. |
-| **Both present** | `global.rules` is non-empty **and** `global.hostnames`/`global.ip_ranges` are also defined | Named rules take full priority; the flat lists are silently ignored. |
+| **Named rules** | `global.rules` contains one or more rule objects | Each rule is evaluated in order. The first match wins. |
+| **Both present** | `global.rules` is non-empty **and** `global.hostnames`/`global.ip_ranges` are also defined | Named rules take full priority. The flat lists are silently ignored. |
 
-**Rule**: always define one style or the other — never both. Mixing them will
+**Rule**: always define one style or the other, never both. Mixing them will
 cause the flat lists to be dropped without any warning.
 
 ## Pattern Syntax
@@ -183,12 +183,12 @@ Within a single rule, hostname and IP matching use **OR logic**:
 - **Allow mode**: request is allowed if hostname matches **OR** IP matches
 - **Block mode**: request is denied if hostname matches **OR** IP matches
 
-Between rules, evaluation is **first-match-wins**:
+Between rules, evaluation uses **first-match-wins**:
 
-1. Rule 1 evaluated → if match, apply its action and stop
-2. Rule 2 evaluated → if match, apply its action and stop
-3. ... continue until a match or all rules exhausted
-4. If no rule matches, apply `default_action`
+1. Evaluate Rule 1. If it matches, apply its action and stop.
+2. Evaluate Rule 2. If it matches, apply its action and stop.
+3. Continue until a match or all rules are exhausted.
+4. If no rule matches, apply `default_action`.
 
 ## mitmweb Visual Indicators
 
@@ -254,8 +254,8 @@ mitmweb --set scripts=allowlist.py \
 
 > **Note:** the allowlist only governs HTTP/HTTPS traffic that mitmproxy
 > intercepts. Non-HTTP protocols are handled separately by the proxy's `FORWARD`
-> policy (default-deny, opt-in via `PROXY_ALLOW_*` — see the project README), not
-> by this addon.
+> policy (default-deny, opt-in via `PROXY_ALLOW_*` (see the project README)).
+> This addon does not handle them.
 
 ## Examples
 

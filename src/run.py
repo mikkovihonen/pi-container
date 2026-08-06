@@ -5,6 +5,7 @@ sys.dont_write_bytecode = True
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import signal
@@ -148,6 +149,25 @@ def _ensure_project_config() -> Path:
             logger.info(f"Seeding {dst} from {src}.")
             shutil.copytree(src, dst)
 
+    # Seed individual files under an existing ``agent/`` directory. The loop
+    # above copies ``agent/`` as a whole when the project directory is new, but a
+    # partially-populated (user-edited) ``agent/`` survives the copy untouched.
+    # Only the subpaths listed below are eligible. A user can turn off an
+    # extension by deleting its directory — the seeder will not resurrect it.
+    # To add a new seeded subpath, append it here.
+    _AGENT_SEED_SUBPATHS = ("extensions/vale/index.js",)
+    agent_template = template_root / "agent"
+    agent_project = project_root / "agent"
+    if agent_template.is_dir():
+        agent_project.mkdir(parents=True, exist_ok=True)
+        for src_rel in _AGENT_SEED_SUBPATHS:
+            src = agent_template / src_rel
+            dst = agent_project / src_rel
+            if src.is_file() and not dst.exists():
+                logger.info(f"Seeding {dst} from {src}.")
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+
     for name in _PROJECT_CONFIG_FILES:
         src, dst = template_root / name, project_root / name
         if src.exists() and not dst.exists():
@@ -190,6 +210,11 @@ def _ensure_project_config() -> Path:
 # of the content hash — unlike the per-workspace ``commands.sh`` files, which are
 # only hashed when non-empty.
 _IMAGE_DEFINITION_FILES = ("Containerfile", "entrypoint.sh")
+# Directories under ``pi-coding-agent/`` whose contents must also enter the hash.
+# A change to any file in any of these trees (Vale rules, Vale config, ...) must
+# invalidate the project-specific image, so the files walk, sort and hash in
+# deterministic order.
+_IMAGE_DEFINITION_DIRS = ("vale",)
 
 
 def _compute_image_hash(project_dir: Path) -> str | None:
@@ -198,6 +223,8 @@ def _compute_image_hash(project_dir: Path) -> str | None:
     Returns a hex digest of the concatenated SHA-256 hashes of:
     - `pi-coding-agent/Containerfile` (at REPO_ROOT, to detect image definition changes)
     - `pi-coding-agent/entrypoint.sh` (at REPO_ROOT, to detect entrypoint changes)
+    - `pi-coding-agent/vale/` (recursively — Vale rules and fallback config are
+      baked into the image and reach the agent via the bind-mounted config dir)
     - `.pi-container/dependencies/root/commands.sh` (if it exists and is non-empty)
     - `.pi-container/dependencies/pi/commands.sh` (if it exists and is non-empty)
 
@@ -210,30 +237,44 @@ def _compute_image_hash(project_dir: Path) -> str | None:
     """
     deps_root = project_dir / ".pi-container" / "dependencies"
     agent_dir = REPO_ROOT / "pi-coding-agent"
-    files_to_hash = []
+    # List of ``(sort_key, absolute_path)`` pairs. Sorting by sort_key gives a
+    # deterministic order regardless of filesystem traversal order. A sort_key of
+    # the file name works for top-level definition files; a relative path within
+    # its directory works for walked subdirectories.
+    entries: list[tuple[str, Path]] = []
 
-    # Image definition files (always included — their changes require a rebuild)
+    # Image definition files (always included — their changes require a rebuild).
     for img_file in _IMAGE_DEFINITION_FILES:
         img_path = agent_dir / img_file
         if img_path.exists():
-            files_to_hash.append(img_file)
+            entries.append((img_file, img_path))
 
-    # Dependency files (optional — skip if absent or empty)
+    # Image definition directories (walked in sorted order).
+    for dir_name in _IMAGE_DEFINITION_DIRS:
+        dir_path = agent_dir / dir_name
+        if dir_path.is_dir():
+            for root, dirs, filenames in os.walk(dir_path):
+                dirs.sort()
+                for fn in sorted(filenames):
+                    fpath = Path(root) / fn
+                    if not fpath.is_file() or fpath.is_symlink():
+                        continue
+                    rel = str(fpath.relative_to(agent_dir))
+                    entries.append((rel, fpath))
+
+    # Dependency files (optional — skip if absent or empty).
     for cmd_file in ("root/commands.sh", "pi/commands.sh"):
         cmd_path = deps_root / cmd_file
         if cmd_path.exists() and cmd_path.stat().st_size > 0:
-            files_to_hash.append(cmd_file)
+            entries.append((cmd_file, cmd_path))
 
-    if not files_to_hash:
+    if not entries:
         return None
 
-    # Sort for deterministic ordering
-    files_to_hash.sort()
+    entries.sort(key=lambda e: e[0])
 
-    # Concatenate SHA-256 hashes of each file
     combined_hash = hashlib.sha256()
-    for cmd_file in files_to_hash:
-        file_path = agent_dir / cmd_file if cmd_file in _IMAGE_DEFINITION_FILES else deps_root / cmd_file
+    for _key, file_path in entries:
         file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
         combined_hash.update(file_hash.encode())
 

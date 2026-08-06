@@ -4,9 +4,9 @@
 
 ### Overview
 
-This mitmproxy addon intercepts HTTP requests flowing through the transparent proxy and conditionally replaces sensitive token values (e.g., API keys, authorization bearer tokens, session cookies) in request bodies, headers, or query parameters.
+This mitmproxy addon intercepts HTTP requests that flow through the transparent proxy. It conditionally replaces sensitive token values (e.g., API keys, authorization bearer tokens, session cookies) in request bodies, headers, or query parameters.
 
-The replacement is only applied when **both** conditions match:
+The addon applies the replacement only when **both** conditions match:
 1. **Hostname match** — the request's target hostname matches a configured pattern.
 2. **Content match** — the request body or headers contain a token that matches a configured pattern.
 
@@ -200,12 +200,12 @@ The addon applies the same hostname + content-pattern matching to HTTP responses
 ### Integration with the Proxy Container
 
 > **In this project the token_replacer is already wired in and active.** The
-> [Containerfile](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/Containerfile) bakes the script + a default config, the
+> [Containerfile](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/Containerfile) bakes the script and a default config. The
 > [entrypoint](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/entrypoint.sh) loads it with `-s` and points
-> `TOKEN_REPLACER_CONFIG_PATH` at `/home/mitmproxy/config/token_replacer.yaml`,
-> and `run.py` mounts the host's [`.pi-container/token_replacer.yaml`](https://github.com/mikkovihonen/pi-container/blob/main/.pi-container/token_replacer.yaml)
+> `TOKEN_REPLACER_CONFIG_PATH` at `/home/mitmproxy/config/token_replacer.yaml`.
+> `run.py` mounts the host's [`.pi-container/token_replacer.yaml`](https://github.com/mikkovihonen/pi-container/blob/main/.pi-container/token_replacer.yaml)
 > over it (also injecting any `${ENV:VAR}` secrets it references). The steps below
-> describe that wiring for reference / other proxies.
+> describe that wiring for reference or other proxies.
 
 The token_replacer addon is loaded as a mitmproxy script via the `scripts` option. The script exposes a module-level `addons = [addon]` list, which is how mitmproxy discovers and registers it (a bare `addon = ...` variable would load but never register its hooks).
 
