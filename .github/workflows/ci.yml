@@ -110,9 +110,27 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
+      # The release body is the CHANGELOG section for this version; GitHub's
+      # generated notes (the "What's Changed" PR list) are appended below it.
+      # An empty extract is fatal — otherwise a heading that does not match the
+      # tag ships an auto-notes-only release with no signal that it happened.
+      - name: Extract CHANGELOG section
+        run: |
+          awk -v v="${{ steps.version.outputs.VERSION }}" '
+            $0 == "## [" v "]" || index($0, "## [" v "] ") == 1 { p = 1; next }
+            p && /^## / { exit }
+            p
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          if [ ! -s "$RUNNER_TEMP/release-notes.md" ]; then
+            echo "::error::No '## [${{ steps.version.outputs.VERSION }}]' section in CHANGELOG.md"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/release-notes.md"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           name: "Release ${{ steps.version.outputs.VERSION }}"
+          body_path: ${{ runner.temp }}/release-notes.md
           generate_release_notes: true
           fail_on_unmatched_files: false
