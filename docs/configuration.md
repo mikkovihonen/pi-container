@@ -741,6 +741,7 @@ flow_export:
 
 When enabled, `run.py` reads the flows the proxy staged for this session. It writes a merged snapshot bucketed by UTC date under `.pi-container/exports/flows/<YYYY-MM-DD>/<HH-MM-SS-mmm>_<session-id>.jsonl`. When the section is absent or malformed, export is **off** (fail-safe). The export contains full request and response bodies and headers — see [Version control](#version-control-gitignore) for why `.pi-container/exports/` must never be committed.
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 ### Prose linting (Vale)
 
@@ -790,6 +791,8 @@ Never treat exit 0 as empty output — suggestions and warnings still land on st
 - `Vale.Spelling` is deliberately absent. The repo's prose is full of identifiers and command names, and the built-in spell check reports them as errors.
 - The `pi-coding-agent/vale/` tree enters the image content hash. Editing any Vale rule or the fallback config invalidates the project-specific image.
 - The extension seeds into `.pi-container/agent/extensions/vale/index.js` even on workspaces with an existing `agent/` directory.
+=======
+>>>>>>> e911cdf (chore: modify documentation to compy with ASD-STE100)
 =======
 >>>>>>> e911cdf (chore: modify documentation to compy with ASD-STE100)
 

@@ -8,6 +8,11 @@ When trying to understand workspace structure, use `git ls-files --cached --othe
 
 CRITICAL: Do not use the `<|tool_call>call:` syntax when explaining your reasoning or plan. Only use it at the exact moment you intend to execute a tool.
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+
+All generated text must follow ASD-STE100 standard.
+>>>>>>> e911cdf (chore: modify documentation to compy with ASD-STE100)
 =======
 
 All generated text must follow ASD-STE100 standard.
