@@ -87,6 +87,32 @@ class TestBuildProxy:
             assert "pi-coding-agent:local" in cmd
             assert any("Containerfile" in str(c) for c in cmd)
 
+    def test_build_agent_labels_image_as_shared(self):
+        """The shared base must be labelled `shared`, never `project`.
+
+        It is built from the same Containerfile as the per-project images. When that
+        file hardcoded `type=project`, the base was stamped as a project image too and
+        run.py's orphan cleanup could not tell it apart from a real project's image.
+        """
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
+            build_agent("podman")
+            cmd = mock_popen.call_args[0][0]
+            assert "pi-container.type=shared" in cmd
+            assert "pi-container.type=project" not in cmd
+
+    def test_containerfile_does_not_hardcode_type_label(self):
+        """`pi-container.type` must come from the CLI, not the Containerfile.
+
+        The agent Containerfile builds both the shared base and the per-project
+        images, so it cannot know which type it is producing. Setting the label per
+        build also keeps it off build intermediates, so a half-finished build is never
+        picked up as an orphan.
+        """
+        from build import REPO_ROOT
+
+        containerfile = (REPO_ROOT / "pi-coding-agent" / "Containerfile").read_text()
+        assert "LABEL pi-container.type" not in containerfile
+
     def test_build_agent_does_not_forward_python_args(self, monkeypatch):
         """PYTHON_OPTIMIZE belongs to the builder image, which is where Python is compiled.
 
