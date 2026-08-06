@@ -1,11 +1,52 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+# Dependabot version updates.
+# Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Security updates (the Dependabot alerts tab) run independently of this file.
 
 version: 2
 updates:
-  - package-ecosystem: "" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  # Python dependencies for every group in pyproject.toml (src, proxy, docs, dev),
+  # resolved through uv.lock. The proxy image installs from this same lock file
+  # via `uv sync --frozen --only-group proxy`, so this covers mitmproxy too.
+  - package-ecosystem: "uv"
+    directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # One PR for the low-risk bumps; majors still arrive individually.
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Actions pinned in ci.yml and gh-pages.yml (actions/*, astral-sh/setup-uv,
+  # softprops/action-gh-release).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Base images in the three Containerfiles. Dependabot's docker file fetcher
+  # matches /dockerfile|containerfile/i, so `Containerfile` is picked up as-is.
+  # Note: the current FROM lines use the floating `debian:trixie-slim` tag, which
+  # has no version for Dependabot to compare against — this entry stays quiet
+  # until an image is pinned to a specific tag or digest.
+  - package-ecosystem: "docker"
+    directories:
+      - "/pi-coding-agent"
+      - "/pi-coding-agent-builder"
+      - "/pi-coding-agent-proxy"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      base-images:
+        patterns: ["*"]
