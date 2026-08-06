@@ -47,3 +47,10 @@ See **[Getting Started](docs/getting-started.md)** for prerequisites, hardware r
 ## License
 
 [MIT](LICENSE)
+
+## Agentic coding disclosure
+
+Built using agentic coding tools.
+
+- [Pi Coding Agent](https://pi.dev) via [pi-container](https://mikkovihonen.github.io/pi-container/) for agentic coding.
+- [Claude Code](https://claude.com/product/claude-code)
