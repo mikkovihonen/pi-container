@@ -1,8 +1,9 @@
 ---
 name: release
 description: Creates a new pi-container release. Bumps versions across all files,
-  updates CHANGELOG, regenerates uv.lock, validates consistency, and creates
-  the git tag. Use when the user says "release vX.Y.Z" or "make a new release".
+  regenerates uv.lock, validates consistency, then guides the CHANGELOG update,
+  release commit, and git tag. Use when the user says "release vX.Y.Z" or
+  "make a new release".
 ---
 
 # Release pi-container
@@ -17,8 +18,9 @@ The user wants to publish a new version. Examples:
 ## Prerequisites
 
 - `main` is green (CI passing)
-- `CHANGELOG.md` has `[Unreleased]` entries ready to promote
-- All changes for this release are committed to `main`
+- `CHANGELOG.md` has `Unreleased` entries ready to promote
+- All changes for this release are committed to `main` and the working tree is
+  clean — the script refuses to start otherwise
 
 ## Steps
 
@@ -38,35 +40,47 @@ If unsure, ask: "Should this be a patch, minor, or major release?"
 ```
 
 The script will:
+- Preflight: semver format, on `main`, clean working tree, tag not already
+  taken, CHANGELOG already in order. It refuses before touching any file.
 - Bump `pyproject.toml` version
 - Bump `schema_version` in `pi-coding-agent/default/config.yaml`
 - Bump `schema_version` in `.pi-container/config.yaml`
 - Run `uv lock` to regenerate the lockfile
+- Commit the bumps as `chore: bump to <version>`
 - Validate version consistency with `validate_versions.py`
 - Run lint and tests
 - Report success/failure
 
+If a step after the commit fails, the script prints the commit SHA and the
+`git reset --hard HEAD~1` needed to undo it.
+
 ### 3. Update CHANGELOG and amend the release commit
 
 If the script succeeds, update `CHANGELOG.md`:
-- Move `[Unreleased]` entries to the new version block
+- Move the `Unreleased` entries to the new version block
 - Add today's date
 - Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format
-- **Enforce reverse chronological order**: `[Unreleased]` must be at the top,
+- **Enforce reverse chronological order**: `Unreleased` must be at the top,
   followed by newest version, then older ones. If out of order, rewrite the
   file with correct ordering before committing.
-- **After editing, re-read the file to verify `[Unreleased]` is still first.**
-  It's easy to accidentally place the new version block above `[Unreleased]`.
-- **Amend the release commit** (the script has already bumped versions):
+- **After editing, verify the ordering** — it's easy to place the new version
+  block above `Unreleased`:
   ```bash
-  git add -A && git commit --amend -m "release: v<version>"
+  ./.pi/skills/release/scripts/release.sh --check-changelog
   ```
+- **Amend the release commit** (the script already committed version bumps):
+  ```bash
+  git add CHANGELOG.md && git commit --amend -m "release: v<version>"
+  ```
+  Stage only `CHANGELOG.md` — `git add -A` would sweep unrelated working-tree
+  changes into the release commit.
+
   **Never re-run the release script** after editing CHANGELOG — that would
   re-bump versions and create a second tag.
 
+### 4. Tag
+
 ```bash
-git add -A
-git commit -m "release: v<version>"
 git tag -a v<version> -m "Release v<version>"
 ```
 
@@ -81,18 +95,27 @@ CI will create the GitHub Release automatically.
 
 ## Error Handling
 
+- **Preflight fails:** Nothing has been modified — fix the reported condition
+  and re-run the script with the same version.
 - **Validation fails:** Fix the error before proceeding. Common issues:
   - Version mismatch between files
   - Missing required fields in config
   - Schema validation errors
-- **Tests fail:** Don't release. Fix the underlying issue first.
-- **CHANGELOG update needed:** The script doesn't modify CHANGELOG — do it manually or use `towncrier` if configured.
+- **Tests fail:** Don't release. Fix the underlying issue first. The bump
+  commit is already in place; either fix and amend it, or
+  `git reset --hard HEAD~1` and start over.
+- **"Nothing to commit":** The bumps produced no changes, so there is no
+  release commit to amend. Check whether the repo is already at this version.
 
 ## Notes
 
+- The script never touches `CHANGELOG.md` or creates the tag — those are steps
+  3 and 4 above.
 - The `validate_versions.py` hook runs in CI only (not pre-commit) because the git tag doesn't exist until after the commit.
 - `.pi-container/config.yaml` must be updated separately from the template — seeding is copy-once.
-- If the user wants to skip pushing, the script commits and tags locally but doesn't push.
+- The lint step runs with `SKIP=pytest`; the suite runs once afterwards with
+  `--cov`, rather than twice.
+- If the user wants to skip pushing, everything through the tag stays local.
 
 ## Reference
 

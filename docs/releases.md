@@ -118,10 +118,13 @@ pi> Release 0.2.0
 
 1. **Determine the version** — asks the user for the version number, or
    suggests patch/minor/major based on the changes since the last tag.
-2. **Run `release.sh`** — bumps `pyproject.toml`, both `schema_version` fields,
-   regenerates `uv.lock`, and runs `validate_versions.py` + lint + tests.
-3. **Update `CHANGELOG.md`** — moves `[Unreleased]` entries into a new version
-   block with today's date, enforcing reverse chronological order.
+2. **Run `release.sh`** — checks the release preconditions (semver format, on
+   `main`, clean tree, tag still free), bumps `pyproject.toml` and both
+   `schema_version` fields, regenerates `uv.lock`, commits the bumps, then runs
+   `validate_versions.py` + lint + tests.
+3. **Update `CHANGELOG.md`** — moves `Unreleased` entries into a new version
+   block with today's date, then confirms the ordering with
+   `release.sh --check-changelog`.
 4. **Amend the release commit** — adds the changelog update to the existing
    commit created by the script (never re-run the script, or versions get
    double-bumped).
@@ -170,18 +173,18 @@ which happens after the commit. The runtime config
 5. **Bump `schema_version` in the seed template** —
    `pi-coding-agent/default/config.yaml`. This is what new workspaces get on
    first run.
-5. **Bump `schema_version` in the runtime config** —
+6. **Bump `schema_version` in the runtime config** —
    `.pi-container/config.yaml`. This is what the currently running container
    uses. Seeding is copy-once (missing-only), so updating the template alone
    will not update the runtime config.
-6. **Validate locally** before pushing:
+7. **Validate locally** before pushing:
 
    ```bash
    uv run python3 .github/workflows/scripts/validate_versions.py
    pre-commit run --all-files --show-diff-on-failure
    uv run pytest --cov
    ```
-7. **Commit, tag, and push**:
+8. **Commit, tag, and push**:
 
    ```bash
    git add CHANGELOG.md pyproject.toml \
