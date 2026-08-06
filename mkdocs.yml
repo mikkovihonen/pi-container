@@ -43,6 +43,7 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - tables
+  - md_in_html
   - toc:
       permalink: true
 
