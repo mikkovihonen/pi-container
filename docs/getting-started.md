@@ -97,17 +97,17 @@ See [Configuration](configuration.md) for the full list of environment variables
 
 This builds three images, in this order:
 
-1. `pi-coding-agent-proxy:local` — the transparent proxy.
-2. `pi-coding-agent-builder:local` — the [toolchain image](architecture.md#toolchain-builder-image). Compiles CPython 3.14 (PGO), podman and netavark/aardvark-dns from source, and stages Node from the official nodejs.org tarball. **A few minutes** on a 9-core/8 GB machine.
+1. `pi-coding-agent-builder:local` — the [toolchain image](architecture.md#toolchain-builder-image). Compiles CPython 3.14 (PGO), podman and netavark/aardvark-dns from source, and stages Node from the official nodejs.org tarball. **A few minutes** on a 9-core/8 GB machine.
 
     `NODE_SOURCE=build ./build.sh` compiles Node from source instead, which takes **about an hour** (measured: ~65 min at 3 compile jobs). It buys a trixie-native build rather than the generic-glibc official one, and nothing else — Node has no build tags worth choosing, so unlike podman there is no correctness argument for it. The default `prebuilt` mode stages byte-for-byte the same Node the old `node:` base image shipped, since that image is this same tarball extracted into `/usr/local`.
 
     Compile parallelism is capped by available memory rather than core count, so a bigger machine directly shortens this step (`MAKE_JOBS=<n>` overrides the cap). Later builds skip the image entirely unless one of its pinned versions changes, and each component is a separate stage, so bumping podman does not rebuild Node.
 
     Every version, git commit and SHA-256 it builds from is an `ARG` in [`pi-coding-agent-builder/Containerfile`](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-builder/Containerfile) — that one file is where you bump a component.
+2. `pi-coding-agent-proxy:local` — the transparent proxy, which copies its CPython and `uv` out of the builder image so that it runs [the same Python as the agent](architecture.md#uniform-python-across-both-images).
 3. `pi-coding-agent:local` — the main agent, which copies the mitmproxy CA certificate out of the proxy image and its whole toolchain out of the builder image.
 
-The order is not optional: the agent image `COPY --from`s both of the others.
+The order is not optional: the proxy image `COPY --from`s the builder, and the agent image `COPY --from`s both of the others.
 
 ### 3. Run the Agent
 

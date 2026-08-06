@@ -1,8 +1,27 @@
-FROM python:3.14.6-slim-trixie
+# The same Debian as the agent image and the toolchain builder, plus the SAME CPython
+# and the SAME uv the agent runs — both compiled/staged in pi-coding-agent-builder/ and
+# copied in below.
+#
+# WHY NOT python:<ver>-slim-trixie
+# That is what this image used to be, with a uv binary pulled separately from
+# ghcr.io/astral-sh/uv by digest. It meant two interpreters and two uv pins across the
+# two images we ship, bumped by hand in different files and free to drift: the proxy
+# could be running a CPython patch release, an OpenSSL, or a uv that the agent had
+# never seen. mitmproxy is the TLS-terminating chokepoint every request crosses, so
+# "which OpenSSL is that, exactly?" is a question worth having one answer to.
+# Now both images take their Python from the same build, pinned in one place
+# (pi-coding-agent-builder/Containerfile).
+FROM debian:trixie-slim
 
-# Install uv and system dependencies in a single layer.
-# uv is used to install proxy dependencies from the main pyproject.toml + uv.lock
-# (frozen, only the proxy dependency group).
+# Runtime packages. The first block is the proxy's own (entrypoint.sh uses iptables,
+# gosu, expect and jq); the lib* block is what the staged CPython's extension modules
+# link against — the builder compiled them against the -dev packages listed in
+# pi-coding-agent-builder/Containerfile, and without the matching runtime libraries
+# here `import ssl` (or sqlite3, lzma, bz2, readline, ...) fails at first use. The
+# verification step below turns that into a build failure instead.
+#
+# Kept deliberately short of the agent's list: no build-essential, no headers, no
+# Node, no podman. This image runs one Python program.
 RUN apt-get update && apt-get install -y \
     curl \
     iptables \
@@ -12,12 +31,51 @@ RUN apt-get update && apt-get install -y \
     expect \
     procps \
     jq \
+    # shared libraries the staged CPython links against
+    libbz2-1.0 \
+    libdb5.3 \
+    libffi8 \
+    libgdbm6 \
+    liblzma5 \
+    libncursesw6 \
+    libreadline8 \
+    libsqlite3-0 \
+    libssl3 \
+    libtinfo6 \
+    libuuid1 \
+    libzstd1 \
+    zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv@sha256:cf4eedcaa81655197f625739489effcbe71b61ceb1506f332c3facae5deceded  /uv /uvx /usr/local/bin/
+# CPython + uv (+ pip, and podman-compose, which is inert here). Just the /python/
+# tree: the builder stages each component at its own root precisely so this image does
+# not have to carry Node, podman and netavark to get an interpreter.
+COPY --from=pi-coding-agent-builder:local /python/ /
+
+# Fail the build here, not at the first request the proxy handles. A staged binary that
+# cannot resolve a shared library — an ABI skew against the builder's base image, or a
+# missing package above — is otherwise invisible until mitmproxy imports the module
+# that needs it, which for `ssl` means at TLS interception time.
+RUN ldconfig \
+ && python --version \
+ && pip --version \
+ && uv --version \
+ && uvx --version \
+ && python -c 'import bz2, ctypes, curses, lzma, readline, sqlite3, ssl, zlib' \
+ && cat /usr/local/share/pi-container/toolchain-versions.d/*.txt \
+      | sort > /usr/local/share/pi-container/toolchain-versions.txt \
+ && cat /usr/local/share/pi-container/toolchain-versions.txt
+
+# uv must build the venv on the interpreter copied in above, never on one it downloads:
+# a managed CPython would quietly reintroduce exactly the drift this image removed.
+# UV_PYTHON_DOWNLOADS=never makes an interpreter that cannot be found a build failure.
+ENV UV_PYTHON=/usr/local/bin/python3
+ENV UV_PYTHON_DOWNLOADS=never
 
 RUN useradd -m mitmproxy
 
+# Proxy dependencies come from the main pyproject.toml + uv.lock (frozen, only the
+# proxy dependency group).
 COPY pyproject.toml uv.lock /home/mitmproxy/
 RUN chown mitmproxy:mitmproxy /home/mitmproxy/pyproject.toml /home/mitmproxy/uv.lock
 

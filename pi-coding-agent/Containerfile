@@ -24,6 +24,10 @@ FROM debian:trixie-slim AS runner
 # built there links against these, and keeping the headers means `uv sync` and
 # `pip install` can still compile a wheel from source in a workspace, which is the
 # common case for a coding agent. Keep the two lists in step.
+#
+# The staged Python carries no static libpython (build-python.sh trims it): an
+# extension module links nothing, resolving its Python symbols from the interpreter
+# that loads it. That script proves it by building one at image-build time.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     build-essential \
@@ -97,13 +101,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ─── Toolchain from the builder image ────────────────────────────────────────
 # Node, CPython + uv + podman-compose, podman built with our own build tags, and the
-# netavark/aardvark-dns release podman 6 requires. All staged under /out by
-# pi-coding-agent-builder/Containerfile, which build.sh builds first.
+# netavark/aardvark-dns release podman 6 requires. Each is staged at its own root by
+# pi-coding-agent-builder/Containerfile, which build.sh builds first; every tree
+# already mirrors the layout it lands in, so each COPY is a plain overlay onto /.
 #
-# Copying a prebuilt tree instead of compiling in place is what keeps a
-# project-specific image rebuild cheap: this layer is invalidated only when the
-# builder image itself changes, and even then it is a copy, not a compile.
-COPY --from=pi-coding-agent-builder:local /out/ /
+# Four COPYs rather than one because the builder keeps the components separate — that
+# is what lets the proxy image take /python/ alone (same CPython, same uv, no Node or
+# podman). This image is the one consumer that wants all of them.
+#
+# Copying prebuilt trees instead of compiling in place is what keeps a
+# project-specific image rebuild cheap: these layers are invalidated only when the
+# builder image itself changes, and even then they are copies, not compiles.
+COPY --from=pi-coding-agent-builder:local /python/ /
+COPY --from=pi-coding-agent-builder:local /node/ /
+COPY --from=pi-coding-agent-builder:local /podman/ /
+COPY --from=pi-coding-agent-builder:local /network/ /
 
 # uv reads the system trust store, which carries the mitmproxy CA (installed below).
 ENV UV_SYSTEM_CERTS=1

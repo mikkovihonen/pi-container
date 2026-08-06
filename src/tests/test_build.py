@@ -224,10 +224,11 @@ class TestNodeBuildArgs:
 
 class TestMain:
     def test_main_builds_all_three_images(self):
-        """main should build proxy, then the toolchain, then the agent.
+        """main should build the toolchain, then the proxy, then the agent.
 
-        Order is load-bearing: the agent image COPYs --from both of the others, so
-        either one missing or stale makes its build fail or bake in stale content.
+        Order is load-bearing in both links: the proxy image COPYs its CPython and uv
+        from the toolchain image, and the agent image COPYs from both. Any of them
+        missing or stale makes a build fail or bake in stale content.
         """
         calls = []
         with (
@@ -239,14 +240,13 @@ class TestMain:
             patch("sys.exit"),
         ):
             main()
-        assert calls == ["proxy", "builder", "agent"]
+        assert calls == ["builder", "proxy", "agent"]
 
     def test_main_rejects_bad_node_source_before_building_anything(self, monkeypatch):
-        """An invalid NODE_SOURCE must not cost a proxy rebuild.
+        """An invalid NODE_SOURCE must cost nothing at all.
 
-        build_proxy() regenerates the mitmproxy CA, which invalidates every project
-        image — so a typo that is only noticed at the toolchain step would force a round
-        of rebuilds nobody asked for.
+        It is consumed by the first image built, so the check has to happen before that
+        build starts rather than inside it.
         """
         monkeypatch.setenv("NODE_SOURCE", "prebuild")
         with (
@@ -303,9 +303,14 @@ class TestMain:
         """main should exit 1 when subprocess raises CalledProcessError."""
         import subprocess
 
+        # build_builder is the one made to fail because it is the first image built;
+        # the other two are patched so a failure here can never reach a real podman.
         with (
             patch("build.validate_environment", return_value="podman"),
-            patch("build.build_proxy", side_effect=subprocess.CalledProcessError(1, "cmd")),
+            patch("build.check_build_memory", return_value=True),
+            patch("build.build_builder", side_effect=subprocess.CalledProcessError(1, "cmd")),
+            patch("build.build_proxy"),
+            patch("build.build_agent"),
             patch("sys.exit") as mock_exit,
             patch("builtins.print"),
         ):
@@ -316,7 +321,10 @@ class TestMain:
         """main should exit 1 when runtime command is not found."""
         with (
             patch("build.validate_environment", return_value="nonexistent_runtime"),
-            patch("build.build_proxy", side_effect=FileNotFoundError),
+            patch("build.check_build_memory", return_value=True),
+            patch("build.build_builder", side_effect=FileNotFoundError),
+            patch("build.build_proxy"),
+            patch("build.build_agent"),
             patch("sys.exit") as mock_exit,
             patch("builtins.print"),
         ):

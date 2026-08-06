@@ -203,12 +203,90 @@ stage_pip -r /tmp/req-uv.txt
 } > /tmp/req-compose.txt
 stage_pip -r /tmp/req-compose.txt
 
+stage_bin="${PI_STAGE}/usr/local/bin"
+stage_lib="${PI_STAGE}/usr/local/lib/python${py_minor}"
+stage_site="${stage_lib}/site-packages"
+
+# ─── Trim the staged tree ────────────────────────────────────────────────────
+# Runs last, after everything that stages into the tree, so nothing can put back what
+# it removes. Only $PI_STAGE is touched — the builder's own /usr/local has to keep
+# working for the pip calls above, and nothing from it ships.
+#
+# Worth doing because BOTH shipped images carry this tree: the agent, and the proxy
+# since it stopped bringing its own interpreter. Every megabyte here is paid twice.
+# Nothing removed below is reachable from anything either image runs:
+#
+#   test/ (157 MiB)         CPython's own regression suite. Reached only by
+#                           `python -m test` and by code importing `test.support`.
+#   libpython3.14.a (2 x 67 MiB)
+#                           the static library — installed both as lib/libpython3.14.a
+#                           and in the config-*/ directory, as two independent copies
+#                           rather than hardlinks. Needed only to EMBED CPython in a C
+#                           program. Building a native wheel does not link it: an
+#                           extension module resolves its Python symbols from the
+#                           interpreter that loads it. That is the case the agent image
+#                           keeps the -dev headers for, and it is proven below rather
+#                           than assumed.
+#
+#                           WHAT THIS GIVES UP, precisely: embedding CPython in a C/C++
+#                           program. `python3.14-config --ldflags --embed` still
+#                           advertises `-lpython3.14` — sysconfig reports what the build
+#                           configured, not what is on disk — so an embed link fails at
+#                           `cannot find -lpython3.14` rather than anywhere informative.
+#                           Plain `--ldflags` (the extension-module case) does not name
+#                           it and is unaffected.
+#
+#                           Note this build has NO SHARED libpython either, and never
+#                           did: ./configure runs without --enable-shared, so
+#                           Py_ENABLE_SHARED=0 and the interpreter core is linked into
+#                           the `python3.14` binary. Tools that require a shared
+#                           libpython — PyInstaller above all, also Nuitka and
+#                           dlopen-based embedding — could not work here before this
+#                           trim and cannot now; restoring the archive would not change
+#                           that. Making them work is a --enable-shared rebuild, which
+#                           costs every workload a slightly slower interpreter to serve
+#                           a case neither shipped image has.
+#   idlelib, tkinter, turtledemo (~10 MiB)
+#                           the Tk stack. tk-dev is not installed, so _tkinter was
+#                           never built and `import tkinter` already fails — idlelib
+#                           and turtledemo are dead code sitting behind it.
+#
+# This is the trim the official python: images make too (docker-library/python removes
+# test directories and libpython*.a) — minus their `*.pyc` deletion, deliberately.
+# /usr/local is not writable by the agent's `pi` user, so a removed .pyc would never be
+# regenerated and every import would re-parse source, for the life of the image.
+trim_before_mib="$(du -sm "${PI_STAGE}" | awk '{print $1}')"
+
+rm -rf \
+    "${stage_lib}/test" \
+    "${stage_lib}/idlelib" \
+    "${stage_lib}/tkinter" \
+    "${stage_lib}/turtledemo"
+rm -f "${stage_bin}"/idle*
+find "${PI_STAGE}/usr/local/lib" -name 'libpython*.a' -delete
+
+trim_after_mib="$(du -sm "${PI_STAGE}" | awk '{print $1}')"
+echo "Trimmed staged Python tree: ${trim_before_mib} MiB -> ${trim_after_mib} MiB"
+
+# `rm -rf` on a path that does not exist succeeds silently, so a renamed or mistyped
+# path here would ship the megabytes it was meant to remove with nothing to show for
+# it. Assert the result instead of trusting the removals.
+for trimmed in "${stage_lib}/test" "${stage_lib}/idlelib" "${stage_lib}/tkinter" "${stage_lib}/turtledemo"; do
+    if [ -e "${trimmed}" ]; then
+        echo "ERROR: ${trimmed} survived the trim." >&2
+        exit 1
+    fi
+done
+if find "${PI_STAGE}/usr/local/lib" -name 'libpython*.a' | grep -q .; then
+    echo "ERROR: a static libpython survived the trim:" >&2
+    find "${PI_STAGE}/usr/local/lib" -name 'libpython*.a' >&2
+    exit 1
+fi
+
 # ─── Verify the STAGED tree, not the builder's own ───────────────────────────
-# Only $PI_STAGE reaches the agent image, and the two can disagree: a missing
+# Only $PI_STAGE reaches the shipped images, and the two can disagree: a missing
 # --ignore-installed silently stages nothing, and a wrong --root stages files
 # under paths that will never exist. So check the staged copy end to end.
-stage_bin="${PI_STAGE}/usr/local/bin"
-stage_site="${PI_STAGE}/usr/local/lib/python${py_minor}/site-packages"
 
 for tool in python python"${py_minor}" pip uv podman-compose; do
     if [ ! -e "${stage_bin}/${tool}" ]; then
@@ -235,6 +313,36 @@ fi
 # staged by a later script. Import and print the version instead.
 PYTHONPATH="${stage_site}" "${stage_bin}/python${py_minor}" \
     -c 'import podman_compose; print("podman-compose", podman_compose.__version__)'
+
+# Compile and import a real C extension against the STAGED headers. This is the one
+# assumption in the trim above worth proving rather than asserting: dropping
+# libpython*.a must not break `pip install` / `uv sync` building a wheel from source in
+# a workspace, which is the common case for a coding agent and the reason the agent
+# image keeps the -dev headers at all. It links nothing — an extension resolves its
+# Python symbols from the interpreter that loads it — so if that ever stops being true
+# here, the build says so instead of a workspace finding out.
+mkdir -p /tmp/extension-check
+cat > /tmp/extension-check/pi_probe.c << 'EOF'
+#include <Python.h>
+static PyObject *answer(PyObject *self, PyObject *args) { return PyLong_FromLong(42); }
+static PyMethodDef methods[] = {
+    {"answer", answer, METH_NOARGS, NULL},
+    {NULL, NULL, 0, NULL},
+};
+static struct PyModuleDef module = {PyModuleDef_HEAD_INIT, "pi_probe", NULL, -1, methods};
+PyMODINIT_FUNC PyInit_pi_probe(void) { return PyModule_Create(&module); }
+EOF
+gcc -shared -fPIC -I"${PI_STAGE}/usr/local/include/python${py_minor}" \
+    /tmp/extension-check/pi_probe.c -o /tmp/extension-check/pi_probe.so
+PYTHONPATH=/tmp/extension-check "${stage_bin}/python${py_minor}" \
+    -c 'import pi_probe; assert pi_probe.answer() == 42; print("native extension: builds and imports")'
+rm -rf /tmp/extension-check
+
+# `python -m venv` is what a workspace's pi/commands.sh template tells people to run,
+# and it needs ensurepip and the stdlib the trim just walked through.
+"${stage_bin}/python${py_minor}" -m venv /tmp/venv-check
+"/tmp/venv-check/bin/python" -c 'import sys; print("venv:", sys.version.split()[0])'
+rm -rf /tmp/venv-check
 
 if [ "${PYTHON_OPTIMIZE:-1}" = "1" ]; then
     stage_record "python" "${PYTHON_VERSION} (PGO)"

@@ -194,7 +194,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # Node + CPython/uv/podman-compose + podman + netavark + aardvark-dns, prebuilt.
-COPY --from=pi-coding-agent-builder:local /out/ /
+# One staged tree per component; the proxy image copies /python/ only.
+COPY --from=pi-coding-agent-builder:local /python/ /
+COPY --from=pi-coding-agent-builder:local /node/ /
+COPY --from=pi-coding-agent-builder:local /podman/ /
+COPY --from=pi-coding-agent-builder:local /network/ /
 
 # Nested subordinate ID ranges for `pi` (uid 1000). These must fall INSIDE the UID
 # range the outer user namespace maps (verified: container UIDs 1..1000000). The

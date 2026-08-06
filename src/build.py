@@ -206,12 +206,15 @@ def _node_build_args() -> list[str]:
 
 
 def build_builder(runtime: str) -> None:
-    """Build the toolchain image the agent images copy their toolchain from.
+    """Build the toolchain image the other images copy their toolchain from.
 
     The slow one: it compiles CPython, podman and the netavark/aardvark-dns pair from
     source, and Node too when ``NODE_SOURCE=build`` (see
     pi-coding-agent-builder/Containerfile for why each is not simply apt-installed). It
     is built only by build.sh — a project-specific image rebuild reuses the tag as-is.
+
+    Built first, because both other images COPY --from it: the agent takes all four
+    staged trees, the proxy takes the Python one.
 
     Carries the same ``pi-container.build.time`` label as the proxy image, because
     run.py compares project-image timestamps against both: a project image built
@@ -249,6 +252,11 @@ def build_builder(runtime: str) -> None:
 
 
 def build_proxy(runtime: str) -> None:
+    """Build the mitmproxy image.
+
+    Requires the toolchain image to exist: the proxy COPYs its CPython and uv from it,
+    so that the interpreter and the package manager are the same ones the agent runs.
+    """
     from datetime import UTC, datetime
 
     build_ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -352,10 +360,9 @@ def build_project_image(
 def main() -> None:
     try:
         runtime = validate_environment(LLAMA_BIN)
-        # Reject a bad NODE_SOURCE here, not where it is used. build_builder() would
-        # raise on it too, but only after build_proxy() has already regenerated the
-        # mitmproxy CA — which invalidates every project image and forces a round of
-        # rebuilds the user did not ask for.
+        # Reject a bad NODE_SOURCE before any build starts. build_builder() would raise
+        # on it too, but only after the memory preflight has run and podman has begun
+        # resolving the build context — and a typo should cost nothing at all.
         _node_build_args()
     except EnvironmentError as e:
         logger.error(f"Environment Error: {e}")
@@ -368,11 +375,13 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        # Proxy first: it is the quick one, and a failure there (or a missing
-        # mitmproxy dependency) should not cost a full toolchain build. The agent
-        # image COPYs from both of the images built before it.
-        build_proxy(runtime)
+        # Strict dependency order, not a preference: the proxy image COPYs its CPython
+        # and uv from the toolchain image, and the agent image COPYs from both. The
+        # proxy used to be built first (it is the quick one, and a failure there was
+        # cheaper), but that stopped being possible once it stopped carrying its own
+        # interpreter.
         build_builder(runtime)
+        build_proxy(runtime)
         build_agent(runtime)
     except subprocess.CalledProcessError as e:
         logger.error(f"Build failed: {e}")

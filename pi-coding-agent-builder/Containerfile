@@ -1,12 +1,14 @@
-# Toolchain builder for the pi-coding-agent image.
+# Toolchain builder for the pi-coding-agent and pi-coding-agent-proxy images.
 #
-# Compiles everything the agent image runs on, and stages it under /out so the agent
-# image can pick it up with a single COPY --from:
+# Compiles everything those images run on and stages it — one tree per component, so a
+# consumer can copy just the parts it needs (see "the shipped artefact" at the bottom):
 #
 #   Node.js                         the agent image used to *be* the node: image
 #                                   (prebuilt tarball by default; NODE_SOURCE=build
 #                                   compiles it instead)
-#   CPython + uv + podman-compose   Debian's python3 would be a second 3.13 tree
+#   CPython + uv + podman-compose   Debian's python3 would be a second 3.13 tree.
+#                                   The proxy image takes this tree too, so the two
+#                                   images cannot drift onto different interpreters
 #   podman                          trixie has 5.4.2 (Mar 2025); this builds 6.0.2
 #                                   with an explicit BUILDTAGS set
 #   netavark + aardvark-dns         podman 6 requires 2.0.0; trixie has 1.14.0
@@ -16,8 +18,9 @@
 #      change to a workspace's commands.sh) then only replays the COPY, so it can
 #      never recompile anything. Before this split, a cache miss on the Python layer
 #      turned a project rebuild into a ~10 minute PGO compile.
-#   2. Nothing from the toolchains can leak into the shipped image. Go, Rust, four
-#      source trees and their build caches are several GB; only /out is copied.
+#   2. Nothing from the toolchains can leak into the shipped images. Go, Rust, four
+#      source trees and their build caches are several GB; only the staged trees are
+#      copied.
 #
 # WHY FOUR INDEPENDENT STAGES
 # Each component builds FROM the same deps stage and stages into its own /out, so
@@ -203,13 +206,27 @@ RUN bash /build/build-network.sh
 # image exists to be COPYed --from, and keeping it at exactly its payload (rather than
 # ~1.7 GB of build environment) is the point of staging in the first place.
 #
-# The trees are disjoint by construction — each component owns its own paths under
-# /usr/local — except for the per-script manifest fragments in
+# WHY ONE ROOT PER COMPONENT AND NOT ONE MERGED /out
+# `COPY --from=<image>` can only address paths, not stages — an image tag exposes
+# whichever tree this final stage lays down. Keeping the components at separate roots
+# is what lets a consumer take a SUBSET: pi-coding-agent-proxy/Containerfile copies
+# /python/ alone, so it runs the same CPython and the same uv as the agent without
+# also carrying Node, podman and netavark into the network chokepoint. The agent image
+# copies all four, one COPY each.
+#
+# The alternative — a merged /out plus a second copy of the Python tree for the proxy —
+# was rejected: that tree is ~380 MB, and duplicating it inside this image to work
+# around a layout choice is the wrong trade.
+#
+# Each root mirrors the final layout on its own: /python/usr/local/bin/uv →
+# /usr/local/bin/uv. The trees are disjoint by construction — each component owns its
+# own paths under /usr/local — except for the per-script manifest fragments in
 # toolchain-versions.d/, which is precisely why stage_record() writes one file per
-# script instead of appending to a shared one.
+# script instead of appending to a shared one: copied into the same image, they merge
+# instead of clobbering each other.
 FROM scratch AS stage
-COPY --from=python /out/ /out/
-COPY --from=node /out/ /out/
-COPY --from=podman /out/ /out/
-COPY --from=network /out/ /out/
+COPY --from=python /out/ /python/
+COPY --from=node /out/ /node/
+COPY --from=podman /out/ /podman/
+COPY --from=network /out/ /network/
 LABEL pi-container.type="shared"

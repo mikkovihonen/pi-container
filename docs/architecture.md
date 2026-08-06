@@ -162,12 +162,13 @@ design and its verification log.
 ## Toolchain builder image
 
 Three of the agent image's components are compiled from source in a separate image,
-`pi-coding-agent-builder:local`, and copied into the agent image as prebuilt files:
+`pi-coding-agent-builder:local`, and copied into the images that ship as prebuilt
+files:
 
 | Component | Otherwise | Built here | Why |
 | --- | --- | --- | --- |
 | Node.js | the `node:<ver>-trixie-slim` base image | 26.6.0 (official tarball; `NODE_SOURCE=build` compiles it) | the base image tag, not this repo, chose the version — and `v26.5.1` was a security release the pinned tag predated |
-| CPython + `uv` + `podman-compose` | Debian has no `python3` in this image | 3.14.6 (PGO) | the workspace targets 3.14; Debian's would be a second interpreter tree at 3.13 |
+| CPython + `uv` + `podman-compose` | Debian has no `python3` in this image | 3.14.6 (PGO) | the workspace targets 3.14; Debian's would be a second interpreter tree at 3.13. The **proxy image takes this tree too** — see below |
 | `podman` | Debian trixie: 5.4.2 (Mar 2025) | 6.0.2 | build tags, then version — see below |
 | `netavark`, `aardvark-dns` | Debian trixie: 1.14.0 | 2.0.0 | podman 6.0.0 "must be used with Netavark and Aardvark v2.0.0" |
 
@@ -209,9 +210,26 @@ source, which buys a trixie-native build rather than the generic-glibc one and n
 else: Node has no equivalent of podman's build tags. Both modes run the same parity
 checks (`node`/`nodejs`/`npm`/`npx` present, version matches, full ICU, `Temporal`).
 
-Everything is staged under `/out` and arrives in the agent image via a single
-`COPY --from=pi-coding-agent-builder:local /out/ /`, which has two consequences
-worth knowing:
+Each component is staged at **its own root** in the builder image — `/python/`,
+`/node/`, `/podman/`, `/network/` — every one of them already mirroring the layout it
+lands in, so a consumer copies the trees it wants straight onto `/`. The agent image
+takes all four:
+
+```dockerfile
+COPY --from=pi-coding-agent-builder:local /python/ /
+COPY --from=pi-coding-agent-builder:local /node/ /
+COPY --from=pi-coding-agent-builder:local /podman/ /
+COPY --from=pi-coding-agent-builder:local /network/ /
+```
+
+Separate roots rather than one merged `/out` because `COPY --from=<image>` can address
+paths but not stages: whatever this image's final stage lays down is all a consumer can
+choose from. Keeping the components apart is what lets the **proxy image take
+`/python/` alone** — the same CPython and the same `uv` the agent runs, without Node,
+podman or netavark riding along into the TLS-terminating chokepoint. See
+[Uniform Python across both images](#uniform-python-across-both-images).
+
+Two further consequences worth knowing:
 
 - **Project-specific image rebuilds never compile anything.** Before the split, a
   cache miss on the Python layer turned a workspace's rebuild into a ~10-minute PGO
@@ -219,6 +237,68 @@ worth knowing:
 - **A rebuilt builder invalidates project images**, the same way a rebuilt proxy
   does — `run.py` compares each project image's `pi-container.build.time` against
   both (see `_newest_shared_image_time()`).
+
+### Uniform Python across both images
+
+The proxy image used to be `python:<ver>-slim-trixie` with a `uv` binary pulled
+separately from `ghcr.io/astral-sh/uv` by digest. That was a second interpreter and a
+second `uv` pin next to the agent's, bumped by hand in a different file and free to
+drift: the proxy could be running a CPython patch release, an OpenSSL, or a `uv` the
+agent had never seen. For the one process that terminates TLS on every request the
+agent makes, "which OpenSSL is that, exactly?" is worth having a single answer to.
+
+Both images now take Python from the same build, and both refuse to start a build
+without it:
+
+- The proxy's base is plain `debian:trixie-slim` plus the runtime shared libraries the
+  staged CPython's extension modules link against. A missing one is a **build**
+  failure — `python -c 'import bz2, ctypes, curses, lzma, readline, sqlite3, ssl,
+  zlib'` runs right after the `COPY`, rather than letting `import ssl` fail at
+  interception time.
+- `UV_PYTHON=/usr/local/bin/python3` and `UV_PYTHON_DOWNLOADS=never` mean `uv sync`
+  builds the mitmproxy venv on the interpreter that was copied in. Without them a
+  managed CPython download would quietly reintroduce the drift.
+
+Because both images now carry the same CPython install, every megabyte of it is paid
+for twice — so `build-python.sh` trims the staged tree of what neither image can
+reach, taking it from 474 MB to 175 MB:
+
+| Removed | Size | Why it is dead here |
+| --- | --- | --- |
+| `lib/python3.14/test/` | 157 MB | CPython's own regression suite; reached only by `python -m test` |
+| `libpython3.14.a` (two copies, not hardlinks) | 134 MB | needed only to *embed* CPython in a C program — building a native wheel links nothing, since an extension resolves its Python symbols from the interpreter that loads it |
+| `idlelib`, `tkinter`, `turtledemo` | 10 MB | `tk-dev` is not installed, so `_tkinter` was never built and `import tkinter` already fails |
+
+This is the trim the official `python:` images make as well, minus their `*.pyc`
+deletion — `/usr/local` is not writable by the agent's `pi` user, so a removed `.pyc`
+would never be regenerated and every import would re-parse source for the life of the
+image.
+
+What it gives up is **embedding CPython in a C/C++ program**. `python-config --ldflags
+--embed` still advertises `-lpython3.14` (sysconfig reports what the build configured,
+not what is on disk), so an embed link fails at `cannot find -lpython3.14`. Plain
+`--ldflags` — the extension-module case — does not name it and is unaffected.
+
+There is no **shared** `libpython` here either, and never was: `./configure` runs
+without `--enable-shared`, so `Py_ENABLE_SHARED=0` and the interpreter core is linked
+into the `python3.14` binary. Tools that require one — PyInstaller above all, also
+Nuitka and `dlopen`-based embedding — could not work in this image before the trim and
+cannot now; restoring the static archive would not change that. Making them work is an
+`--enable-shared` rebuild, which costs every workload a slightly slower interpreter to
+serve a case neither shipped image has.
+
+The claim that matters — that dropping `libpython*.a` does not break `pip install` or
+`uv sync` building a wheel from source in a workspace — is **proven at build time**,
+not asserted: the build compiles a small C extension against the staged headers and
+imports it with the staged interpreter, and creates a `python -m venv` to confirm
+`ensurepip` and the stdlib came through. A failure there fails the build.
+
+Net effect on the images: proxy 417 MB → 509 MB (it gained a full interpreter and lost
+the slim base's), agent 1.6 GB → 1.3 GB, builder 790 MB → 486 MB.
+
+**Build order is therefore a dependency, not a preference:** builder → proxy → agent.
+`build.py` builds them in that order because the proxy `COPY`s from the builder and the
+agent `COPY`s from both.
 
 Sources are pinned by content, not by tag: each git tag is checked against an
 expected **commit** (tags are mutable; the peeled commit sha is the real pin), and
@@ -273,7 +353,7 @@ drift apart.
 │       ├── test_server.py
 │       └── test_util.py
 │
-├── pi-coding-agent-builder/          # Toolchain builder image (not shipped; agent COPYs --from it)
+├── pi-coding-agent-builder/          # Toolchain builder image (not shipped; agent + proxy COPY --from it)
 │   ├── Containerfile                 # EVERY version/commit/sha pin (as ARGs) + one stage per component
 │   ├── common.sh                     # Verified fetch/clone, required-ARG check, memory-capped jobs, manifest
 │   ├── build-node.sh                 # Node 26 (official tarball, or from source; replaces the node: image)
