@@ -44,6 +44,19 @@ nested_containers:
   enabled: false
   storage: volume
   security: disable
+  # Host ports for UIs served by nested containers. A nested container's own
+  # `-p 3000:3000` binds only inside the AGENT's netns, which the host cannot
+  # reach, so the agent republishes it. Declared here rather than discovered:
+  # a container's published ports are fixed at start, so pi-container cannot
+  # add one to a running agent. Inbound only — this creates no egress.
+  ports:
+    #   localhost → 127.0.0.1 only (default)
+    #   lan       → 0.0.0.0 (reachable across the network — NOT authenticated)
+    expose: localhost
+    #   publish:
+    #     - 3000            # host 3000 → agent 3000
+    #     - "18080:8080"    # host 18080 → agent 8080
+    publish: []
 
 # Transient tmpfs mounts inside the agent container (volatile; lost on stop).
 # These shadow this repo's own build/runtime artifacts so the agent works against

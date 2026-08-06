@@ -1789,6 +1789,49 @@ class TestUnavailableHostPorts:
             sock.close()
 
 
+class TestConfigFixHint:
+    """The remedy printed when config.yaml fails validation.
+
+    Split by failure kind on purpose: the old message printed both remedies every
+    time, so a user whose version already matched was told to bump it anyway.
+    """
+
+    PATH = Path("/ws/.pi-container/config.yaml")
+
+    def test_stale_version_alone_is_fixed_by_editing_the_version(self):
+        errors = [f"  {run.SCHEMA_VERSION_MISMATCH}: config has '0.4.1', pi-container is '0.4.2'"]
+        hint = " ".join(run._config_fix_hint(errors, self.PATH))
+        assert "set schema_version" in hint
+        assert "rm " not in hint  # nothing is deleted to fix a string
+
+    def test_missing_field_never_suggests_a_version_edit(self):
+        """The circle the old message sent users round: bump, then fail on the field."""
+        hint = " ".join(run._config_fix_hint(["  nested_containers.ports: required field missing"], self.PATH))
+        assert "will not help" in hint
+        assert "set schema_version" not in hint
+
+    def test_missing_field_scopes_the_reseed_to_one_file(self):
+        hint = " ".join(run._config_fix_hint(["  nested_containers.ports: required field missing"], self.PATH))
+        assert f"rm {self.PATH}" in hint
+        assert "rm -rf" not in hint
+        assert "allowlist.yaml" in hint  # says what survives
+
+    def test_version_and_field_errors_together_take_the_reseed_path(self):
+        """A bump would clear the version gate and stop at the field gate."""
+        errors = [
+            f"  {run.SCHEMA_VERSION_MISMATCH}: config has '0.4.1', pi-container is '0.4.2'",
+            "  nested_containers.ports: required field missing",
+        ]
+        hint = " ".join(run._config_fix_hint(errors, self.PATH))
+        assert f"rm {self.PATH}" in hint
+        assert "set schema_version" not in hint
+
+    def test_no_errors_does_not_claim_the_version_is_stale(self):
+        """Defensive: an empty list must not fall into the version-only branch."""
+        hint = " ".join(run._config_fix_hint([], self.PATH))
+        assert "set schema_version" not in hint
+
+
 class TestPortHolders:
     """Attribution for a port conflict: which container is holding it."""
 

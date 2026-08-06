@@ -82,11 +82,40 @@ When a user has an outdated config:
 
 1. The launch fails with: "Configuration incompatible with this version of pi-container"
 2. The error message lists the specific issues (missing fields, type mismatches, version mismatch)
-3. The error message suggests: "delete .pi-container and re-run to re-seed"
+3. The error message gives the remedy **for that specific failure** — the two kinds
+   are not interchangeable
 
-Users can also manually update `schema_version` in their local `config.yaml` to
-match the new version, but this is not recommended — they should re-seed to get
-the latest defaults and new fields.
+**Stale version, valid shape.** Only the `schema_version` string is behind; every
+field the new template requires is already present. Editing the string is
+sufficient *and* lossless — it keeps whatever the user configured. Re-seeding here
+would discard their settings to fix a string.
+
+**A missing or mistyped field.** The template changed shape, and no edit to
+`schema_version` produces a key that is not in the file. Bumping the version alone
+sends the user in a circle: they clear the version check and fail the field check
+immediately after, one line further down. The file has to be re-seeded.
+
+Re-seeding is **one file, not the directory**:
+
+```
+rm .pi-container/config.yaml && <re-run>
+```
+
+`_ensure_project_config()` only writes files that are absent, so deleting the one
+file whose shape changed leaves `allowlist.yaml`, `token_replacer.yaml`,
+`models.json`, `chat-templates/` and `dependencies/` exactly as they were. Reach
+for `rm -rf .pi-container` only when several of those are out of date at once —
+it takes every hand-edited file in the workspace with it.
+
+The user's own edits to `config.yaml` are not merged, so the error tells them to
+note their settings before deleting it.
+
+> **During development, the version gate does not fire.** `schema_version` is
+> bumped at release time, so on an unreleased `main` the template still carries the
+> *shipped* version. A workspace seeded at that same version therefore **passes**
+> the version check and fails only on the field — which is why the remedy must
+> never assume a version mismatch is what went wrong. This is the ordinary case for
+> anyone developing pi-container in a workspace seeded before the field was added.
 
 ### Example: adding a new field
 
@@ -102,7 +131,9 @@ custom:
 ```
 
 Users with `schema_version: "0.1.0"` in their local config will see an error on
-next launch. They must `rm -rf .pi-container` and re-run to get the new field.
+next launch. Because a *field* was added, bumping their version string is not
+enough — they must `rm .pi-container/config.yaml` and re-run to get the new field.
+Everything else in `.pi-container/` is preserved.
 
 ## Release skill
 
@@ -238,8 +269,12 @@ step 5 above), the launch fails with:
 > schema_version mismatch: config has '0.1.1', the latest pi-container
 > version is '0.2.0'.
 
-The user must update `schema_version` in `.pi-container/config.yaml`, or delete
-`.pi-container` and re-run to re-seed from the new template.
+If that is the **only** error, the shape still validates and editing
+`schema_version` fixes it without losing any settings. If the release also added
+or changed a field, the error list says so, and the fix is
+`rm .pi-container/config.yaml` plus a re-run — see
+[User-facing behavior](#user-facing-behavior) for why the two are not
+interchangeable.
 
 ## Rolling back
 

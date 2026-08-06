@@ -56,6 +56,13 @@ def get_app_version() -> str | None:
 _SCHEMA = SCHEMA
 _MODELS_SCHEMA = MODELS_SCHEMA
 
+#: Marker text in the stale-version error. Callers match on it to tell the two
+#: failure kinds apart, because they have different remedies: a stale version with
+#: an otherwise-valid shape can be fixed by editing the string (lossless, keeps the
+#: user's settings), while a missing or mistyped field means the template changed
+#: shape and only a re-seed will produce it.
+SCHEMA_VERSION_MISMATCH = "schema_version mismatch"
+
 
 # ─── Validation ─────────────────────────────────────────────────────────────
 # All helpers are imported from ``schema_common.py``.
@@ -103,7 +110,7 @@ def validate_config(config_path: Path) -> tuple[bool, list[str], str | None]:
     app_version = get_app_version()
     if app_version is not None and schema_version_str != app_version:
         errors.append(
-            f"  schema_version mismatch: config has '{schema_version_str}', "
+            f"  {SCHEMA_VERSION_MISMATCH}: config has '{schema_version_str}', "
             f"but pi-container version is '{app_version}' (from git tag). "
             f"Delete .pi-container and re-run to re-seed, or update schema_version in config.yaml."
         )

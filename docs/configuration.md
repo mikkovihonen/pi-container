@@ -346,6 +346,29 @@ agent:
 
 Device entries support the optional `mode` suffix (`r` for read-only, `w` for write-only, `rw` for read-write; default is `rw` if omitted).
 
+<a name="upgrading-a-workspace"></a>
+### Upgrading an existing workspace
+
+`.pi-container/` is seeded on first run and then **never edited again** — the seeder only writes files that are absent, so your changes are never overwritten. The cost is that a workspace does not pick up new config fields on its own. When a release adds one, the next launch stops with:
+
+```
+Configuration incompatible with this version of pi-container:
+  nested_containers.ports: required field missing
+```
+
+Two failures produce that banner, and they have different fixes:
+
+| What the error says | Fix |
+|---|---|
+| **Only** `schema_version mismatch` | Edit `schema_version` in `.pi-container/config.yaml` to the version named. The shape already validates, so nothing else changes and your settings are kept. |
+| Anything naming a **field** | Re-seed that one file: `rm .pi-container/config.yaml` and re-run. |
+
+Bumping the version string is not a general remedy. When a field is missing, no edit to `schema_version` conjures it — you clear the version check and fail the field check one line further down. The launch error names whichever applies rather than offering both.
+
+Re-seeding is **one file, not the directory**. Because the seeder only fills in what is missing, deleting `config.yaml` alone regenerates it from the current template and leaves `allowlist.yaml`, `token_replacer.yaml`, `agent/models.json`, `chat-templates/` and `dependencies/` untouched. `rm -rf .pi-container` also works but takes every hand-edited file in the workspace with it — reach for it only when several are out of date at once.
+
+Your own edits to `config.yaml` are not merged into the fresh copy, so note your settings before deleting it. A `diff` against `pi-coding-agent/default/config.yaml` beforehand shows exactly what you changed.
+
 <a name="pi-container-environment"></a>
 ### The `PI_CONTAINER_*` environment contract
 
@@ -491,7 +514,17 @@ services:
       # container-side target path, so the committed mount is superseded
       # while named volumes survive.
       - ./config/prometheus.pi-container.yml:/etc/prometheus/prometheus.yml:ro
+
+  caddy:
+    # Ports do NOT merge that way — a second entry is appended, giving two
+    # publishes of the same port. `!override` replaces the list instead.
+    ports: !override
+      - "8080:8080"
 ```
+
+That asymmetry is worth knowing before writing an overlay: **volumes merge by target and supersede; ports append.** Measured with podman-compose 1.6.0 — a base `127.0.0.1:8080:8080` plus an overlay `8080:8080` yields both, and podman then rejects the duplicate publish. `!override` is the Compose-spec tag for replacing a list outright.
+
+The same overlay is where a loopback bind gets relaxed. A service bound to `127.0.0.1` inside a nested container is unreachable from the host whatever the agent publishes (see the two conditions above), so it has to bind `0.0.0.0` — but only inside the agent. Doing that in the committed compose file would widen every other operator's exposure to fix an environment they are not in; doing it in the overlay confines it to the agent, where `0.0.0.0` is bounded by the isolated network and the real control is `nested_containers.ports.expose`.
 
 ```
 compose -f docker-compose.yml -f docker-compose.pi-container.yml up -d

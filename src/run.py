@@ -28,7 +28,7 @@ from config import (
     PROXY_UPSTREAM_NETWORK_ENV,
     REPO_ROOT,
 )
-from config_schema import validate_config, validate_models, validate_project_yaml
+from config_schema import SCHEMA_VERSION_MISMATCH, validate_config, validate_models, validate_project_yaml
 from flow_export import export_mitmweb_flows, poll_agent_container_ips
 from models import Model, ServerConfig
 from network import (
@@ -1024,6 +1024,43 @@ def _warn_about_registry_allowlist(config_dir: Path) -> None:
             )
 
 
+def _config_fix_hint(errors: list[str], config_path: Path) -> list[str]:
+    """Remedy lines for a failed ``config.yaml`` validation, matched to the failure.
+
+    The two failure kinds need different advice, and giving both unconditionally is
+    how this message used to mislead:
+
+    * **Stale version only.** The shape already validates, so editing
+      ``schema_version`` is sufficient *and* lossless — it keeps every setting the
+      user chose. Re-seeding here would throw those away to fix a string.
+    * **Anything about a field.** The template changed shape, and no edit to the
+      version produces the missing key. Suggesting one sends the user in a circle:
+      they clear the version gate and land on the field gate immediately after.
+      This is also the only advice the old message had for the case where the
+      version already matched — where it addressed nothing at all.
+
+    Re-seeding is scoped to ``config.yaml`` because
+    :func:`_ensure_project_config` only writes files that are absent: deleting the
+    one file that changed shape leaves ``allowlist.yaml``, ``models.json``,
+    ``chat-templates/`` and ``dependencies/`` untouched. ``rm -rf .pi-container``
+    was the only documented remedy and takes all of those with it.
+    """
+    version_only = bool(errors) and all(SCHEMA_VERSION_MISMATCH in e for e in errors)
+    if version_only:
+        return [
+            f"\nFix: set schema_version in {config_path} to the version named above.",
+            "  The rest of the file already validates, so nothing else has to change and your settings are kept.",
+        ]
+    return [
+        f"\nFix: re-seed the one file whose shape changed — {config_path.name} —",
+        f"  by deleting it and re-running:    rm {config_path}",
+        "  Only that file is rewritten. allowlist.yaml, token_replacer.yaml, models.json,",
+        "  chat-templates/ and dependencies/ are left alone.",
+        "  Your own edits to it are NOT merged, so note them first. Editing schema_version alone will not help:",
+        "  the fields above are missing from the file, not mislabelled.",
+    ]
+
+
 def _unavailable_host_ports(publish: list[tuple[int, int]], expose: str) -> list[int]:
     """Which of the requested host ports are already taken. Fail fast, not mid-run.
 
@@ -1126,11 +1163,8 @@ def main() -> None:
         logger.error("Configuration incompatible with this version of pi-container:")
         for error in errors:
             logger.error(error)
-        logger.error(
-            "\nFix: delete .pi-container in this workspace and re-run to re-seed, "
-            "or update schema_version in .pi-container/config.yaml to match the "
-            "current pi-container version (see latest git tag)."
-        )
+        for line in _config_fix_hint(errors, config_yaml_path):
+            logger.error(line)
         sys.exit(1)
 
     # Duplicate mapping keys in any per-project YAML file. Separate from the
