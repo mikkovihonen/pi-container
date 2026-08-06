@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-06
+
+### Added
+- `_images_in_use()` and `_unused_volumes()` helpers: which images and volumes a container still holds open, so a cleanup pass can skip them instead of attempting a removal the runtime will refuse. The volume query is inverted (`volume ls --filter dangling=true`) because that is the form podman answers directly — `ps --format {{.Mounts}}` reports mount *destinations*, which cannot be mapped back to a volume name. A merely created, never-started container counts in both, matching `ps --all`. `_unused_volumes()` returns `None` rather than an empty set when the query fails, so "cannot tell" falls back to attempting the removal instead of silently skipping every volume.
+- `_enumerate_project_images()` and `_is_protected_image()` helpers, backing the two fixes below.
+
+### Changed
+- `_list_project_images()` returns `(image_id, display_name, content_hash)` triples and no longer takes a `project_hash` argument. It never filtered on it despite its docstring — `_cleanup_stale_project_images()` does that against the `pi-container.project.hash` label, and still does.
+- `pi-container.type` is set per build with `--label` instead of by the agent `Containerfile`. See below for why; a side effect is that the label now lands only on the final image, never on build intermediates, so a half-finished build cannot be mistaken for an orphan by a concurrent run.
+
+### Fixed
+- **Startup no longer warns `Could not remove image <none>:<none>: Error: parsing reference "<none>:<none>": invalid reference format`.** Both cleanup passes enumerated images as `{{.Repository}}:{{.Tag}}`, which podman renders as the literal `<none>:<none>` once an image loses its tag — which happens to the previous image every time a rebuild moves a tag. That string is not a valid image reference, so both the inspect and the removal failed against it: untagged images could never be reclaimed, and warned on every start. Images are now enumerated as `{{.ID}}\t{{.Repository}}:{{.Tag}}` and acted on by ID, with the name kept for log messages only.
+- **The shared base image is no longer labelled `pi-container.type=project`.** `pi-coding-agent/Containerfile` hardcoded that label, but it builds two different things: the shared base (`build_agent()`, which passes none of the label ARGs) and the per-project images (`build_project_image()`, which passes all of them). The base — and every untagged predecessor of it — was therefore stamped as a project image with blank values for every other label, and the orphan pass could not tell it apart from a real project's image. Each builder now sets the label itself. Because images built before this change are still on disk carrying the old label, `_cleanup_orphaned_project_images()` additionally refuses outright to remove the shared base, proxy or builder image whatever its labels say, comparing tags ignoring the `localhost/` prefix podman prepends to locally-built images.
+- **A blank `pi-container.project.path` label is now treated as unverifiable, like a missing one.** The orphan rule was implemented as `Path(stored_path).exists()`, and `Path("")` is `PosixPath(".")`, which always exists — so blank-labelled project images and nested-storage volumes were kept forever rather than reclaimed.
+- **Cleanup no longer attempts to remove an image or volume that a container still holds open**, which failed with `image is in use by a container` and warned on every start for as long as that container lived. This is the ordinary case for concurrent sessions in one workspace: change a definition file, start a second session, and the stale-image pass targets the image the first session is still running on. Such images and volumes are now skipped with an INFO line and reclaimed by a later run, once the container is gone. The check runs only after something has been established as a removal candidate, so images and volumes belonging to live projects stay silent.
+
 ## [0.4.0] - 2026-08-05
 
 ### Added
