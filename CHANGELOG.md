@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.4.2] - 2026-08-06
+
 ### Added
 - **Preflight gate in `release.sh`**, run before any file is touched: the version is semver, `HEAD` is on `main`, the working tree is clean, and `v<version>` is not already tagged. A rejected release now leaves nothing half-bumped to clean up by hand.
 - **`release.sh --check-changelog`**, a standalone mode the release skill invokes *after* the changelog has been rewritten. The ordering check previously ran inside the main script, before the edit — it could only ever catch pre-existing disorder, never the mistake it exists to prevent (placing the new version block above `Unreleased`).
