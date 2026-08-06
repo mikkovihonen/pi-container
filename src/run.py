@@ -28,7 +28,7 @@ from config import (
     PROXY_UPSTREAM_NETWORK_ENV,
     REPO_ROOT,
 )
-from config_schema import validate_config, validate_models
+from config_schema import validate_config, validate_models, validate_project_yaml
 from flow_export import export_mitmweb_flows, poll_agent_container_ips
 from models import Model, ServerConfig
 from network import (
@@ -988,9 +988,9 @@ def _warn_about_registry_allowlist(config_dir: Path) -> None:
     """
     allowlist_path = config_dir / "allowlist.yaml"
     try:
-        import yaml
+        from yaml_strict import load_yaml_file
 
-        data = yaml.safe_load(allowlist_path.read_text()) or {}
+        data = load_yaml_file(allowlist_path) or {}
     except Exception:
         return
 
@@ -1072,6 +1072,21 @@ def main() -> None:
             "\nFix: delete .pi-container in this workspace and re-run to re-seed, "
             "or update schema_version in .pi-container/config.yaml to match the "
             "current pi-container version (see latest git tag)."
+        )
+        sys.exit(1)
+
+    # Duplicate mapping keys in any per-project YAML file. Separate from the
+    # schema check above because a duplicate key parses clean and passes every
+    # schema rule — the losing value is already gone by the time validation
+    # sees the data. Caught here, before anything is built or started.
+    yaml_errors = validate_project_yaml(pi_container_dir)
+    if yaml_errors:
+        logger.error("Configuration has duplicate YAML keys:")
+        for error in yaml_errors:
+            logger.error(error)
+        logger.error(
+            "\nYAML keeps only the last occurrence of a repeated key, so the earlier "
+            "value was silently discarded. Delete the duplicate line and re-run."
         )
         sys.exit(1)
 

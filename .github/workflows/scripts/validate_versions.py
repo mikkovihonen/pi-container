@@ -46,6 +46,7 @@ from schema_common import (
 )
 from template_paths import _check_chat_template_paths, _resolve_chat_template_path
 from version import get_git_tag_version
+from yaml_strict import load_yaml_strict
 
 TAG_PREFIX = "v"
 
@@ -182,7 +183,9 @@ def main() -> int:
         all_pass = False
     else:
         try:
-            seed_data = yaml.safe_load(seed_config_path.read_text()) or {}
+            # Strict: a duplicate key in the seed template would be copied into
+            # every new workspace, silently discarding whichever value lost.
+            seed_data = load_yaml_strict(seed_config_path.read_text()) or {}
         except yaml.YAMLError as e:
             _error(f"Seed config is not valid YAML: {e}")
             all_pass = False

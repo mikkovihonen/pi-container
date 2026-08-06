@@ -13,6 +13,7 @@ from schema_common import (
 )
 from template_paths import _check_chat_template_paths as _shared_check_chat_template_paths
 from version import get_git_tag_version
+from yaml_strict import DuplicateKeyError, check_duplicate_keys, load_yaml_strict
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -79,8 +80,13 @@ def validate_config(config_path: Path) -> tuple[bool, list[str], str | None]:
         return False, errors, None
 
     try:
-        with config_path.open("r") as f:
-            data = yaml.safe_load(f) or {}
+        data = load_yaml_strict(config_path.read_text()) or {}
+    except DuplicateKeyError as e:
+        # Called out separately from other syntax errors because it is the one
+        # YAML mistake that otherwise parses clean and loses a setting silently.
+        errors.append(f"Config file has a duplicate key: {e}")
+        errors.append("  Remove the repeated key — YAML keeps only the last occurrence.")
+        return False, errors, None
     except yaml.YAMLError as e:
         errors.append(f"Config file is not valid YAML: {e}")
         return False, errors, None
@@ -109,6 +115,27 @@ def validate_config(config_path: Path) -> tuple[bool, list[str], str | None]:
 
     is_valid = len(errors) == 0
     return is_valid, errors, schema_version_str
+
+
+#: Per-project YAML files checked for duplicate keys at launch. ``config.yaml``
+#: is validated in full by ``validate_config``; the other two are consumed by
+#: the proxy addons inside the proxy container, where a dropped key is invisible
+#: from the host — an allowlist rule silently discarded is a security-relevant
+#: failure, so the check happens here rather than after the proxy is up.
+PROJECT_YAML_FILES = ("config.yaml", "allowlist.yaml", "token_replacer.yaml")
+
+
+def validate_project_yaml(config_dir: Path) -> list[str]:
+    """Duplicate-key check across every per-project YAML file.
+
+    Returns a list of human-readable error messages (empty = all clean).
+    Missing files are not an error here: only ``config.yaml`` is required, and
+    ``validate_config`` reports that one.
+    """
+    errors: list[str] = []
+    for name in PROJECT_YAML_FILES:
+        errors.extend(check_duplicate_keys(config_dir / name))
+    return errors
 
 
 # ─── Models.json validation ──────────────────────────────────────────────────

@@ -14,8 +14,6 @@ import urllib.error
 import urllib.request
 from typing import TYPE_CHECKING, Any
 
-import yaml
-
 from config import ADMIN_PASSWORD, CONFIG_DIR, REPO_ROOT
 from runtimes import ContainerRuntime
 from util import get_free_port, run_quiet
@@ -64,14 +62,15 @@ def load_project_config(config_dir: Path | None = None) -> dict:
     """
     import yaml as _yaml
 
+    from yaml_strict import load_yaml_file
+
     config_path = (config_dir or CONFIG_DIR) / "config.yaml"
     if not config_path.exists():
         logger.debug(f"Project config not found at {config_path}; using defaults.")
         return {}
 
     try:
-        with config_path.open("r") as f:
-            return _yaml.safe_load(f) or {}
+        return load_yaml_file(config_path) or {}
     except (OSError, _yaml.YAMLError) as e:
         logger.warning(f"Could not read project config {config_path}: {e}; using defaults.")
         return {}
@@ -348,7 +347,7 @@ def scan_config_env_refs(config: dict) -> list[str]:
     the host must pull from a secret store before launching the container.
 
     Args:
-        config: The parsed YAML config dict (as returned by ``yaml.safe_load``).
+        config: The parsed YAML config dict (as returned by ``load_yaml_file``).
 
     Returns:
         A deduplicated, sorted list of env var names that are required.
@@ -424,8 +423,9 @@ class ContainerNetworkManager:
             )
             return {}
 
-        with config_path.open("r") as f:
-            config = yaml.safe_load(f) or {}
+        from yaml_strict import load_yaml_file
+
+        config = load_yaml_file(config_path) or {}
 
         required_vars = scan_config_env_refs(config)
         if not required_vars:

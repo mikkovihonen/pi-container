@@ -227,6 +227,17 @@ Each setup directory contains a `models.json` you can drop into `.pi-container/a
 
 `.pi-container/config.yaml` is the single source of truth for this workspace's orchestration knobs:
 
+> **A repeated key is rejected, not merged.** YAML keeps only the **last** occurrence of a duplicated mapping key and discards the earlier value. The easy way to hit this is adding an entry above a seeded empty default instead of replacing it:
+>
+> ```yaml
+> ports:
+>   publish:
+>     - "18080:8080"
+>   publish: []          # ← wins; the entry above is silently thrown away
+> ```
+>
+> `run.sh` parses `config.yaml`, `allowlist.yaml` and `token_replacer.yaml` strictly and aborts with the file and line number if any of them repeats a key. Without that check the file parses clean, passes schema validation, and the setting simply never takes effect.
+
 ```yaml
 # .pi-container/config.yaml
 resources:
