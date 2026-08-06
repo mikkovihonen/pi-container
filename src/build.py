@@ -271,6 +271,12 @@ def build_proxy(runtime: str) -> None:
 
 
 def build_agent(runtime: str) -> None:
+    """Build the shared base agent image.
+
+    Labelled ``pi-container.type=shared``, not ``project``: this image belongs to no
+    project, so it must stay out of run.py's project-image cleanup passes. Nothing
+    reclaims ``type=shared`` images — they are rebuilt only by build.sh.
+    """
     logger.info(f"Building agent image ({runtime}): {PI_IMAGE_TAG}")
     _run_command_with_logging(
         [
@@ -280,6 +286,8 @@ def build_agent(runtime: str) -> None:
             f"root_commands_path={DEFAULT_ROOT_COMMANDS.parent}",
             "--build-arg",
             f"ROOT_COMMANDS_PATH={DEFAULT_ROOT_COMMANDS.name}",
+            "--label",
+            "pi-container.type=shared",
             "--tag",
             PI_IMAGE_TAG,
             "--file",

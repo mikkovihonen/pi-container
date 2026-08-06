@@ -399,3 +399,94 @@ This migration is **out of scope for v1**.
 | `docs/configuration.md` | Document new labels (including `pi-container.project.path`), new tag format, cleanup behavior, and orphan detection. |
 | `src/tests/test_build.py` | Add tests for new `build_project_image()` args and labels. |
 | `src/tests/test_run.py` | Add tests for `_cleanup_stale_project_images()`, `_list_project_images()`, `_remove_image()`, new tag format. |
+
+---
+
+## Addendum: Corrections Found in Practice
+
+Three details of the design above turned out to be wrong once it was running. All
+three are fixed in the code; this section records why, so the design document is not
+read as current.
+
+### 1. `pi-container.type` must not live in the Containerfile
+
+The design puts `LABEL pi-container.type="project"` in
+`pi-coding-agent/Containerfile`. But that one Containerfile builds **two** different
+things: the shared base image (`build_agent()`, which passes none of the label ARGs)
+and the per-project images (`build_project_image()`, which passes all of them). The
+hardcoded label stamped the shared base — and every untagged predecessor of it — as
+`type=project` with blank values for every other label, so the orphan pass could not
+tell the base apart from a real project's image.
+
+Each builder now sets the label itself via `--label` on the command line
+(`type=shared` for the base, `type=project` for project images). A useful side
+effect: a CLI `--label` lands only on the final image, never on build intermediates,
+so an in-flight build cannot be mistaken for an orphan by a concurrent run.
+
+### 2. Enumerate images by ID, not by `Repository:Tag`
+
+`_list_project_images()` and `_cleanup_orphaned_project_images()` both listed images
+as `{{.Repository}}:{{.Tag}}`. Every rebuild that moves a tag leaves the previous
+image untagged, and podman renders an untagged image's name as the literal string
+`<none>:<none>` — which is not a valid image reference:
+
+```
+Error: parsing reference "<none>:<none>": invalid reference format
+```
+
+Both the inspect and the remove failed on it, so untagged images could never be
+reclaimed and produced a pair of warnings on every startup. Both functions now
+enumerate `{{.ID}}\t{{.Repository}}:{{.Tag}}`, operate on the ID, and use the name
+for log messages only.
+
+### 3. A blank path label is not the same as a present one
+
+The orphan rule — "remove if `pi-container.project.path` points at a path that no
+longer exists" — was implemented as `Path(stored_path).exists()`. For a blank label
+that is `Path("")`, which is `PosixPath(".")`, which always exists. Blank-labelled
+images were therefore kept forever rather than treated as unverifiable. The blank
+case is now checked explicitly, alongside the missing-label case.
+
+### Protected images
+
+Because images built before correction 1 are still on disk carrying the old label,
+`_cleanup_orphaned_project_images()` also refuses outright to remove anything in
+`_PROTECTED_IMAGE_TAGS` (the shared base, proxy and builder images), whatever their
+labels say. The comparison ignores a leading `localhost/`, which podman prepends to
+locally-built images and docker does not.
+
+### 4. An image a container holds open is not reclaimable
+
+Neither cleanup pass checked whether a container was still using an image before
+trying to remove it. The removal fails:
+
+```
+Error: image used by 29703bda…: image is in use by a container:
+consider listing external containers and force-removing image
+```
+
+This is not an edge case. Concurrent sessions in one workspace are supported, and
+the design's own edge-case table calls the concurrent-same-project case "correct" —
+but it only considered two runs racing to *build*, not one run cleaning up while an
+earlier session is still running on the image it started from. Change a definition
+file, start a second session in the same workspace, and the stale-image pass targets
+the image the first session is running on. It warned on every start for as long as
+that session lived.
+
+Both passes now consult `_images_in_use()` — the image IDs of all containers, running
+or stopped — and skip those images with an INFO line. The image is reclaimed by a
+later run, once the container is gone. The check is made only after an image has been
+established as a removal candidate, so images belonging to live projects stay silent
+rather than logging a skip on every startup.
+
+`_cleanup_orphaned_nested_volumes()` had the same gap and got the same treatment,
+via `_unused_volumes()`. The query is inverted there because that is the form podman
+answers directly: `ps --format {{.Mounts}}` reports mount *destinations*, which cannot
+be mapped back to a volume name, while `volume ls --filter dangling=true` lists
+exactly the volumes nothing references. A merely created, never-started container is
+enough to keep a volume off that list, which matches the `ps --all` semantics used for
+images. A failed query returns None rather than an empty set, so "cannot tell" falls
+back to attempting the removal instead of silently skipping every volume.
+
+The blank-path correction (3) applied to the volume pass too — it shared the
+`Path("")` bug verbatim.

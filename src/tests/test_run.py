@@ -507,38 +507,38 @@ class TestListProjectImages:
         mock_result.stdout = ""
         mock_result.stderr = ""
         monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
-        result = run._list_project_images("podman", "project-hash")
+        result = run._list_project_images("podman")
         assert result == []
 
-    def test_returns_images_for_matching_project(self, monkeypatch):
-        """_list_project_images returns images with matching project hash."""
+    def test_returns_images_with_id_and_display_name(self, monkeypatch):
+        """_list_project_images pairs each image ID with its display name and hash."""
         from unittest.mock import MagicMock
-
-        mock_ls_result = MagicMock()
-        mock_ls_result.returncode = 0
-        mock_ls_result.stdout = (
-            "pi-container-project-a1b2c-1111111111111111.local\npi-container-project-a1b2c-2222222222222222.local\n"
-        )
 
         monkeypatch.setattr(
             run,
             "_get_image_label",
-            lambda tag, label_key: "a1b2c" if label_key == "pi-container.project.hash" else "1111111111111111",
+            lambda image_id, label_key: "a1b2c" if label_key == "pi-container.project.hash" else "1111111111111111",
         )
 
-        # Mock image ls
+        # Mock image ls in podman's real "{{.ID}}\t{{.Repository}}:{{.Tag}}" shape.
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = (
-            "pi-container-project-a1b2c-1111111111111111.local\npi-container-project-a1b2c-2222222222222222.local\n"
+            "aaaaaaaaaaaa\tpi-container-project-a1b2c-1111111111111111.local:latest\n"
+            "bbbbbbbbbbbb\tpi-container-project-a1b2c-2222222222222222.local:latest\n"
         )
         monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
 
-        result = run._list_project_images("podman", "a1b2c")
+        result = run._list_project_images("podman")
         assert len(result) == 2
-        # Each entry is (tag, content_hash)
-        for tag, _content_hash in result:
-            assert "a1b2c" in tag
+        # Each entry is (image_id, display_name, content_hash).
+        assert result[0] == (
+            "aaaaaaaaaaaa",
+            "pi-container-project-a1b2c-1111111111111111.local:latest",
+            "1111111111111111",
+        )
+        for _image_id, name, _content_hash in result:
+            assert "a1b2c" in name
 
     def test_handles_runtime_failure(self, monkeypatch):
         """_list_project_images returns [] when the runtime is unavailable."""
@@ -547,8 +547,71 @@ class TestListProjectImages:
         monkeypatch.setattr(
             run.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired("cmd", 10))
         )
-        result = run._list_project_images("podman", "project-hash")
+        result = run._list_project_images("podman")
         assert result == []
+
+    def test_untagged_image_uses_id_not_none_name(self, monkeypatch):
+        """An untagged image is identified by ID, never by the literal "<none>:<none>"."""
+        from unittest.mock import MagicMock
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "6abc36fca57d\t<none>:<none>\n"
+        monkeypatch.setattr(run.subprocess, "run", lambda *args, **kwargs: mock_result)
+
+        inspected: list[str] = []
+
+        def mock_get_label(image_id, label_key):
+            inspected.append(image_id)
+            return ""
+
+        monkeypatch.setattr(run, "_get_image_label", mock_get_label)
+
+        result = run._list_project_images("podman")
+        assert result == [("6abc36fca57d", "6abc36fca57d (untagged)", "")]
+        # The unusable "<none>:<none>" reference never reaches an inspect call.
+        assert inspected == ["6abc36fca57d"]
+
+
+def _mock_podman(image_ls_stdout: str, ps_stdout: str = ""):
+    """Build a subprocess.run stand-in that answers `image ls` and `ps` separately.
+
+    Both cleanup passes call both commands. A single canned stdout would feed the
+    image list straight back as the list of in-use containers, so the two have to be
+    dispatched apart for the mock to mean anything.
+    """
+
+    def _run(cmd, *args, **kwargs):
+        return MagicMock(returncode=0, stdout=ps_stdout if "ps" in cmd else image_ls_stdout, stderr="")
+
+    return _run
+
+
+class TestImagesInUse:
+    """Tests for _images_in_use() — the guard against removing an image a container holds."""
+
+    def test_returns_image_ids_of_all_containers(self, monkeypatch):
+        """Both running and stopped containers pin their image."""
+        monkeypatch.setattr(
+            run.subprocess,
+            "run",
+            lambda *a, **kw: MagicMock(returncode=0, stdout="aaaaaaaaaaaa\nbbbbbbbbbbbb\n", stderr=""),
+        )
+        assert run._images_in_use("podman") == {"aaaaaaaaaaaa", "bbbbbbbbbbbb"}
+
+    def test_returns_empty_set_when_no_containers(self, monkeypatch):
+        monkeypatch.setattr(run.subprocess, "run", lambda *a, **kw: MagicMock(returncode=0, stdout="\n", stderr=""))
+        assert run._images_in_use("podman") == set()
+
+    def test_returns_empty_set_on_runtime_failure(self, monkeypatch):
+        """A failed query degrades to the old behaviour, not to a crash."""
+        import subprocess
+
+        def boom(*a, **kw):
+            raise subprocess.TimeoutExpired("cmd", 10)
+
+        monkeypatch.setattr(run.subprocess, "run", boom)
+        assert run._images_in_use("podman") == set()
 
 
 class TestCleanupStaleProjectImages:
@@ -558,18 +621,13 @@ class TestCleanupStaleProjectImages:
         new_hash = "newhash1234567890"
         stale_tag = f"pi-container-project-{project_hash}-oldhash1234567890.local"
 
-        def mock_subprocess_run(*args, **kwargs):
-            m = MagicMock()
-            m.returncode = 0
-            m.stdout = f"{stale_tag}\n"
-            m.stderr = ""
-            return m
-
-        monkeypatch.setattr(run.subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(run.subprocess, "run", _mock_podman(f"aaaaaaaaaaaa\t{stale_tag}\n"))
         monkeypatch.setattr(
             run,
             "_get_image_label",
-            lambda tag, label_key: project_hash if label_key == "pi-container.project.hash" else "oldhash1234567890",
+            lambda image_id, label_key: (
+                project_hash if label_key == "pi-container.project.hash" else "oldhash1234567890"
+            ),
         )
 
         result = run._cleanup_stale_project_images(
@@ -580,20 +638,43 @@ class TestCleanupStaleProjectImages:
         )
         assert stale_tag in result
 
+    def test_keeps_stale_image_still_in_use(self, monkeypatch, tmp_path):
+        """A stale image a container is still running on is kept, not removed.
+
+        Concurrent sessions in one workspace are supported: a session started before
+        a definition-file change keeps its now-stale image alive. Attempting the
+        removal fails with "image is in use by a container" and warns on every start.
+        """
+        project_hash = "a1b2c"
+        stale_tag = f"pi-container-project-{project_hash}-oldhash1234567890.local"
+
+        monkeypatch.setattr(
+            run.subprocess,
+            "run",
+            _mock_podman(f"aaaaaaaaaaaa\t{stale_tag}\n", ps_stdout="aaaaaaaaaaaa\n"),
+        )
+        monkeypatch.setattr(
+            run,
+            "_get_image_label",
+            lambda image_id, label_key: (
+                project_hash if label_key == "pi-container.project.hash" else "oldhash1234567890"
+            ),
+        )
+
+        attempted = []
+        monkeypatch.setattr(run, "_remove_image", lambda rt, iid: attempted.append(iid) or True)
+
+        result = run._cleanup_stale_project_images("podman", tmp_path, project_hash, "newhash1234567890")
+        assert result == []
+        assert attempted == []
+
     def test_skips_images_matching_new_hash(self, monkeypatch, tmp_path):
         """_cleanup_stale_project_images skips images whose hash matches new_hash."""
         project_hash = "a1b2c"
         new_hash = "newhash1234567890"
         matching_tag = f"pi-container-project-{project_hash}-{new_hash}.local"
 
-        def mock_subprocess_run(*args, **kwargs):
-            m = MagicMock()
-            m.returncode = 0
-            m.stdout = f"{matching_tag}\n"
-            m.stderr = ""
-            return m
-
-        monkeypatch.setattr(run.subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(run.subprocess, "run", _mock_podman(f"aaaaaaaaaaaa\t{matching_tag}\n"))
         monkeypatch.setattr(
             run,
             "_get_image_label",
@@ -614,14 +695,7 @@ class TestCleanupStaleProjectImages:
         other_hash = "xyz99"
         other_tag = f"pi-container-project-{other_hash}-somehash1234567.local"
 
-        def mock_subprocess_run(*args, **kwargs):
-            m = MagicMock()
-            m.returncode = 0
-            m.stdout = f"{other_tag}\n"
-            m.stderr = ""
-            return m
-
-        monkeypatch.setattr(run.subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(run.subprocess, "run", _mock_podman(f"bbbbbbbbbbbb\t{other_tag}\n"))
         monkeypatch.setattr(
             run,
             "_get_image_label",
@@ -779,18 +853,12 @@ class TestCleanupOrphanedProjectImages:
         import subprocess as sp
 
         # Mock the `podman image ls` output.
-        def mock_run(cmd, **kwargs):
-            class Result:
-                stdout = "pi-container-project-abc12-def3456789012345.local\n"
-                stderr = ""
-                returncode = 0
-
-            return Result()
-
-        monkeypatch.setattr(sp, "run", mock_run)
+        monkeypatch.setattr(
+            sp, "run", _mock_podman("aaaaaaaaaaaa\tpi-container-project-abc12-def3456789012345.local:latest\n")
+        )
 
         # Mock _get_image_label to return a path that doesn't exist.
-        def mock_get_label(tag, label):
+        def mock_get_label(image_id, label):
             if label == "pi-container.project.path":
                 return "/nonexistent/project/path"
             return None
@@ -800,31 +868,27 @@ class TestCleanupOrphanedProjectImages:
         # Mock _remove_image to track calls.
         removed = []
 
-        def mock_remove(runtime, tag):
-            removed.append(tag)
+        def mock_remove(runtime, image_id):
+            removed.append(image_id)
             return True
 
         monkeypatch.setattr(run, "_remove_image", mock_remove)
 
         result = run._cleanup_orphaned_project_images("podman")
         assert len(result) == 1
-        assert "pi-container-project-abc12-def3456789012345.local" in result
+        assert "pi-container-project-abc12-def3456789012345.local:latest" in result
+        # Removal goes by ID, not by name.
+        assert removed == ["aaaaaaaaaaaa"]
 
     def test_keeps_image_with_existing_path(self, monkeypatch):
         """Images whose stored path still exists are NOT removed."""
         import subprocess as sp
 
-        def mock_run(cmd, **kwargs):
-            class Result:
-                stdout = "pi-container-project-abc12-def3456789012345.local\n"
-                stderr = ""
-                returncode = 0
+        monkeypatch.setattr(
+            sp, "run", _mock_podman("aaaaaaaaaaaa\tpi-container-project-abc12-def3456789012345.local:latest\n")
+        )
 
-            return Result()
-
-        monkeypatch.setattr(sp, "run", mock_run)
-
-        def mock_get_label(tag, label):
+        def mock_get_label(image_id, label):
             if label == "pi-container.project.path":
                 return str(Path(__file__).parent)  # exists
             return None
@@ -833,7 +897,7 @@ class TestCleanupOrphanedProjectImages:
 
         removed_count = [0]
 
-        def mock_remove(runtime, tag):
+        def mock_remove(runtime, image_id):
             removed_count[0] += 1
             return True
 
@@ -847,29 +911,114 @@ class TestCleanupOrphanedProjectImages:
         """Images without pi-container.project.path label are removed (unverifiable)."""
         import subprocess as sp
 
-        def mock_run(cmd, **kwargs):
-            class Result:
-                stdout = "pi-container-project-abc12-def3456789012345.local\n"
-                stderr = ""
-                returncode = 0
+        monkeypatch.setattr(
+            sp, "run", _mock_podman("aaaaaaaaaaaa\tpi-container-project-abc12-def3456789012345.local:latest\n")
+        )
 
-            return Result()
-
-        monkeypatch.setattr(sp, "run", mock_run)
-
-        def mock_get_label(tag, label):
+        def mock_get_label(image_id, label):
             return None  # No path label
 
         monkeypatch.setattr(run, "_get_image_label", mock_get_label)
 
-        def mock_remove(runtime, tag):
+        def mock_remove(runtime, image_id):
             return True
 
         monkeypatch.setattr(run, "_remove_image", mock_remove)
 
         result = run._cleanup_orphaned_project_images("podman")
         assert len(result) == 1
-        assert "pi-container-project-abc12-def3456789012345.local" in result
+        assert "pi-container-project-abc12-def3456789012345.local:latest" in result
+
+    def test_removes_images_with_blank_path_label(self, monkeypatch):
+        """A blank path label is as unverifiable as a missing one.
+
+        Regression test: `Path("")` is `PosixPath(".")`, which always exists, so a
+        blank label used to fall through the "path gone" check and be kept forever.
+        """
+        import subprocess as sp
+
+        monkeypatch.setattr(
+            sp, "run", _mock_podman("aaaaaaaaaaaa\tpi-container-project-abc12-def3456789012345.local:latest\n")
+        )
+        monkeypatch.setattr(run, "_get_image_label", lambda image_id, label: "")
+        monkeypatch.setattr(run, "_remove_image", lambda runtime, image_id: True)
+
+        result = run._cleanup_orphaned_project_images("podman")
+        assert result == ["pi-container-project-abc12-def3456789012345.local:latest"]
+
+    def test_removes_untagged_image_by_id(self, monkeypatch):
+        """Untagged images are removed by ID, never by the literal "<none>:<none>".
+
+        Regression test: `podman image rm '<none>:<none>'` fails with
+        `parsing reference "<none>:<none>": invalid reference format`, so these
+        images could never be reclaimed and warned on every startup.
+        """
+        import subprocess as sp
+
+        monkeypatch.setattr(sp, "run", _mock_podman("6abc36fca57d\t<none>:<none>\n"))
+        monkeypatch.setattr(run, "_get_image_label", lambda image_id, label: "")
+
+        removed = []
+        monkeypatch.setattr(run, "_remove_image", lambda runtime, image_id: removed.append(image_id) or True)
+
+        result = run._cleanup_orphaned_project_images("podman")
+        assert removed == ["6abc36fca57d"]
+        assert result == ["6abc36fca57d (untagged)"]
+
+    def test_keeps_orphaned_image_still_in_use(self, monkeypatch):
+        """An orphaned image a container still holds open is kept, not removed.
+
+        The removal would fail with "image is in use by a container" and warn on every
+        start; the image is reclaimed by a later run once the container is gone.
+        """
+        import subprocess as sp
+
+        monkeypatch.setattr(
+            sp,
+            "run",
+            _mock_podman(
+                "aaaaaaaaaaaa\tpi-container-project-abc12-def3456789012345.local:latest\n",
+                ps_stdout="aaaaaaaaaaaa\n",
+            ),
+        )
+        # Path is gone — it would be removed if nothing were using it.
+        monkeypatch.setattr(run, "_get_image_label", lambda image_id, label: "/nonexistent/project/path")
+
+        attempted = []
+        monkeypatch.setattr(run, "_remove_image", lambda runtime, image_id: attempted.append(image_id) or True)
+
+        result = run._cleanup_orphaned_project_images("podman")
+        assert result == []
+        assert attempted == []
+
+    def test_never_removes_protected_shared_images(self, monkeypatch):
+        """The shared base image is never a cleanup candidate, whatever its labels say.
+
+        Older builds stamped the shared base `pi-container.type=project` with blank
+        project labels, so it matches the cleanup filter until it is rebuilt.
+        """
+        import subprocess as sp
+
+        # podman prefixes locally-built images with "localhost/". Both spellings must
+        # be protected — the prefixed one is how the shared base actually appears in
+        # `podman image ls` output.
+        protected = "\n".join(
+            f"{i:012x}\t{prefix}{tag}"
+            for i, (prefix, tag) in enumerate(
+                [(p, t) for t in sorted(run._PROTECTED_IMAGE_TAGS) for p in ("", "localhost/")]
+            )
+        )
+
+        monkeypatch.setattr(sp, "run", _mock_podman(protected + "\n"))
+        # Blank labels — exactly what the pre-fix shared base carries.
+        monkeypatch.setattr(run, "_get_image_label", lambda image_id, label: "")
+
+        removed = []
+        monkeypatch.setattr(run, "_remove_image", lambda runtime, image_id: removed.append(image_id) or True)
+
+        result = run._cleanup_orphaned_project_images("podman")
+        assert removed == []
+        assert result == []
 
     def test_returns_empty_when_list_fails(self, monkeypatch):
         """Returns [] when `podman image ls` fails."""
@@ -1017,26 +1166,22 @@ class TestCleanupOrphanedProjectImages:
         """Multiple images without path labels are all removed."""
         import subprocess as sp
 
-        def mock_run(cmd, **kwargs):
-            class Result:
-                stdout = (
-                    "pi-container-project-aaa11-bbb2222222222222.local\n"
-                    "pi-container-project-ccc33-ddd4444444444444.local\n"
-                    "pi-container-project-eee55-fff6666666666666.local\n"
-                )
-                stderr = ""
-                returncode = 0
+        monkeypatch.setattr(
+            sp,
+            "run",
+            _mock_podman(
+                "aaaaaaaaaaaa\tpi-container-project-aaa11-bbb2222222222222.local:latest\n"
+                "bbbbbbbbbbbb\tpi-container-project-ccc33-ddd4444444444444.local:latest\n"
+                "cccccccccccc\tpi-container-project-eee55-fff6666666666666.local:latest\n"
+            ),
+        )
 
-            return Result()
-
-        monkeypatch.setattr(sp, "run", mock_run)
-
-        def mock_get_label(tag, label):
+        def mock_get_label(image_id, label):
             return None  # No path labels — all will be cleaned
 
         monkeypatch.setattr(run, "_get_image_label", mock_get_label)
 
-        def mock_remove(runtime, tag):
+        def mock_remove(runtime, image_id):
             return True
 
         monkeypatch.setattr(run, "_remove_image", mock_remove)
@@ -1318,13 +1463,53 @@ class TestEnsureNestedVolume:
         assert run._ensure_nested_volume("podman", "pi-nested-abc", "pi-proxy-abc", "/tmp/proj") is False
 
 
-class TestCleanupOrphanedNestedVolumes:
-    def _mock_ls(self, monkeypatch, names: str):
+class TestUnusedVolumes:
+    """Tests for _unused_volumes() — the guard against removing a volume in use."""
+
+    def test_returns_dangling_volume_names(self, monkeypatch):
         monkeypatch.setattr(
             run.subprocess,
             "run",
-            lambda cmd, **kw: MagicMock(returncode=0, stdout=names, stderr=""),
+            lambda *a, **kw: MagicMock(returncode=0, stdout="vol-a\nvol-b\n", stderr=""),
         )
+        assert run._unused_volumes("podman") == {"vol-a", "vol-b"}
+
+    def test_queries_the_dangling_filter(self, monkeypatch):
+        """The whole check rests on `dangling=true` meaning "no container references it"."""
+        seen: list[list[str]] = []
+
+        def _run(cmd, **kw):
+            seen.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(run.subprocess, "run", _run)
+        run._unused_volumes("podman")
+        assert "dangling=true" in seen[0]
+
+    def test_returns_none_on_runtime_failure(self, monkeypatch):
+        """None means "unknown", which the caller distinguishes from "none are unused"."""
+        import subprocess
+
+        def boom(*a, **kw):
+            raise subprocess.TimeoutExpired("cmd", 10)
+
+        monkeypatch.setattr(run.subprocess, "run", boom)
+        assert run._unused_volumes("podman") is None
+
+
+class TestCleanupOrphanedNestedVolumes:
+    def _mock_ls(self, monkeypatch, names: str, dangling: str | None = None):
+        """Answer `volume ls` by label and by `dangling=true` separately.
+
+        Defaults to reporting every listed volume as unused, so tests that are not
+        about container usage behave as if nothing holds the volumes open.
+        """
+
+        def _run(cmd, **kw):
+            stdout = (names if dangling is None else dangling) if "dangling=true" in cmd else names
+            return MagicMock(returncode=0, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(run.subprocess, "run", _run)
 
     def test_removes_volume_with_missing_path(self, monkeypatch):
         self._mock_ls(monkeypatch, "pi-nested-abc1234567\n")
@@ -1355,8 +1540,49 @@ class TestCleanupOrphanedNestedVolumes:
         monkeypatch.setattr(run, "_remove_volume", lambda rt, name: True)
         assert run._cleanup_orphaned_nested_volumes("podman") == ["pi-nested-abc1234567"]
 
-    def test_skips_volume_still_in_use(self, monkeypatch):
-        """`volume rm` fails while a container holds it — skip, don't abort."""
+    def test_removes_volume_with_blank_path_label(self, monkeypatch):
+        """A blank path label is as unverifiable as a missing one.
+
+        Regression test: `Path("")` is `PosixPath(".")`, which always exists, so a
+        blank label used to fall through the "path gone" check and be kept forever.
+        """
+        self._mock_ls(monkeypatch, "pi-nested-abc1234567\n")
+        monkeypatch.setattr(run, "_get_volume_label", lambda rt, name, label: "")
+        monkeypatch.setattr(run, "_remove_volume", lambda rt, name: True)
+        assert run._cleanup_orphaned_nested_volumes("podman") == ["pi-nested-abc1234567"]
+
+    def test_keeps_orphaned_volume_still_in_use(self, monkeypatch):
+        """An orphaned volume a container still holds open is skipped, not attempted.
+
+        The removal would fail with "volume is being used by a container" and warn on
+        every start; it is reclaimed by a later run once the container is gone.
+        """
+        # Listed, but absent from the dangling set — something references it.
+        self._mock_ls(monkeypatch, "pi-nested-abc1234567\n", dangling="")
+        monkeypatch.setattr(run, "_get_volume_label", lambda rt, name, label: "/nonexistent/path")
+
+        def unexpected(rt, name):
+            raise AssertionError("removal must not be attempted while a container holds the volume")
+
+        monkeypatch.setattr(run, "_remove_volume", unexpected)
+        assert run._cleanup_orphaned_nested_volumes("podman") == []
+
+    def test_attempts_removal_when_usage_is_unknown(self, monkeypatch):
+        """A failed usage query degrades to the old behaviour, not to skipping everything."""
+        import subprocess as sp
+
+        def _run(cmd, **kw):
+            if "dangling=true" in cmd:
+                raise sp.TimeoutExpired("cmd", 10)
+            return MagicMock(returncode=0, stdout="pi-nested-abc1234567\n", stderr="")
+
+        monkeypatch.setattr(run.subprocess, "run", _run)
+        monkeypatch.setattr(run, "_get_volume_label", lambda rt, name, label: "/nonexistent/path")
+        monkeypatch.setattr(run, "_remove_volume", lambda rt, name: True)
+        assert run._cleanup_orphaned_nested_volumes("podman") == ["pi-nested-abc1234567"]
+
+    def test_removal_failure_is_not_fatal(self, monkeypatch):
+        """If `volume rm` fails anyway, the volume is skipped rather than reported removed."""
         self._mock_ls(monkeypatch, "pi-nested-abc1234567\n")
         monkeypatch.setattr(run, "_get_volume_label", lambda rt, name, label: "/nonexistent/path")
         monkeypatch.setattr(run, "_remove_volume", lambda rt, name: False)

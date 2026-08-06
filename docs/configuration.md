@@ -403,7 +403,7 @@ The check reads `MemAvailable` (reclaimable page cache counts — on a warm buil
 
 The compilers are also capped by *memory* rather than core count — `make -j`, `go build -p` and `cargo --jobs` each get `MemAvailable / peak-RSS-per-job` jobs, never more than `nproc`. Giving the VM more memory automatically raises the cap; `MAKE_JOBS` overrides it for CPython.
 
-**Storage lifecycle.** The `pi-nested-<project-hash>` volume carries the same labels as project-specific images (`pi-container.type=nested-storage`, `pi-container.project.hash`, `pi-container.project.path`), so the same orphan-cleanup pass reclaims it when the project directory is deleted or moved — see [Orphan detection](#orphan-detection). Concurrent runs in one workspace share the volume (that is what makes the layer cache shared); they interlock through containers/storage's own lockfiles, which live inside the shared graph root, while each run keeps its own podman run root under its private `XDG_RUNTIME_DIR`.
+**Storage lifecycle.** The `pi-nested-<project-hash>` volume carries the same labels as project-specific images (`pi-container.type=nested-storage`, `pi-container.project.hash`, `pi-container.project.path`), so the same orphan-cleanup pass reclaims it when the project directory is deleted or moved — see [Orphan detection](#orphan-detection). As with images, a volume any container still holds open is skipped rather than removed, and reclaimed by a later run once that container is gone. Concurrent runs in one workspace share the volume (that is what makes the layer cache shared); they interlock through containers/storage's own lockfiles, which live inside the shared graph root, while each run keeps its own podman run root under its private `XDG_RUNTIME_DIR`.
 
 **`docker` and `compose` both work out of the box.** A `docker` → `podman` shim is installed at `/usr/local/bin/docker`, so tools that shell out to `docker` by name work (`docker build`, `docker run`, `docker ps`, …), and **`podman-compose`** ships as the compose provider — so `docker compose up` and `podman compose up` work with no per-project setup. The provider is pinned in `containers.conf` (`compose_providers = ["podman-compose"]`); without that pin podman would try `docker-compose` first and report it missing instead of using the provider that is installed.
 
@@ -487,9 +487,15 @@ This enables:
 Each project-specific image stores the absolute path of its source project directory in the `pi-container.project.path` label. On every run, pi-container scans all project images and removes any that don't have a verifiable source project. An image is removed if:
 
 - Its `pi-container.project.path` label points to a path that no longer exists (deleted project), OR
-- It has **no** `pi-container.project.path` label (older images from before this feature — unverifiable).
+- Its `pi-container.project.path` label is missing or blank (older images from before this feature — unverifiable).
 
-Only images with a path label pointing to an **existing** directory are kept. This handles:
+Only images with a path label pointing to an **existing** directory are kept, plus the shared images (`pi-coding-agent:local`, `pi-coding-agent-proxy:local`, `pi-coding-agent-builder:local`), which are never cleanup candidates whatever their labels say — they belong to no project and are rebuilt only by `build.sh`.
+
+Images are enumerated and removed **by image ID**, not by tag. A rebuild that moves a tag leaves the previous image untagged, and an untagged image has no usable name — podman renders it as the literal `<none>:<none>`, which is not a valid image reference. Identifying by ID is what lets those images be reclaimed.
+
+**Images and volumes in use are never removed.** Every cleanup pass skips anything a container — running, stopped, or merely created — still holds open, and logs it at INFO rather than attempting the removal. This is the normal case when two sessions share a workspace: a session started before a definition-file change keeps running on its now-stale image, which is reclaimed by a later run once that session exits. The same applies to a session whose project directory was deleted mid-run, and to its nested-storage volume.
+
+This handles:
 
 - **Deleted projects**: Images from removed workspaces are cleaned up automatically.
 - **Moved projects**: Images retain the old path label → detected as orphaned and removed. New builds use the new path.

@@ -508,20 +508,67 @@ def _remove_image(runtime: str, image_tag: str) -> bool:
         return False
 
 
-def _list_project_images(
-    runtime: str,
-    project_hash: str,
-) -> list[tuple[str, str]]:
-    """List all project-specific images for a given project hash.
+# Images that must never be reclaimed by a project-image cleanup pass, whatever
+# their labels say. The shared base was stamped `pi-container.type=project` by
+# older builds (the label was hardcoded in the Containerfile, which builds both the
+# base and the per-project images); those images are still on disk until rebuilt,
+# and deleting one would force a full base rebuild on every run.
+_PROTECTED_IMAGE_TAGS = frozenset({IMAGE_TAG, *_SHARED_SOURCE_IMAGES})
 
-    Returns a list of ``(tag, content_hash)`` tuples. Images whose
-    ``pi-container.project.hash`` label doesn't match ``project_hash`` are
-    excluded. Images without labels are returned with an empty content_hash.
+# `{{.Repository}}:{{.Tag}}` renders as this literal once an image loses its tag,
+# which happens to the previous image every time a rebuild moves a tag. It is not a
+# valid image reference: inspecting or removing by it fails with
+# `parsing reference "<none>:<none>": invalid reference format`. Enumerate by ID
+# instead — valid for tagged and untagged images alike.
+_UNTAGGED_NAME = "<none>:<none>"
 
-    Raises warnings (but does not raise exceptions) if the container runtime
-    is unavailable.
+
+def _is_protected_image(name: str) -> bool:
+    """True if this image must never be reclaimed by a project-image cleanup pass.
+
+    podman reports a locally-built image as ``localhost/pi-coding-agent:local`` while
+    the configured tag is ``pi-coding-agent:local``, so both spellings have to match —
+    an exact comparison silently lets the shared base through as a removal candidate.
     """
-    images: list[tuple[str, str]] = []
+    return name in _PROTECTED_IMAGE_TAGS or name.removeprefix("localhost/") in _PROTECTED_IMAGE_TAGS
+
+
+def _images_in_use(runtime: str) -> set[str]:
+    """Image IDs pinned by an existing container, running or stopped.
+
+    A cleanup pass must skip these. Removing one fails, and the failure is not a
+    problem to report: concurrent sessions in a single workspace are supported, so a
+    session started before a definition-file change legitimately keeps its now-stale
+    image alive for as long as it runs. The image is reclaimed by a later run, once
+    that session has exited.
+
+    Returns short IDs, in the same 12-character form ``image ls --format {{.ID}}``
+    reports. An empty set on failure just restores the previous behaviour — an
+    attempted removal that the runtime refuses.
+    """
+    try:
+        result = subprocess.run(
+            [runtime, "ps", "--all", "--format", "{{.ImageID}}"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        logger.warning(f"Could not list containers to check which images are in use: {e}")
+        return set()
+
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def _enumerate_project_images(runtime: str) -> list[tuple[str, str]] | None:
+    """Enumerate every image labelled ``pi-container.type=project``.
+
+    Returns ``(image_id, display_name)`` pairs. ``image_id`` is what inspect and
+    remove calls must use; ``display_name`` is for log messages only and is never a
+    valid reference for untagged images. Returns None if the runtime could not be
+    queried (distinct from an empty list, which means "no such images").
+    """
     try:
         result = subprocess.run(
             [
@@ -529,7 +576,7 @@ def _list_project_images(
                 "image",
                 "ls",
                 "--format",
-                "{{.Repository}}:{{.Tag}}",
+                "{{.ID}}\t{{.Repository}}:{{.Tag}}",
                 "--filter",
                 "label=pi-container.type=project",
             ],
@@ -540,15 +587,33 @@ def _list_project_images(
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
         logger.warning(f"Could not list project images: {e}")
-        return images
+        return None
 
-    for tag in result.stdout.strip().splitlines():
-        tag = tag.strip()
-        if not tag:
+    images: list[tuple[str, str]] = []
+    for line in result.stdout.strip().splitlines():
+        image_id, _, name = line.strip().partition("\t")
+        if not image_id:
             continue
-        label_hash = _get_image_label(tag, "pi-container.hash") or ""
-        images.append((tag, label_hash))
+        name = name.strip()
+        images.append((image_id, name if name and name != _UNTAGGED_NAME else f"{image_id} (untagged)"))
     return images
+
+
+def _list_project_images(runtime: str) -> list[tuple[str, str, str]]:
+    """List every project image together with its content hash.
+
+    Returns a list of ``(image_id, display_name, content_hash)`` tuples. Images
+    without labels are returned with an empty content_hash. Filtering by project
+    is the caller's job — :func:`_cleanup_stale_project_images` does it against the
+    ``pi-container.project.hash`` label.
+
+    Raises warnings (but does not raise exceptions) if the container runtime
+    is unavailable.
+    """
+    listed = _enumerate_project_images(runtime)
+    if listed is None:
+        return []
+    return [(image_id, name, _get_image_label(image_id, "pi-container.hash") or "") for image_id, name in listed]
 
 
 def _cleanup_stale_project_images(
@@ -568,33 +633,43 @@ def _cleanup_stale_project_images(
       4. If an image already matches ``new_hash``, no build is needed (cache
          hit — caller checks this separately).
 
-    Returns the list of removed image tags.
+    Returns the display names of the removed images.
 
     Images belonging to *other* projects (different ``project_hash``) are
-    never touched.
+    never touched, nor is any image a container still holds open — a concurrent
+    session in this workspace pins the image it started on (see
+    :func:`_images_in_use`).
     """
     removed: list[str] = []
     try:
-        all_images = _list_project_images(runtime, project_hash)
+        all_images = _list_project_images(runtime)
     except Exception as e:
         logger.warning(f"Failed to list project images during cleanup: {e}")
         return removed
 
-    for tag, stored_hash in all_images:
+    in_use = _images_in_use(runtime)
+    for image_id, name, stored_hash in all_images:
+        if _is_protected_image(name):
+            continue
         # Skip images that already match the new hash (cache hit).
         if stored_hash == new_hash:
             continue
         # Skip images that don't have a pi-container.project.hash label
         # (they may be from a previous version — leave them for a future
         # migration pass).
-        stored_project_hash = _get_image_label(tag, "pi-container.project.hash")
+        stored_project_hash = _get_image_label(image_id, "pi-container.project.hash")
         if stored_project_hash is None:
             continue
         if stored_project_hash != project_hash:
             continue
-        # This image is stale — remove it.
-        if _remove_image(runtime, tag):
-            removed.append(tag)
+        # This image is stale — but a concurrent session in this workspace may still
+        # be running on it, in which case the removal would fail. Reclaim it on a
+        # later run, once that session has exited.
+        if image_id in in_use:
+            logger.info(f"Stale project image still in use by a container, keeping for now: {name}")
+            continue
+        if _remove_image(runtime, image_id):
+            removed.append(name)
     return removed
 
 
@@ -602,54 +677,50 @@ def _cleanup_orphaned_project_images(runtime: str) -> list[str]:
     """Remove project images whose source project no longer exists.
 
     An image is considered orphaned if:
-    - It has no `pi-container.project.path` label (older images, unverifiable), OR
+    - Its `pi-container.project.path` label is missing or blank (older images,
+      unverifiable), OR
     - Its `pi-container.project.path` label points to a path that doesn't exist.
 
-    Only images with a path label pointing to an **existing** directory are kept.
+    Only images with a path label pointing to an **existing** directory are kept,
+    plus the shared images in ``_PROTECTED_IMAGE_TAGS``, which are never candidates
+    whatever their labels say, and any image a container still holds open (see
+    :func:`_images_in_use`).
 
-    Returns the list of removed image tags.
+    Returns the display names of the removed images.
     """
     removed: list[str] = []
-    try:
-        # List ALL project-specific images (regardless of project hash).
-        result = subprocess.run(
-            [
-                runtime,
-                "image",
-                "ls",
-                "--format",
-                "{{.Repository}}:{{.Tag}}",
-                "--filter",
-                "label=pi-container.type=project",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=10,
-        )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
-        logger.warning(f"Could not list project images for orphan cleanup: {e}")
+    # List ALL project images (regardless of project hash), by ID: an untagged
+    # image has no usable name to inspect or remove by.
+    listed = _enumerate_project_images(runtime)
+    if listed is None:
         return removed
 
-    for tag in result.stdout.strip().splitlines():
-        tag = tag.strip()
-        if not tag:
+    in_use = _images_in_use(runtime)
+    for image_id, name in listed:
+        if _is_protected_image(name):
             continue
 
-        stored_path = _get_image_label(tag, "pi-container.project.path")
+        stored_path = _get_image_label(image_id, "pi-container.project.path")
 
-        if stored_path is None:
-            # No path label — cannot verify this image belongs to an active project.
-            logger.info(f"Orphaned project image (no path label): {tag}")
-            if _remove_image(runtime, tag):
-                removed.append(tag)
+        # A blank label is as unverifiable as a missing one, and must be handled
+        # explicitly: `Path("")` is `PosixPath(".")`, which always exists, so
+        # falling through to the path check would silently keep the image.
+        if stored_path is None or not stored_path.strip():
+            reason = "no path label"
+        elif not Path(stored_path).exists():
+            reason = f"path gone: {stored_path}"
+        else:
+            continue  # Live project — not a candidate.
+
+        # Decided it is an orphan, so say so — but a container may still be running
+        # on it, in which case the removal would fail. Reclaim it on a later run.
+        if image_id in in_use:
+            logger.info(f"Orphaned project image still in use by a container, keeping for now: {name} ({reason})")
             continue
 
-        # If the stored path no longer exists, the image is orphaned.
-        if not Path(stored_path).exists():
-            logger.info(f"Orphaned project image (path gone): {tag} ({stored_path})")
-            if _remove_image(runtime, tag):
-                removed.append(tag)
+        logger.info(f"Orphaned project image ({reason}): {name}")
+        if _remove_image(runtime, image_id):
+            removed.append(name)
 
     return removed
 
@@ -749,13 +820,42 @@ def _ensure_nested_volume(runtime: str, volume_name: str, project_hash: str, pro
     return True
 
 
+def _unused_volumes(runtime: str) -> set[str] | None:
+    """Names of volumes no container references — the ones that can be removed.
+
+    This is the volume counterpart of :func:`_images_in_use`, but inverted, because
+    that is the form podman answers directly: ``ps --format {{.Mounts}}`` reports
+    mount *destinations*, which cannot be mapped back to a volume name, while
+    ``volume ls --filter dangling=true`` lists exactly the volumes nothing
+    references. A merely created (never started) container is enough to keep a volume
+    off this list, which matches the ``ps --all`` semantics used for images.
+
+    Returns None if the query fails, which the caller treats as "unknown" and falls
+    back to attempting the removal.
+    """
+    try:
+        result = subprocess.run(
+            [runtime, "volume", "ls", "--filter", "dangling=true", "--format", "{{.Name}}"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        logger.warning(f"Could not list unused volumes to check which are in use: {e}")
+        return None
+
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
 def _cleanup_orphaned_nested_volumes(runtime: str) -> list[str]:
     """Remove nested-storage volumes whose source project no longer exists.
 
     Mirrors :func:`_cleanup_orphaned_project_images`: a volume is orphaned when
     its ``pi-container.project.path`` label points at a path that is gone, or when
-    it has no path label at all (unverifiable). A volume still in use by a running
-    container cannot be removed — that failure is logged and skipped, not fatal.
+    it has no path label at all (unverifiable). A volume a container still holds
+    open is skipped — the removal would fail — and reclaimed by a later run, once
+    that container is gone (see :func:`_unused_volumes`).
     """
     removed: list[str] = []
     try:
@@ -778,19 +878,33 @@ def _cleanup_orphaned_nested_volumes(runtime: str) -> list[str]:
         logger.warning(f"Could not list nested-storage volumes for orphan cleanup: {e}")
         return removed
 
+    unused = _unused_volumes(runtime)
     for name in result.stdout.strip().splitlines():
         name = name.strip()
         if not name:
             continue
 
         stored_path = _get_volume_label(runtime, name, "pi-container.project.path")
-        if stored_path is None:
-            logger.info(f"Orphaned nested-storage volume (no path label): {name}")
+
+        # A blank label is as unverifiable as a missing one: `Path("")` is
+        # `PosixPath(".")`, which always exists, so it would fall through the check
+        # below and keep the volume forever.
+        if stored_path is None or not stored_path.strip():
+            reason = "no path label"
         elif not Path(stored_path).exists():
-            logger.info(f"Orphaned nested-storage volume (path gone): {name} ({stored_path})")
+            reason = f"path gone: {stored_path}"
         else:
+            continue  # Live project — not a candidate.
+
+        # Decided it is an orphan, but a container may still hold it open, in which
+        # case the removal would fail. Reclaim it on a later run.
+        if unused is not None and name not in unused:
+            logger.info(
+                f"Orphaned nested-storage volume still in use by a container, keeping for now: {name} ({reason})"
+            )
             continue
 
+        logger.info(f"Orphaned nested-storage volume ({reason}): {name}")
         if _remove_volume(runtime, name):
             removed.append(name)
 

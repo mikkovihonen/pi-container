@@ -267,5 +267,11 @@ LABEL pi-container.hash="${LABEL_HASH}"
 LABEL pi-container.project.hash="${PROJECT_HASH}"
 LABEL pi-container.project.path="${PROJECT_PATH}"
 LABEL pi-container.build.time="${BUILD_TIMESTAMP}"
-LABEL pi-container.type="project"
+# pi-container.type is deliberately NOT set here. This Containerfile builds two
+# different things: the shared base image (build_agent, no label ARGs passed) and
+# per-project images (build_project_image, all ARGs passed). Hardcoding
+# type="project" stamped the shared base as a project image too, so run.py's
+# orphan cleanup could not tell them apart. Each builder now passes its own
+# --label on the command line — which also keeps the label off build
+# intermediates, so a half-finished build is never mistaken for an orphan.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
