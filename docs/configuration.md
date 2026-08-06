@@ -424,6 +424,48 @@ This is **inbound only and creates no egress.** The agent's only route out is st
 
 Under the hood, this is also why the image sets `netns = "bridge"` in its `containers.conf` drop-in (a documented `containers.conf` key that takes the same values as `--network`), overriding podman 6's rootless default of `pasta`. Measured with the agent on the isolated network and the same outer `-p` in both cases: under `pasta` the forward reaches the agent's netns and the TCP handshake even completes, then stalls — the connection arrives carrying the agent's own address as its source, which is also the address pasta hands the nested guest, so the flow never resolves. Giving the guest the host's address is pasta's deliberate way of avoiding NAT, so this is a consequence of its design rather than a defect. Under `bridge`, `rootlessport` binds a real socket in the agent's netns, the agent's `-p` publishes it, and the host reaches the UI. Bridge is also what `docker compose` already got, since it creates a user-defined network per project, so a plain `podman run -p` now behaves like the compose path instead of differently from it.
 
+**`host.docker.internal` does not reach the agent from inside a nested container.** This is the mirror image of the outbound hop above, and it bites any project that runs a sidecar on the agent — an exporter, a mock API, a language server — and has a nested container talk to it. Inside a nested container, both `host.containers.internal` and `host.docker.internal` resolve to the podman machine's gvproxy address (`192.168.127.254` on macOS), which is **your Mac, not the agent**. The service isn't there, and the agent's isolated network has no route to it either, so the connection times out rather than being refused — which reads like a slow service instead of a wrong address.
+
+The address that does work is **`169.254.1.2`**. That is not a value pi-container picks; podman assigns it when it builds the rootless network namespace, visible in the `pasta` command line inside the agent:
+
+```
+/usr/bin/pasta --config-net … --no-map-gw --map-guest-addr 169.254.1.2
+```
+
+Measured from inside a nested container, against a listener on `0.0.0.0:9100` in the agent:
+
+| target | result |
+|--------|--------|
+| `192.168.127.254` (`host.docker.internal`) | times out — gvproxy, i.e. the host, and unreachable from the isolated network |
+| `10.89.1.1` (nested bridge gateway) | connection refused — `--no-map-gw` |
+| `10.89.0.2` (agent's own bridge address) | connection refused — wrong netns |
+| **`169.254.1.2`** | **serves** |
+
+**Configure the address, not the name.** The obvious fix — `--add-host host.docker.internal:169.254.1.2`, or a compose `extra_hosts:` entry — **does not work**, and fails in a way that looks like it worked. Podman keeps its own entry for that name, so `/etc/hosts` ends up listing it twice:
+
+```
+169.254.1.2      host.docker.internal          ← from --add-host
+192.168.127.254  host.containers.internal host.docker.internal
+```
+
+busybox `wget` takes the first match and succeeds, so a quick check from inside the container passes. Go's resolver sorts multi-address results by RFC 6724 destination-address selection, which ranks a global-scope address above a link-local one — so a Go client dials `192.168.127.254` first and a short timeout expires before any fallback. Prometheus stayed `down` with `context deadline exceeded` until the podman line was deleted from `/etc/hosts` by hand, at which point it went `up` on the next scrape. Anything else with RFC 6724-aware resolution (Go, glibc `getaddrinfo`) behaves the same way.
+
+Podman will not omit its own entry: `--no-hosts` suppresses it but is mutually exclusive with `--add-host`. So put the literal address wherever the target is configured, and keep that in a local file:
+
+```yaml
+# docker-compose.override.yml — gitignored
+services:
+  prometheus:
+    volumes:
+      # Replaces rather than adds: compose merges volumes keyed on the
+      # container-side target path.
+      - ./config/prometheus.local.yml:/etc/prometheus/prometheus.yml:ro
+```
+
+Local, not committed: `169.254.1.2` means nothing outside a pi-container agent, so hardcoding it in a tracked file breaks every non-nested run of the same stack. It is also **coupled to podman's rootless-netns layout**, not to a documented interface — treat it as a version-pinned constant that a podman upgrade in the agent image can invalidate, and whose failure mode is a silently empty dashboard.
+
+This is **not** fixable in the image's `containers.conf` drop-in, which is where the `netns` default above lives. `host_containers_internal_ip` is ignored there, under `[containers]` and under `[network]` alike — verified with an override file proven to be read (a marker `env` entry in the same file reached the container while the `/etc/hosts` line stayed unchanged). The agent has `/run/.containerenv`, so the nested podman detects that it is itself inside a container and propagates the agent's own `host.containers.internal` entry, which outranks the config key. Hence a per-project fix rather than a transparent default.
+
 **Registries must be allowlisted.** The proxy's allowlist is `default_action: block`, so image pulls 403 until a registry is permitted. `allowlist.yaml` ships a commented-out `container-registries-allow` rule (Docker Hub, GHCR, Quay, GCR) — uncomment it, or add the registries you use. `run.py` logs a warning at startup when nesting is enabled and no registry hostname is allowed.
 
 **TLS inside nested containers.** The image ships `/etc/containers/containers.conf.d/50-pi-container.conf`, which mounts the agent's full CA bundle (system CAs *plus* the mitmproxy CA) into every nested container and points `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `GIT_SSL_CAINFO` at it. That covers tools honouring those variables (OpenSSL, Go, Node, Python-requests, curl, git). A tool that only reads a hardcoded path inside its own image still fails — the fix is per-image (`COPY` the CA in a build stage).

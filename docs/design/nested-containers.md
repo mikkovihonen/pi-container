@@ -599,6 +599,97 @@ dev server is not). `publish` ships empty, matching how `egress.allow` ships all
 
 ---
 
+### 12. The reverse hop: a nested container reaching a service on the agent
+
+Section 11 is inbound — host reaching a nested container. The mirror case is a nested
+container reaching a service in the *agent's* netns: a metrics exporter, a mock API, a
+language server, anything a project runs beside its stack rather than inside it. The
+conventional address for that is `host.docker.internal`, and inside the agent it is
+wrong.
+
+```
+# /etc/hosts inside a nested container
+192.168.127.254   host.containers.internal host.docker.internal
+```
+
+`192.168.127.254` is gvproxy — the **macOS host** as seen from the podman machine VM.
+Two independent things are wrong with it: the agent-side service is not on the host, and
+the agent's `--internal` network has no route to the host anyway. The second failure
+masks the first: the connection times out instead of being refused, which presents as a
+slow or hung service rather than a misdirected one. Prometheus reports it as
+`context deadline exceeded` and marks the target down; the dashboard renders fine and
+shows nothing, with no error anywhere in the UI.
+
+The value is not computed for the nested netns — it is byte-identical to the agent's own
+`/etc/hosts` entry. The agent carries `/run/.containerenv`, so the nested podman detects
+that it is itself running inside a container and propagates the parent's entry.
+
+**Measured**, listener on `0.0.0.0:9100` in the agent's netns, probed from a nested
+container on a compose network:
+
+```
+192.168.127.254:9100   (host.docker.internal)   download timed out          ❌
+10.89.1.1:9100         (nested bridge gateway)  connection refused          ❌
+10.89.0.2:9100         (agent's bridge address) connection refused          ❌
+169.254.1.2:9100                                # HELP … (serves)           ✅
+```
+
+`169.254.1.2` is podman's own, from the rootless-netns setup inside the agent:
+
+```
+/usr/bin/pasta --config-net … --no-map-gw --map-guest-addr 169.254.1.2
+```
+
+`--no-map-gw` is why the bridge gateway refuses, and `--map-guest-addr` is the address
+that replaces it. Both are podman's choices for the rootless network namespace, so this
+is stable within a podman generation and not an interface it promises.
+
+**`--add-host` does not fix it, and fails convincingly.** The obvious remedy is
+`--add-host host.docker.internal:169.254.1.2` (compose: `extra_hosts:`). Podman
+accepts it and keeps its own entry too, so the name resolves to two addresses:
+
+```
+169.254.1.2      host.docker.internal          ← from --add-host
+192.168.127.254  host.containers.internal host.docker.internal
+```
+
+busybox `wget` inside the container takes the first match and succeeds — which is
+exactly the check an operator runs to confirm the fix, and it passes. Prometheus stayed
+`down` anyway, with the same `context deadline exceeded` and a `lastScrapeDuration` of
+exactly 1.0006s, the full `scrape_timeout`. Go's resolver sorts multi-address results by
+RFC 6724 destination-address selection, which ranks global scope above link-local, so it
+dials `192.168.127.254` first — a black hole that neither connects nor refuses — and the
+scrape deadline expires before the second address is reached. Deleting the podman line
+from `/etc/hosts` by hand flipped the target to `up` on the next scrape; that is the
+evidence, and it is what rules out every other explanation for the timeout.
+
+`--no-hosts` would suppress podman's entry but is mutually exclusive with `--add-host`,
+and the image's `/etc/hosts` has no such name to begin with. So the name cannot be made
+unambiguous, and the fix is to stop resolving it: put `169.254.1.2` literally wherever
+the target is configured. For a compose stack that is a replacement config file mounted
+at the same container path — compose merges volumes keyed on target, so the committed
+mount is superseded and named volumes survive.
+
+**No transparent fix exists in the drop-in either.** `host_containers_internal_ip` is the
+documented `containers.conf` key for exactly this, and it does not take effect here —
+tried under `[containers]` and under `[network]`, both ignored. The test controlled for
+the obvious explanation: the same override file also set a marker `env` entry, which
+*did* reach the container, so the file was read and only the key was disregarded. That
+is consistent with the `/run/.containerenv` propagation above outranking it. Also
+rejected: rewriting `/etc/hosts` in the agent image (the agent's own entry is correct
+*for the agent* — it really can reach the host through the proxy), and a per-project
+`--add-host` injected by pi-container (there is no hook on the nested `podman run`, and
+it would be wrong for containers that legitimately mean the host).
+
+**So this stays a documented constraint with a per-project fix**: the literal address in
+the project's own config, held in a local, gitignored file rather than a committed one —
+`169.254.1.2` is meaningless outside a pi-container agent and would break the same stack
+run anywhere else. Documented in
+[Configuration](../configuration.md#nested-containers) because the failure gives the
+operator nothing to search for: no error, no log line, just an empty graph.
+
+---
+
 ## Dropping Docker
 
 Nesting does not *technically* require removing Docker — the nesting happens inside the
