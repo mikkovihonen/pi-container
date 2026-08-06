@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+- **Preflight gate in `release.sh`**, run before any file is touched: the version is semver, `HEAD` is on `main`, the working tree is clean, and `v<version>` is not already tagged. A rejected release now leaves nothing half-bumped to clean up by hand.
+- **`release.sh --check-changelog`**, a standalone mode the release skill invokes *after* the changelog has been rewritten. The ordering check previously ran inside the main script, before the edit — it could only ever catch pre-existing disorder, never the mistake it exists to prevent (placing the new version block above `Unreleased`).
+- Every failure after the version-bump commit now prints that commit's SHA and the `git reset --hard HEAD~1` that undoes it, instead of leaving the release half-applied with no stated way back.
+
+### Changed
+- The lint step runs with `SKIP=pytest` and the suite runs once afterwards with `--cov`. `pre-commit run --all-files` triggers the `pytest` hook, so every release ran the full suite twice.
+- The release skill stages `CHANGELOG.md` alone when amending, not `git add -A`, which would sweep any unrelated working-tree change into the release commit.
+
+### Fixed
+- **`release.sh` no longer fails on the first bump under macOS.** All three `sed -i` calls were GNU-only; BSD sed reads the argument after `-i` as a backup suffix, so each invocation died with `undefined label` and left the file unchanged. Substitutions now write through a temp file, the one form both implementations accept. This is why the v0.4.1 tag ships `0.4.0` in `pyproject.toml` and both `schema_version` fields.
+- **The changelog order check no longer aborts the release silently.** It grepped for `^## \[Unreleased\]`, but the heading in this file is `## Unreleased` — unbracketed. The match never succeeded, and under `set -euo pipefail` a failed pipeline inside a command substitution terminates the script, so every run exited non-zero directly after `=== Checking CHANGELOG order ===` and before the tests, with no error printed. Both spellings are now accepted and a miss reports rather than aborts.
+- **A no-op version bump is now fatal rather than a warning.** The bump commit was made with `|| echo "(nothing to commit)"`, so a re-run against an already-bumped tree continued with no release commit in place — and the skill's next instruction, `git commit --amend`, would then rewrite whatever unrelated commit happened to be at the tip of `main`.
+- Skill and docs corrected to describe what the script actually does: `SKILL.md` claimed in its frontmatter to update the changelog and create the tag (it does neither), numbered its steps 1, 2, 3, 5 with the `git tag` block orphaned under step 3, printed closing instructions that contradicted its own amend flow by creating a second commit, and pointed at `towncrier`, which is not a dependency of this project.
+
 ## [0.4.1] - 2026-08-06
 
 ### Added
