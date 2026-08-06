@@ -68,7 +68,7 @@ class ContainerRuntime(ABC):
     methods where the runtimes genuinely diverge.
     """
 
-    #: The CLI binary name (also the value stored in ``CONTAINER_RUNTIME``).
+    #: The CLI binary name (``podman``).
     name: str = ""
     #: Host bridge interface where ``llama-server`` is exposed via socat.
     default_bridge_interface: str = ""

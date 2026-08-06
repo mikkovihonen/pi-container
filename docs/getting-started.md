@@ -60,7 +60,7 @@ To run this environment comfortably, especially when utilizing the full 128k con
 
 ### Linux / WSL2
 
-- **Container runtime**: podman. `CONTAINER_RUNTIME` defaults to it and takes no other value.
+- **Container runtime**: podman (auto-detected).
 - **Network**: The default bridge interface is `podman0` and the proxy upstream network defaults to `podman`. Override via `BRIDGE_INTERFACE` and `PROXY_UPSTREAM_NETWORK` in `.env` if needed.
 - **LLaMA backend**: The `llama-server` binary runs natively on Linux/WSL2. For GPU acceleration on Linux, build llama.cpp with CUDA or ROCm support.
 - **WSL2**: Ensure WSL2 is properly configured with a Linux distro; podman runs inside it.

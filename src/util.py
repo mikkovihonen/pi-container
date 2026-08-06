@@ -99,27 +99,13 @@ def validate_environment(llama_bin: str | None) -> str:
     if shutil.which("hf") is None:
         raise EnvironmentError("hf not found. Install via: pip install huggingface_hub[cli]")
 
-    # Check for explicit CONTAINER_RUNTIME from .env first
-    explicit_runtime = os.environ.get("CONTAINER_RUNTIME", "").strip()
-    supported_runtimes = ("podman",)
-
-    if explicit_runtime:
-        if explicit_runtime not in supported_runtimes:
-            raise EnvironmentError(
-                f"Unsupported CONTAINER_RUNTIME '{explicit_runtime}'. "
-                f"Supported values: {', '.join(supported_runtimes)}."
-            )
-        return explicit_runtime
-
-    # Fall back to auto-detection
+    # Podman is the only supported runtime.
     runtime: str | None = None
-    for candidate in supported_runtimes:
-        if shutil.which(candidate) is not None:
-            runtime = candidate
-            break
+    if shutil.which("podman") is not None:
+        runtime = "podman"
 
     if runtime is None:
-        raise EnvironmentError("podman not found. Install it (macOS: brew install podman) or set CONTAINER_RUNTIME.")
+        raise EnvironmentError("podman not found. Install it (macOS: brew install podman).")
 
     return runtime
 

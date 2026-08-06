@@ -25,7 +25,6 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 | `PROXY_UPSTREAM_NETWORK` | The upstream network the proxy connects to for internet access | `podman` |
 | `LOG_LEVEL` | Log level | `INFO` |
 | `ADMIN_PASSWORD` | Password for mitmproxy Web UI | `CHANGEME` |
-| `CONTAINER_RUNTIME` | Container CLI to use — `podman` is the only supported value | Auto-detected (`podman`) |
 | `BUILDER_IMAGE_TAG` | The tag of the toolchain image the agent image copies node/python/podman from | `pi-coding-agent-builder:local` |
 | `NODE_SOURCE` | `build` compiles Node from source in the toolchain image (~1 hour) instead of staging the official tarball | `prebuilt` |
 | `PYTHON_OPTIMIZE` | `0` skips the PGO CPython build in the toolchain image: a fraction of the memory and time, ~10-20% slower Python | `1` (PGO on) |

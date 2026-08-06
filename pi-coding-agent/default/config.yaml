@@ -28,7 +28,7 @@ llama:
 # Network settings for this project's isolated stack.
 network:
   # Plumb IPv6 through the isolated network + proxy. Only works if the runtime
-  # AND host actually route IPv6 (leave false on macOS / Apple container).
+  # AND host actually route IPv6.
   ipv6: false
   # Upstream resolver the proxy uses for the agent's DNS lookups.
   dns: "1.1.1.1"
