@@ -411,6 +411,11 @@ hosts are permitted. Ship a **commented-out** block in the seeded
     #   hostnames:
     #     - "registry-1.docker.io"
     #     - "auth.docker.io"
+    #     # Docker Hub 307-redirects layer blobs to a CDN on docker.com, which
+    #     # "*.docker.io" does not cover. Without these, auth and manifest
+    #     # resolve and the pull then dies on the first layer with a 403.
+    #     - "production.cloudfront.docker.com"
+    #     - "*.cloudfront.docker.com"
     #     - "production.cloudflare.docker.com"
     #     - "*.docker.io"
     #     - "ghcr.io"
@@ -541,7 +546,8 @@ runtime would attach, and collapsing it would be a large diff for no gain.
 | Scenario | Behavior |
 |---|---|
 | `nested_containers.enabled: false` (default) | No new flags, no volume, no entrypoint work. Only cost is the toolchain's ~150 MB in the image. |
-| Nesting enabled, registries not allowlisted | Pulls fail with mitmproxy's 403. Needs a clear log line at startup — see [Open questions](#open-questions). |
+| Nesting enabled, registries not allowlisted | Pulls fail with mitmproxy's 403. `_warn_about_registry_allowlist` in `run.py` catches this at startup. |
+| Registry allowlisted, its blob CDN not | The subtler half of the same failure: token and manifest succeed, then the 307 to the CDN is blocked and the pull dies part-way through the first layer. Same preflight warns, naming the missing hostname. |
 | Nested container tries to reach the internet directly | Impossible — verified `Network unreachable`. Proxy is the only route. |
 | Nested container publishes a port | Binds in the agent's netns; reachable from the isolated network only, never from the host. |
 | Nested container bind-mounts `/workspace/...` | Works — nested containers are children in the agent's mount namespace. Cannot reach beyond what the agent already sees. |
@@ -597,10 +603,12 @@ Each phase leaves the tree working; the security-relevant surface all lands in 3
 
 ## Open questions
 
-1. **Startup warning for un-allowlisted registries.** When `nested_containers.enabled`
-   is true, `run.py` could scan `allowlist.yaml` for any registry hostname and log a
-   warning if none is present. Cheap, and turns a confusing mid-session 403 into a
-   startup hint. Recommend including in phase 4.
+1. ~~**Startup warning for un-allowlisted registries.**~~ Resolved — `run.py`'s
+   `_warn_about_registry_allowlist` scans `allowlist.yaml` when `nested_containers.enabled`
+   is true and warns both when no registry is present and when a registry is allowed
+   without the CDN host its layer blobs redirect to. The blob-host map is verified
+   against the live registries and needs re-checking when one moves its CDN, as Docker
+   Hub did (Cloudflare → CloudFront).
 2. **Concurrent runs sharing one nested-storage volume.** Two agents in the same
    workspace both mount `pi-nested-<hash>`, and each has its own `XDG_RUNTIME_DIR`, so
    podman's storage locks don't see each other — a plausible route to a corrupted store.

@@ -933,24 +933,55 @@ def _remove_volume(runtime: str, volume_name: str) -> bool:
 
 # ─── Registry allowlist preflight ──────────────────────────────────────────
 
-# Hostname fragments that indicate a container registry is reachable. The proxy's
-# allowlist ships default_action: block, so nesting is useless until one of these
-# is allowed — and the symptom (mitmproxy's 403 on `podman pull`, mid-session) is
-# confusing enough to be worth a startup hint.
-_REGISTRY_HOST_HINTS = (
-    "docker.io",
-    "ghcr.io",
-    "quay.io",
-    "gcr.io",
-    "registry.k8s.io",
-    "public.ecr.aws",
-    "mcr.microsoft.com",
-    "pkg-containers.githubusercontent.com",
-)
+# Registry hostname fragment → the hosts its layer blobs are 307-redirected to.
+# Allowing the registry alone is not enough: the token and manifest requests
+# succeed, then the redirect to the CDN falls through to default_action: block
+# and the pull dies part-way through the first layer with a 403.
+#
+# Each entry is (sample_host, suggested_pattern) — the sample is a concrete host
+# observed from the live registry (matched against the allowlist), the suggestion
+# is what to actually add, widened where the real host is region- or
+# account-dependent. Verified 2026-08-06; re-check when a registry moves its CDN,
+# as Docker Hub did (Cloudflare → CloudFront).
+_REGISTRY_BLOB_HOSTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "docker.io": (("production.cloudfront.docker.com", "*.cloudfront.docker.com"),),
+    "ghcr.io": (("pkg-containers.githubusercontent.com", "pkg-containers.githubusercontent.com"),),
+    "quay.io": (("cdn01.quay.io", "*.quay.io"),),
+    "gcr.io": (),  # serves blobs inline, no redirect
+    "registry.k8s.io": (("europe-north1-docker.pkg.dev", "*.pkg.dev"),),  # region-dependent
+    "public.ecr.aws": (("d2glxqk2uabbnd.cloudfront.net", "*.cloudfront.net"),),  # opaque distribution id
+    "mcr.microsoft.com": (("westeurope.data.mcr.microsoft.com", "*.data.mcr.microsoft.com"),),  # region-dependent
+}
+
+_REGEX_METACHARS = r"^$+{}[]()|"
 
 
-def _warn_if_no_registry_allowlisted(config_dir: Path) -> None:
-    """Warn when nesting is on but no container registry is allowlisted.
+def _hostname_allowed(host: str, patterns: list[str]) -> bool:
+    """Would the allowlist addon let ``host`` through, given these allow patterns?
+
+    Mirrors ``_matches_hostname`` in the proxy's allowlist addon: a pattern
+    containing a regex metacharacter is treated as a regex, anything else as a
+    glob. Duplicated rather than imported because the addon pulls in mitmproxy,
+    which is not a dependency of the launcher.
+    """
+    for pattern in patterns:
+        if any(c in pattern for c in _REGEX_METACHARS):
+            try:
+                if re.search(pattern, host, re.IGNORECASE):
+                    return True
+            except re.error:
+                continue
+        elif re.match("^" + re.escape(pattern).replace(r"\*", ".*").replace(r"\?", ".") + "$", host, re.IGNORECASE):
+            return True
+    return False
+
+
+def _warn_about_registry_allowlist(config_dir: Path) -> None:
+    """Warn when nesting is on but the allowlist cannot actually carry an image pull.
+
+    Two distinct gaps, both surfacing mid-session as an opaque mitmproxy 403:
+    no registry is allowed at all, or a registry is allowed without the CDN host
+    its blobs redirect to.
 
     Best-effort: an unreadable or malformed allowlist is the allowlist addon's
     problem to report, not this preflight's.
@@ -963,20 +994,34 @@ def _warn_if_no_registry_allowlisted(config_dir: Path) -> None:
     except Exception:
         return
 
-    hostnames = [
+    patterns = [
         str(host)
         for rule in (data.get("global") or {}).get("rules", []) or []
         if str((rule or {}).get("mode", "allow")) == "allow"
         for host in (rule or {}).get("hostnames", []) or []
     ]
-    if any(hint in host for host in hostnames for hint in _REGISTRY_HOST_HINTS):
+
+    allowed = [registry for registry in _REGISTRY_BLOB_HOSTS if any(registry in pattern for pattern in patterns)]
+    if not allowed:
+        logger.warning(
+            f"nested_containers.enabled is true but no container registry hostname is allowed in "
+            f"{allowlist_path}; image pulls from nested containers will fail with mitmproxy's 403. "
+            f"Uncomment the 'container-registries-allow' rule (or add the registries you use)."
+        )
         return
 
-    logger.warning(
-        f"nested_containers.enabled is true but no container registry hostname is allowed in "
-        f"{allowlist_path}; image pulls from nested containers will fail with mitmproxy's 403. "
-        f"Uncomment the 'container-registries-allow' rule (or add the registries you use)."
-    )
+    for registry in allowed:
+        missing = [
+            suggestion
+            for sample, suggestion in _REGISTRY_BLOB_HOSTS[registry]
+            if not _hostname_allowed(sample, patterns)
+        ]
+        if missing:
+            logger.warning(
+                f"{registry} is allowed in {allowlist_path}, but the host its layer blobs redirect to "
+                f"is not ({', '.join(missing)}); pulls will resolve the manifest and then fail on the "
+                f"first layer with mitmproxy's 403. Add those hostnames to the rule."
+            )
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────
@@ -1024,7 +1069,7 @@ def main() -> None:
             f"the agent can run its own rootless podman. Its traffic still egresses through the proxy, "
             f"but the agent container's SELinux confinement is relaxed."
         )
-        _warn_if_no_registry_allowlisted(pi_container_dir)
+        _warn_about_registry_allowlist(pi_container_dir)
 
     with config_path.open("r") as file:
         data = json.load(file)

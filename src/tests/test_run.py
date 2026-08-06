@@ -1628,7 +1628,7 @@ class TestVolumeHelpers:
 # ---------------------------------------------------------------------------
 
 
-class TestWarnIfNoRegistryAllowlisted:
+class TestWarnAboutRegistryAllowlist:
     def _allowlist(self, tmp_path: Path, hostnames: list[str]) -> Path:
         import yaml
 
@@ -1640,25 +1640,47 @@ class TestWarnIfNoRegistryAllowlisted:
     def test_warns_when_no_registry_present(self, tmp_path, caplog):
         self._allowlist(tmp_path, ["pypi.org", "github.com"])
         with caplog.at_level("WARNING"):
-            run._warn_if_no_registry_allowlisted(tmp_path)
+            run._warn_about_registry_allowlist(tmp_path)
         assert any("no container registry hostname is allowed" in r.message for r in caplog.records)
 
-    def test_silent_when_registry_allowed(self, tmp_path, caplog):
-        self._allowlist(tmp_path, ["pypi.org", "registry-1.docker.io"])
+    def test_silent_when_registry_and_its_cdn_allowed(self, tmp_path, caplog):
+        self._allowlist(tmp_path, ["pypi.org", "registry-1.docker.io", "*.cloudfront.docker.com"])
         with caplog.at_level("WARNING"):
-            run._warn_if_no_registry_allowlisted(tmp_path)
+            run._warn_about_registry_allowlist(tmp_path)
         assert caplog.records == []
 
-    def test_wildcard_registry_counts(self, tmp_path, caplog):
-        self._allowlist(tmp_path, ["*.ghcr.io"])
+    def test_warns_when_registry_allowed_without_its_blob_cdn(self, tmp_path, caplog):
+        """The failure this preflight exists for: manifest resolves, first layer 403s."""
+        self._allowlist(tmp_path, ["registry-1.docker.io", "auth.docker.io", "*.docker.io"])
         with caplog.at_level("WARNING"):
-            run._warn_if_no_registry_allowlisted(tmp_path)
+            run._warn_about_registry_allowlist(tmp_path)
+        assert any("*.cloudfront.docker.com" in r.message for r in caplog.records)
+
+    def test_stale_cloudflare_entry_does_not_satisfy_the_check(self, tmp_path, caplog):
+        """Docker Hub moved its blob CDN from Cloudflare to CloudFront."""
+        self._allowlist(tmp_path, ["registry-1.docker.io", "production.cloudflare.docker.com"])
+        with caplog.at_level("WARNING"):
+            run._warn_about_registry_allowlist(tmp_path)
+        assert any("*.cloudfront.docker.com" in r.message for r in caplog.records)
+
+    def test_wildcard_pattern_covers_blob_host(self, tmp_path, caplog):
+        """ghcr's blob host is usually already covered by the github rule's wildcard."""
+        self._allowlist(tmp_path, ["*.ghcr.io", "*.githubusercontent.com"])
+        with caplog.at_level("WARNING"):
+            run._warn_about_registry_allowlist(tmp_path)
+        assert caplog.records == []
+
+    def test_registry_without_blob_redirect_never_warns(self, tmp_path, caplog):
+        """gcr.io serves blobs inline, so the registry host alone is sufficient."""
+        self._allowlist(tmp_path, ["gcr.io", "*.gcr.io"])
+        with caplog.at_level("WARNING"):
+            run._warn_about_registry_allowlist(tmp_path)
         assert caplog.records == []
 
     def test_missing_allowlist_is_silent(self, tmp_path, caplog):
         """An unreadable allowlist is the addon's problem to report, not this preflight's."""
         with caplog.at_level("WARNING"):
-            run._warn_if_no_registry_allowlisted(tmp_path)
+            run._warn_about_registry_allowlist(tmp_path)
         assert caplog.records == []
 
     def test_commented_template_still_warns(self, tmp_path, caplog):
@@ -1667,5 +1689,39 @@ class TestWarnIfNoRegistryAllowlisted:
         template = repo_root / "pi-coding-agent" / "default" / "allowlist.yaml"
         (tmp_path / "allowlist.yaml").write_text(template.read_text())
         with caplog.at_level("WARNING"):
-            run._warn_if_no_registry_allowlisted(tmp_path)
+            run._warn_about_registry_allowlist(tmp_path)
         assert any("no container registry hostname is allowed" in r.message for r in caplog.records)
+
+    def test_shipped_registry_block_is_self_consistent(self, tmp_path, caplog):
+        """Uncommenting the template's registry rule must produce a clean preflight."""
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        template = (repo_root / "pi-coding-agent" / "default" / "allowlist.yaml").read_text()
+        uncommented = "\n".join(
+            line.replace("    # ", "    ", 1) if line.lstrip().startswith("#") else line
+            for line in template.splitlines()
+        )
+        (tmp_path / "allowlist.yaml").write_text(uncommented)
+        with caplog.at_level("WARNING"):
+            run._warn_about_registry_allowlist(tmp_path)
+        assert caplog.records == []
+
+
+class TestHostnameAllowed:
+    """Glob/regex semantics must match the proxy addon's `_matches_hostname`."""
+
+    @pytest.mark.parametrize(
+        "host,patterns,expected",
+        [
+            ("registry-1.docker.io", ["*.docker.io"], True),
+            ("production.cloudfront.docker.com", ["*.docker.io"], False),
+            ("production.cloudfront.docker.com", ["*.cloudfront.docker.com"], True),
+            ("evil.com", ["*.docker.io", "pypi.org"], False),
+            ("REGISTRY-1.DOCKER.IO", ["registry-1.docker.io"], True),
+            ("cdn01.quay.io", [r"^cdn\d+\.quay\.io$"], True),
+            ("sub.a.docker.io", ["*.docker.io"], True),
+            ("docker.io", ["*.docker.io"], False),
+            ("anything", ["*.["], False),  # malformed regex is skipped, not raised
+        ],
+    )
+    def test_matching(self, host, patterns, expected):
+        assert run._hostname_allowed(host, patterns) is expected

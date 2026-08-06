@@ -55,6 +55,11 @@ global:
     #   hostnames:
     #     - "registry-1.docker.io"
     #     - "auth.docker.io"
+    #     # Docker Hub 307-redirects layer blobs to a CDN on docker.com, which
+    #     # "*.docker.io" does not cover. Without these, auth and manifest
+    #     # resolve and the pull then dies on the first layer with a 403.
+    #     - "production.cloudfront.docker.com"
+    #     - "*.cloudfront.docker.com"
     #     - "production.cloudflare.docker.com"
     #     - "*.docker.io"
     #     - "ghcr.io"
