@@ -4,7 +4,9 @@ All notable changes to this project will be documented in this file. The format 
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## Unreleased
+
+## [0.4.1] - 2026-08-06
 
 ### Added
 - `_images_in_use()` and `_unused_volumes()` helpers: which images and volumes a container still holds open, so a cleanup pass can skip them instead of attempting a removal the runtime will refuse. The volume query is inverted (`volume ls --filter dangling=true`) because that is the form podman answers directly — `ps --format {{.Mounts}}` reports mount *destinations*, which cannot be mapped back to a volume name. A merely created, never-started container counts in both, matching `ps --all`. `_unused_volumes()` returns `None` rather than an empty set when the query fails, so "cannot tell" falls back to attempting the removal instead of silently skipping every volume.
