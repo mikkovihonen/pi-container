@@ -133,15 +133,27 @@ _truthy "$PROXY_ALLOW_NTP"  && _allow_fwd udp 123        "NTP"
 export ALLOWLIST_CONFIG_PATH="${ALLOWLIST_CONFIG_PATH:-/home/mitmproxy/config/allowlist.yaml}"
 export TOKEN_REPLACER_CONFIG_PATH="${TOKEN_REPLACER_CONFIG_PATH:-/home/mitmproxy/config/token_replacer.yaml}"
 
-# Execute the CMD as mitmproxy user. Load the allowlist (host/IP filtering),
+# Launch mitmweb as the mitmproxy user. Load the allowlist (host/IP filtering),
 # token_replacer (secret redaction), and flow_export (session flow history)
 # addons. The flow_export addon appends each captured flow (JSON Lines) to a
 # per-client-IP file /home/mitmproxy/exports/flows-<ip>.jsonl as it completes,
 # which is mounted from the host so run.py can read it after the session ends.
-exec gosu mitmproxy bash -c '
-    uv run mitmweb --mode transparent@8080 --mode dns@5353 --web-host 0.0.0.0 \
-        -s /home/mitmproxy/scripts/allowlist.py \
-        -s /home/mitmproxy/scripts/token_replacer.py \
-        -s /home/mitmproxy/scripts/flow_export.py \
-        --set web_password=$ADMIN_PASSWORD
-' -- "$@"
+#
+# WHY THE VENV BINARY AND NOT `uv run mitmweb`
+# `uv run` reconciles .venv against the project's DEFAULT dependency groups
+# (pyproject.toml [tool.uv] default-groups = src, proxy, dev) before it execs
+# anything. The image builds the venv with `--only-group proxy --no-dev`, so uv
+# saw a mismatch on EVERY container start and installed the missing src/dev
+# packages — ruff, pre-commit, pytest, huggingface_hub — from PyPI. That added
+# ~15s of downloads to each startup (more on a cold or slow network), enough to
+# blow run.py's 30s proxy health probe, and it ran before mitmproxy existed, so
+# the traffic was uninspected. Exec'ing the venv's own entry point keeps the
+# runtime environment exactly the frozen one the build produced and verified,
+# with no network at startup.
+exec gosu mitmproxy /home/mitmproxy/.venv/bin/mitmweb \
+    --mode transparent@8080 --mode dns@5353 --web-host 0.0.0.0 \
+    -s /home/mitmproxy/scripts/allowlist.py \
+    -s /home/mitmproxy/scripts/token_replacer.py \
+    -s /home/mitmproxy/scripts/flow_export.py \
+    --set web_password="$ADMIN_PASSWORD" \
+    "$@"

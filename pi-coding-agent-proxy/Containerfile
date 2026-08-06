@@ -74,14 +74,20 @@ ENV UV_PYTHON_DOWNLOADS=never
 
 RUN useradd -m mitmproxy
 
-# Proxy dependencies come from the main pyproject.toml + uv.lock (frozen, only the
-# proxy dependency group).
+# Proxy dependencies come from the main pyproject.toml + uv.lock (frozen).
+#
+# --no-default-groups suppresses [tool.uv] default-groups (src, proxy, dev) and
+# --group proxy adds back the only one this image needs, so the venv gets the
+# project's own dependencies (pyyaml — the allowlist and token_replacer addons
+# import it) plus mitmproxy, and none of the src/dev tooling. NOT --only-group
+# proxy: that installs the group ALONE, omitting pyyaml, and the addons then die
+# on ModuleNotFoundError at their first flow.
 COPY pyproject.toml uv.lock /home/mitmproxy/
 RUN chown mitmproxy:mitmproxy /home/mitmproxy/pyproject.toml /home/mitmproxy/uv.lock
 
 USER mitmproxy
 WORKDIR /home/mitmproxy
-RUN uv sync --frozen --only-group proxy --no-dev
+RUN uv sync --frozen --no-default-groups --group proxy
 RUN timeout 3s /home/mitmproxy/.venv/bin/mitmweb || [ $? -eq 124 ]
 
 USER root
@@ -109,6 +115,20 @@ RUN mkdir -p /home/mitmproxy/exports && chown mitmproxy:mitmproxy /home/mitmprox
 # mitmweb, independent of entrypoint export/gosu propagation.
 ENV ALLOWLIST_CONFIG_PATH=/home/mitmproxy/config/allowlist.yaml
 ENV TOKEN_REPLACER_CONFIG_PATH=/home/mitmproxy/config/token_replacer.yaml
+
+# Start mitmproxy the way the entrypoint does — real addons, real user, real
+# baked configs — and require that it survives. The bare `mitmweb` check above
+# loads no scripts, so it cannot see a dependency the addons need but the venv
+# lacks (pyyaml was exactly that), an unreadable script, or a config that does
+# not parse. Placed after the ENV lines so the addons resolve the same config
+# paths they will at run time. mitmproxy logs the traceback and exits non-zero on
+# any addon error, so the only acceptable outcome is 124: still running when
+# timeout killed it.
+RUN timeout 5s gosu mitmproxy /home/mitmproxy/.venv/bin/mitmdump \
+        -s /home/mitmproxy/scripts/allowlist.py \
+        -s /home/mitmproxy/scripts/token_replacer.py \
+        -s /home/mitmproxy/scripts/flow_export.py \
+    || [ $? -eq 124 ]
 
 EXPOSE 8080 8081
 

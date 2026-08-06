@@ -27,12 +27,18 @@ This addon also works in reverse: in `block` mode, only blocked hosts/IPs are de
 The addon is loaded as part of the mitmproxy startup in the [entrypoint](https://github.com/mikkovihonen/pi-container/blob/main/pi-coding-agent-proxy/entrypoint.sh), alongside the `token_replacer` and `flow_export` addons:
 
 ```bash
-uv run mitmweb --mode transparent@8080 --mode dns@5353 --web-host 0.0.0.0 \
+exec gosu mitmproxy /home/mitmproxy/.venv/bin/mitmweb \
+    --mode transparent@8080 --mode dns@5353 --web-host 0.0.0.0 \
     -s /home/mitmproxy/scripts/allowlist.py \
     -s /home/mitmproxy/scripts/token_replacer.py \
     -s /home/mitmproxy/scripts/flow_export.py \
-    --set web_password=$ADMIN_PASSWORD
+    --set web_password="$ADMIN_PASSWORD"
 ```
+
+The venv's own `mitmweb` is invoked directly rather than through `uv run`: `uv
+run` would re-resolve the environment against the project's default dependency
+groups on every container start, which meant downloading packages from PyPI
+before mitmproxy existed to inspect the traffic.
 
 The config file path is set via the `ALLOWLIST_CONFIG_PATH` environment
 variable, which points to the mounted host config at
