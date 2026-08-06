@@ -248,7 +248,7 @@ class ContainerRuntime(ABC):
           ``/home/pi`` is tmpfs, and the container rootfs is overlayfs (podman
           would degrade to the full-copy ``vfs`` driver on overlay-on-overlay).
         * ``XDG_RUNTIME_DIR`` — rootless podman's lock/pid directory, created by
-          the entrypoint (which is gated on ``NESTED_CONTAINERS``).
+          the entrypoint (which is gated on ``PI_CONTAINER_NESTED``).
 
         Why ``unmask=ALL`` and ``SYS_ADMIN`` are both needed — each was isolated
         by starting an inner ``alpine`` container from the agent image:
@@ -295,7 +295,7 @@ class ContainerRuntime(ABC):
             "--env",
             "XDG_RUNTIME_DIR=/run/user/1000",
             "--env",
-            "NESTED_CONTAINERS=true",
+            "PI_CONTAINER_NESTED=true",
         ]
 
     def nested_port_args(self, cfg: dict) -> list[str]:

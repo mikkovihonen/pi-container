@@ -1050,6 +1050,60 @@ def _unavailable_host_ports(publish: list[tuple[int, int]], expose: str) -> list
     return taken
 
 
+def _port_holders(runtime: str, ports: list[int], project_key: str = "") -> dict[int, str]:
+    """Describe, per port, which running container publishes it. Best-effort.
+
+    "Free them" is advice you cannot act on without going and looking, which is
+    the same gap :func:`_unavailable_host_ports` exists to close for podman's own
+    message. The holder is almost always another pi agent — a previous session
+    for this workspace still running, or a concurrent one — so naming it turns
+    the error into an instruction.
+
+    Attribution only, never a gate: any failure returns ``{}`` and the caller
+    falls back to naming the port alone. A port held by a plain host process
+    (not a container) is legitimately unattributable and reported that way.
+
+    ``project_key`` marks the holder as belonging to *this* workspace. Agent
+    containers are named per run (``pi-coding-agent-<uuid>``), so identity comes
+    from the project image tag, which embeds the key.
+    """
+    if not ports:
+        return {}
+    try:
+        result = subprocess.run(
+            [runtime, "ps", "--format", "json"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+        containers = json.loads(result.stdout or "[]")
+    except OSError, subprocess.SubprocessError, json.JSONDecodeError:
+        return {}
+
+    wanted = set(ports)
+    holders: dict[int, str] = {}
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        names = container.get("Names") or []
+        name = names[0] if names else container.get("Id", "")[:12]
+        image = str(container.get("Image") or "")
+        status = str(container.get("Status") or "").strip()
+        for mapping in container.get("Ports") or []:
+            start = mapping.get("host_port")
+            if not isinstance(start, int):
+                continue
+            # A single entry can cover a published *range* (`-p 8000-8010:...`),
+            # in which case host_port is only its first port.
+            span = mapping.get("range") if isinstance(mapping.get("range"), int) else 1
+            for port in range(start, start + max(span, 1)):
+                if port in wanted and port not in holders:
+                    mine = " — this workspace" if project_key and project_key in image else ""
+                    holders[port] = f"{name}{mine}" + (f" ({status})" if status else "")
+    return holders
+
+
 # ─── Main ──────────────────────────────────────────────────────────────────
 
 
@@ -1063,7 +1117,11 @@ def main() -> None:
     # Validate per-project config schema and version compatibility.
     pi_container_dir = PROJECT_DIR / ".pi-container"
     config_yaml_path = pi_container_dir / "config.yaml"
-    is_valid, errors, _ = validate_config(config_yaml_path)
+    # The schema_version is kept, not discarded: it becomes PI_CONTAINER_VERSION
+    # inside the agent. Validation above has already established that it matches
+    # the git tag whenever tags exist, so it is the version of the runner and not
+    # merely what the file claims.
+    is_valid, errors, schema_version = validate_config(config_yaml_path)
     if not is_valid:
         logger.error("Configuration incompatible with this version of pi-container:")
         for error in errors:
@@ -1117,8 +1175,12 @@ def main() -> None:
             # would only reject it after the images are built and the proxy is up.
             taken = _unavailable_host_ports(nested_ports["publish"], nested_ports["expose"])
             if taken:
+                logger.error(f"Host port(s) already in use: {', '.join(str(p) for p in taken)}")
+                holders = _port_holders(CONTAINER_RUNTIME, taken, _project_key(PROJECT_DIR))
+                for port in taken:
+                    holder = holders.get(port)
+                    logger.error(f"  {port} → {holder}" if holder else f"  {port} → not held by a container")
                 logger.error(
-                    f"Host port(s) already in use: {', '.join(str(p) for p in taken)}. "
                     f"Free them, or change nested_containers.ports.publish in "
                     f"{config_yaml_path} (an entry may be written 'HOSTPORT:AGENTPORT' to remap)."
                 )
@@ -1377,6 +1439,12 @@ def main() -> None:
                     f"LLAMA_PORTS={portconfig}",
                     "--env",
                     f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",
+                    # Part of the PI_CONTAINER_* contract a project's scripts can
+                    # depend on (docs/configuration.md). The marker itself and
+                    # PI_CONTAINER_HOST_IP are ENV in the image, since they are
+                    # true of the image; the version describes this run, so it is
+                    # injected here rather than baked in and left to go stale.
+                    *(["--env", f"PI_CONTAINER_VERSION={schema_version}"] if schema_version else []),
                     # Extra agent env vars + bind mounts + capabilities + devices (config.yaml agent.env/mounts/capabilities/devices).
                     *[flag for k, v in agent_extras["env"].items() for flag in ("--env", f"{k}={v}")],
                     *[flag for m in agent_extras["mounts"] for flag in ("--volume", m)],

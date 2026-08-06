@@ -34,14 +34,14 @@ else
     printf 'Acquire::ForceIPv4 "true";\n' > /etc/apt/apt.conf.d/99force-ipv4
 fi
 
-# ─── Nested container support (NESTED_CONTAINERS, injected by run.py) ─────
+# ─── Nested container support (PI_CONTAINER_NESTED, injected by run.py) ───
 # Only the setup that genuinely needs root happens here, before `gosu pi`.
 # Rootless podman needs a private XDG_RUNTIME_DIR for its locks and pid files,
 # and it must own its own image store: the volume (or tmpfs) mounted at
 # ~/.local/share/containers is freshly created and root-owned on the first run.
 # The chown is deliberately non-recursive — a populated store already belongs to
 # pi, and walking every layer would be slow for nothing.
-if [ "${NESTED_CONTAINERS}" = "true" ]; then
+if [ "${PI_CONTAINER_NESTED}" = "true" ]; then
     mkdir -p /run/user/1000
     chown pi:pi /run/user/1000
     chmod 700 /run/user/1000

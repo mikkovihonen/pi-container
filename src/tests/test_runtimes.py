@@ -252,7 +252,18 @@ class TestNestedContainerArgs:
         assert "/dev/fuse" in args
         assert "/dev/net/tun" in args
         assert "XDG_RUNTIME_DIR=/run/user/1000" in args
-        assert "NESTED_CONTAINERS=true" in args
+        assert "PI_CONTAINER_NESTED=true" in args
+
+    def test_nested_flag_is_namespaced_with_no_legacy_alias(self):
+        """``NESTED_CONTAINERS`` was the pre-``PI_CONTAINER_*`` name and is gone.
+
+        No fallback is shipped because ``run.py`` rebuilds the project image from
+        this repo on every launch, so the runner and the entrypoint reading this
+        flag are always the same version — there is no window in which an old
+        image meets a new runner.
+        """
+        args = PodmanRuntime().nested_container_args(_nested(), "abcdef1234")
+        assert not any(a.startswith("NESTED_CONTAINERS") for a in args)
 
     def test_enabled_grants_sys_admin_and_unmask(self):
         """Both were measured as necessary, not predicted: without unmask=ALL the

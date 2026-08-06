@@ -153,7 +153,7 @@ Added to the agent `podman run` when nesting is enabled:
 | `--cap-add SYS_ADMIN` | **Correction, measured during implementation.** Podman's default seccomp profile permits `mount`/`sethostname`/`umount2`/`pivot_root` only when `CAP_SYS_ADMIN` is in the container's capability set, and a seccomp filter cannot be relaxed from inside a nested userns. Without this, the inner runtime dies with `crun: sethostname: Operation not permitted`. |
 | `--volume pi-nested-<project-hash>:/home/pi/.local/share/containers` | Persistent nested image store |
 | `--env XDG_RUNTIME_DIR=/run/user/1000` | Rootless podman's lock/pid directory |
-| `--env NESTED_CONTAINERS=true` | Entrypoint gate (see below) |
+| `--env PI_CONTAINER_NESTED=true` | Entrypoint gate (see below) |
 
 The two corrections above replace this design's original claim that nesting needs no
 capability or seccomp relaxation. That claim came from testing only the *primitive*
@@ -459,10 +459,10 @@ compiler minutes in. Enabling nesting warrants more again.
 the one setup step that needs it:
 
 ```bash
-# ─── Nested container support (NESTED_CONTAINERS, injected by run.py) ─────
+# ─── Nested container support (PI_CONTAINER_NESTED, injected by run.py) ───
 # Rootless podman needs a private XDG_RUNTIME_DIR for its locks and pid files.
 # Created here (as root, pre-gosu) because the agent runs as pi.
-if [ "${NESTED_CONTAINERS}" = "true" ]; then
+if [ "${PI_CONTAINER_NESTED}" = "true" ]; then
     mkdir -p /run/user/1000
     chown pi:pi /run/user/1000
     chmod 700 /run/user/1000
@@ -682,9 +682,14 @@ rejected: rewriting `/etc/hosts` in the agent image (the agent's own entry is co
 it would be wrong for containers that legitimately mean the host).
 
 **So this stays a documented constraint with a per-project fix**: the literal address in
-the project's own config, held in a local, gitignored file rather than a committed one —
-`169.254.1.2` is meaningless outside a pi-container agent and would break the same stack
-run anywhere else. Documented in
+the project's own config. That does not have to be an untracked file. `169.254.1.2` is
+meaningless outside a pi-container agent, but a compose **named overlay** confines it —
+an explicit `-f` list replaces auto-discovery, so `docker-compose.pi-container.yml` is
+inert for everyone who does not pass it, while `docker-compose.override.yml` (loaded
+automatically) would not be. That makes the fix reviewable and shared instead of
+rediscovered per operator. Selecting it is what the `PI_CONTAINER` marker is for, so
+"forgot the overlay" stops being a failure mode rather than becoming a warning; the
+address is `PI_CONTAINER_HOST_IP` wherever substitution is possible. Documented in
 [Configuration](../configuration.md#nested-containers) because the failure gives the
 operator nothing to search for: no error, no log line, just an empty graph.
 
@@ -779,7 +784,7 @@ Each phase leaves the tree working; the security-relevant surface all lands in 3
 | `src/schema_common.py` | `SCHEMA` gains `nested_containers` (`enabled`, `storage`, `security`). |
 | `pi-coding-agent/Containerfile` | Nesting runtime packages; `COPY --from` the toolchain image; `/etc/subuid`/`/etc/subgid`; `setcap` on `newuidmap`/`newgidmap`; `docker` shim; `/etc/containers/{policy.json,registries.conf,containers.conf.d/50-pi-container.conf}`. |
 | `pi-coding-agent-builder/` | **New.** Builds podman 6 (explicit `BUILDTAGS`), netavark/aardvark-dns 2.0 and CPython/uv/podman-compose from source, and stages Node 26 (official tarball by default, `NODE_SOURCE=build` to compile) — one independent stage each, under `/out`. Every version, commit and sha256 is an `ARG` in its `Containerfile`; the scripts assert them via `require_env` and default nothing. |
-| `pi-coding-agent/entrypoint.sh` | `NESTED_CONTAINERS` block creating/chowning `/run/user/1000` and the store. |
+| `pi-coding-agent/entrypoint.sh` | `PI_CONTAINER_NESTED` block creating/chowning `/run/user/1000` and the store. |
 | `pi-coding-agent/default/config.yaml` | New `nested_containers` section; bump `schema_version`. |
 | `pi-coding-agent/default/allowlist.yaml` | Commented registry allow-rule block. |
 | `docs/configuration.md`, `docs/architecture.md`, `docs/getting-started.md` | Document the section, the trust model change, machine sizing; drop Docker references. |

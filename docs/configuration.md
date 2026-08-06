@@ -346,6 +346,36 @@ agent:
 
 Device entries support the optional `mode` suffix (`r` for read-only, `w` for write-only, `rw` for read-write; default is `rw` if omitted).
 
+<a name="pi-container-environment"></a>
+### The `PI_CONTAINER_*` environment contract
+
+A project's own scripts often need to behave differently inside the agent — pick a different compose overlay, skip a test that wants host networking, point a tool at an address that only exists here. The agent injects a small, stable set of variables for exactly that, so nothing has to probe for it. Every variable pi-container sets shares the `PI_CONTAINER` prefix.
+
+| Variable | Value | Set by |
+|----------|-------|--------|
+| `PI_CONTAINER` | `1`, always | The image. Present for every process — login shells, `podman exec`, anything the entrypoint never touches. |
+| `PI_CONTAINER_VERSION` | The running pi-container version, e.g. `0.4.2` | `run.py`, from the validated `schema_version`. Absent if the workspace has none. |
+| `PI_CONTAINER_HOST_IP` | `169.254.1.2` | The image. Where the **agent** is reachable from inside a nested container — see [Nested containers](#nested-containers). |
+| `PI_CONTAINER_NESTED` | `true` | `run.py`, only when `nested_containers.enabled` is true. |
+
+Test the marker, not a side effect:
+
+```make
+# A project Makefile choosing a compose overlay
+ifdef PI_CONTAINER
+  COMPOSE_FILES := -f docker-compose.yml -f docker-compose.pi-container.yml
+endif
+```
+
+```bash
+# A shell script
+if [ -n "$PI_CONTAINER" ]; then …; fi
+```
+
+`PI_CONTAINER` is deliberately **not** a general "am I in a container" test — `/run/.containerenv` and `/.dockerenv` answer that, and they are true inside nested containers too. This one means *this* container: the agent, with its isolated network, its proxy-only egress, and the workspace bind-mounted at `/workspace`.
+
+Two properties worth relying on. The variables are set at the image and `run` layers, so they survive `podman exec` and any shell the agent spawns. And they do **not** propagate into nested containers — a container the agent starts gets a clean environment, which is what makes `PI_CONTAINER` mean "I am the agent" rather than "I am somewhere under it".
+
 <a name="nested-containers"></a>
 ### Nested containers
 
@@ -450,19 +480,34 @@ Measured from inside a nested container, against a listener on `0.0.0.0:9100` in
 
 busybox `wget` takes the first match and succeeds, so a quick check from inside the container passes. Go's resolver sorts multi-address results by RFC 6724 destination-address selection, which ranks a global-scope address above a link-local one — so a Go client dials `192.168.127.254` first and a short timeout expires before any fallback. Prometheus stayed `down` with `context deadline exceeded` until the podman line was deleted from `/etc/hosts` by hand, at which point it went `up` on the next scrape. Anything else with RFC 6724-aware resolution (Go, glibc `getaddrinfo`) behaves the same way.
 
-Podman will not omit its own entry: `--no-hosts` suppresses it but is mutually exclusive with `--add-host`. So put the literal address wherever the target is configured, and keep that in a local file:
+Podman will not omit its own entry: `--no-hosts` suppresses it but is mutually exclusive with `--add-host`. So put the literal address wherever the target is configured. For a compose stack, that fits in a **named overlay** — a tracked file that only applies when it is asked for, because an explicit `-f` list replaces compose's auto-discovery:
 
 ```yaml
-# docker-compose.override.yml — gitignored
+# docker-compose.pi-container.yml — tracked, and inert unless named
 services:
   prometheus:
     volumes:
       # Replaces rather than adds: compose merges volumes keyed on the
-      # container-side target path.
-      - ./config/prometheus.local.yml:/etc/prometheus/prometheus.yml:ro
+      # container-side target path, so the committed mount is superseded
+      # while named volumes survive.
+      - ./config/prometheus.pi-container.yml:/etc/prometheus/prometheus.yml:ro
 ```
 
-Local, not committed: `169.254.1.2` means nothing outside a pi-container agent, so hardcoding it in a tracked file breaks every non-nested run of the same stack. It is also **coupled to podman's rootless-netns layout**, not to a documented interface — treat it as a version-pinned constant that a podman upgrade in the agent image can invalidate, and whose failure mode is a silently empty dashboard.
+```
+compose -f docker-compose.yml -f docker-compose.pi-container.yml up -d
+```
+
+The name matters: `docker-compose.override.yml` is loaded automatically, so an agent-only address placed there reaches every operator and has to be gitignored to stay out of their way. Any other filename is inert until passed with `-f`, which is what makes the fix safe to commit and review rather than something each operator rediscovers.
+
+Selecting it is what [`PI_CONTAINER`](#pi-container-environment) is for — no probing, and no way to forget:
+
+```make
+ifdef PI_CONTAINER
+  COMPOSE_FILES := -f docker-compose.yml -f docker-compose.pi-container.yml
+endif
+```
+
+The address itself is available as `PI_CONTAINER_HOST_IP`, so a generated config or a tool invocation can substitute it instead of hardcoding. Prometheus is the awkward case — its config file has no environment substitution, so the literal has to be written down somewhere. That makes the caveat worth repeating: `169.254.1.2` is **coupled to podman's rootless-netns layout**, not to a documented interface. Treat it as a version-pinned constant that a podman upgrade in the agent image can invalidate, and whose failure mode is a silently empty dashboard.
 
 This is **not** fixable in the image's `containers.conf` drop-in, which is where the `netns` default above lives. `host_containers_internal_ip` is ignored there, under `[containers]` and under `[network]` alike — verified with an override file proven to be read (a marker `env` entry in the same file reached the container while the `/etc/hosts` line stayed unchanged). The agent has `/run/.containerenv`, so the nested podman detects that it is itself inside a container and propagates the agent's own `host.containers.internal` entry, which outranks the config key. Hence a per-project fix rather than a transparent default.
 

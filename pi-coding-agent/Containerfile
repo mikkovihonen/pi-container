@@ -261,6 +261,36 @@ RUN mkdir -p /etc/containers/containers.conf.d \
       'compose_warning_logs = false' \
     > /etc/containers/containers.conf.d/50-pi-container.conf
 
+# ─── The PI_CONTAINER_* environment contract ────────────────────────────────
+#
+# What a project's own scripts test to know they are running inside the agent,
+# so a Makefile, compose wrapper or test harness can pick agent-specific
+# settings without probing for them. Everything pi-container injects shares this
+# prefix; see docs/configuration.md.
+#
+#   PI_CONTAINER=1          set here, so it is present for every process in the
+#                           image — login shells, `podman exec`, and anything the
+#                           entrypoint never touches. Its truth is a property of
+#                           the image, not of how run.py invoked it.
+#   PI_CONTAINER_HOST_IP    where the agent is reachable **from inside a nested
+#                           container**, which is the one address projects
+#                           routinely need and cannot guess. It lives next to the
+#                           podman pin on purpose: the value is podman's, not
+#                           ours — its rootless netns is built with
+#                           `pasta --map-guest-addr 169.254.1.2` — so a podman
+#                           upgrade in the builder image must re-check it. The
+#                           conventional name for this, host.containers.internal,
+#                           is WRONG inside an agent: podman propagates the
+#                           agent's own entry, which points at the host machine
+#                           the agent has no route to.
+#
+# Injected by run.py rather than here, because they describe the run and not the
+# image: PI_CONTAINER_VERSION, PI_CONTAINER_NESTED. The latter replaces the
+# unprefixed NESTED_CONTAINERS outright, with no fallback — run.py rebuilds this
+# image from this repo on every launch, so runner and image cannot disagree.
+ENV PI_CONTAINER=1
+ENV PI_CONTAINER_HOST_IP=169.254.1.2
+
 COPY pi-coding-agent/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent

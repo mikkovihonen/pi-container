@@ -5,6 +5,7 @@ Run with:
     python -m pytest src/tests/test_run.py -v
 """
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -1786,3 +1787,83 @@ class TestUnavailableHostPorts:
             assert run._unavailable_host_ports([(port, port)], "lan") == [port]
         finally:
             sock.close()
+
+
+class TestPortHolders:
+    """Attribution for a port conflict: which container is holding it."""
+
+    @staticmethod
+    def _ps(payload, monkeypatch, returncode: int = 0):
+        """Stand in for ``<runtime> ps --format json``."""
+        import subprocess
+
+        def fake_run(cmd, **kwargs):
+            assert cmd[1:] == ["ps", "--format", "json"]
+            if returncode:
+                raise subprocess.CalledProcessError(returncode, cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout=payload, stderr="")
+
+        monkeypatch.setattr(run.subprocess, "run", fake_run)
+
+    @staticmethod
+    def _container(name: str, host_port: int, *, image: str = "alpine", span: int = 1, status: str = "Up 2 minutes"):
+        return {
+            "Names": [name],
+            "Image": image,
+            "Status": status,
+            "Ports": [{"host_ip": "127.0.0.1", "host_port": host_port, "container_port": 80, "range": span}],
+        }
+
+    def test_no_ports_asked_makes_no_subprocess_call(self, monkeypatch):
+        def explode(*a, **k):  # pragma: no cover — must never run
+            raise AssertionError("should not shell out for an empty port list")
+
+        monkeypatch.setattr(run.subprocess, "run", explode)
+        assert run._port_holders("podman", []) == {}
+
+    def test_names_the_container_publishing_the_port(self, monkeypatch):
+        self._ps(json.dumps([self._container("pi-coding-agent-abc123", 18080)]), monkeypatch)
+        assert run._port_holders("podman", [18080]) == {18080: "pi-coding-agent-abc123 (Up 2 minutes)"}
+
+    def test_marks_a_holder_belonging_to_this_workspace(self, monkeypatch):
+        """Agent containers are named per run, so identity comes from the image tag."""
+        image = "localhost/pi-container-project-f155d7064f-60e201e6.local:latest"
+        self._ps(json.dumps([self._container("pi-coding-agent-abc123", 18080, image=image)]), monkeypatch)
+        holders = run._port_holders("podman", [18080], "f155d7064f")
+        assert "this workspace" in holders[18080]
+
+    def test_other_workspace_is_not_marked_as_this_one(self, monkeypatch):
+        image = "localhost/pi-container-project-aaaaaaaaaa-60e201e6.local:latest"
+        self._ps(json.dumps([self._container("pi-coding-agent-abc123", 18080, image=image)]), monkeypatch)
+        holders = run._port_holders("podman", [18080], "f155d7064f")
+        assert "this workspace" not in holders[18080]
+
+    def test_a_published_range_covers_every_port_in_it(self, monkeypatch):
+        """`-p 8000-8010:...` reports host_port 8000 with range 11, not 11 entries."""
+        self._ps(json.dumps([self._container("ranged", 8000, span=11)]), monkeypatch)
+        holders = run._port_holders("podman", [8005])
+        assert holders[8005].startswith("ranged")
+
+    def test_unrelated_ports_are_not_reported(self, monkeypatch):
+        self._ps(json.dumps([self._container("other", 9999)]), monkeypatch)
+        assert run._port_holders("podman", [18080]) == {}
+
+    def test_runtime_failure_degrades_to_no_attribution(self, monkeypatch):
+        """Diagnostics must never be able to break the launch path they explain."""
+        self._ps("", monkeypatch, returncode=125)
+        assert run._port_holders("podman", [18080]) == {}
+
+    def test_unparseable_output_degrades_to_no_attribution(self, monkeypatch):
+        self._ps("not json at all", monkeypatch)
+        assert run._port_holders("podman", [18080]) == {}
+
+    def test_malformed_entries_are_skipped_not_fatal(self, monkeypatch):
+        payload = json.dumps(
+            [
+                "a bare string, not a container",
+                {"Names": [], "Ports": [{"host_port": None}]},
+                {"Names": ["good"], "Image": "x", "Status": "Up", "Ports": [{"host_port": 18080, "range": 1}]},
+            ]
+        )
+        self._ps(payload, monkeypatch)
+        assert run._port_holders("podman", [18080]) == {18080: "good (Up)"}
