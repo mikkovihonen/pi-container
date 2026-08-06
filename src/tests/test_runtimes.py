@@ -230,7 +230,13 @@ _STORE = "/home/pi/.local/share/containers"
 
 def _nested(**overrides) -> dict:
     """A nested_containers config dict, as read_nested_containers_config returns."""
-    return {"enabled": True, "storage": "volume", "security": "disable", **overrides}
+    return {
+        "enabled": True,
+        "storage": "volume",
+        "security": "disable",
+        "ports": {"expose": "localhost", "publish": []},
+        **overrides,
+    }
 
 
 class TestNestedContainerArgs:
@@ -296,3 +302,41 @@ class TestNestedContainerArgs:
     def test_volume_name_is_per_project(self):
         assert PodmanRuntime.nested_volume_name("abcdef1234") == "pi-nested-abcdef1234"
         assert PodmanRuntime.nested_volume_name("0123456789") != PodmanRuntime.nested_volume_name("abcdef1234")
+
+
+class TestNestedPortArgs:
+    """``-p`` flags republishing a nested container's UI port to the host.
+
+    A nested container's own ``-p`` binds inside the agent's netns only; the agent
+    container has to publish it onward, and published ports are fixed at start.
+    """
+
+    def test_nothing_published_by_default(self):
+        assert PodmanRuntime().nested_port_args(_nested()) == []
+
+    def test_disabled_publishes_nothing_even_if_listed(self):
+        """The relaxation and the inbound surface are both scoped to nesting being on."""
+        cfg = _nested(enabled=False, ports={"expose": "localhost", "publish": [(3000, 3000)]})
+        assert PodmanRuntime().nested_port_args(cfg) == []
+
+    def test_localhost_scope_binds_loopback_only(self):
+        cfg = _nested(ports={"expose": "localhost", "publish": [(3000, 3000)]})
+        assert PodmanRuntime().nested_port_args(cfg) == ["-p", "127.0.0.1:3000:3000"]
+
+    def test_lan_scope_binds_every_interface(self):
+        cfg = _nested(ports={"expose": "lan", "publish": [(3000, 3000)]})
+        assert PodmanRuntime().nested_port_args(cfg) == ["-p", "3000:3000"]
+
+    def test_remapped_port_is_host_then_agent(self):
+        cfg = _nested(ports={"expose": "localhost", "publish": [(18080, 8080)]})
+        assert PodmanRuntime().nested_port_args(cfg) == ["-p", "127.0.0.1:18080:8080"]
+
+    def test_multiple_ports_each_get_a_flag(self):
+        cfg = _nested(ports={"expose": "localhost", "publish": [(3000, 3000), (5173, 5173)]})
+        args = PodmanRuntime().nested_port_args(cfg)
+        assert args == ["-p", "127.0.0.1:3000:3000", "-p", "127.0.0.1:5173:5173"]
+
+    def test_missing_ports_key_is_not_fatal(self):
+        """A config read by an older path (or a hand-edited one) must not crash."""
+        cfg = {"enabled": True, "storage": "volume", "security": "disable"}
+        assert PodmanRuntime().nested_port_args(cfg) == []

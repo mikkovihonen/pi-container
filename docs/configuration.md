@@ -249,6 +249,9 @@ nested_containers:
   enabled: false              # let the agent run its own containers (off by default)
   storage: volume             # nested image store: volume | tmpfs
   security: disable           # agent SELinux label: disable | engine_t
+  ports:
+    expose: localhost         # host bind for published ports: localhost | lan
+    publish: []               # host ports for nested-container UIs, e.g. [3000]
 tmpfs:
   paths: []
 flow_export:
@@ -343,6 +346,9 @@ nested_containers:
   enabled: false
   storage: volume     # volume | tmpfs
   security: disable   # disable | engine_t
+  ports:
+    expose: localhost # localhost | lan
+    publish: []       # e.g. [3000, 5173, "18080:8080"]
 ```
 
 | Key | Values | Meaning |
@@ -350,8 +356,10 @@ nested_containers:
 | `enabled` | `false` (default) / `true` | When false, no extra run flags, no volume, no entrypoint work — the only cost is the toolchain's ~150 MB in the image. |
 | `storage` | `volume` (default) / `tmpfs` | Where nested image layers live. `volume` is a persistent per-project named volume (`pi-nested-<project-hash>`) that survives runs, so base images are not re-pulled every session. `tmpfs` is a volatile RAM disk — it needs a large `podman machine` and re-pulls each run. |
 | `security` | `disable` (default) / `engine_t` | The agent container's SELinux label (see below). |
+| `ports.publish` | `[]` (default) | Host ports for UIs served by nested containers (see below). |
+| `ports.expose` | `localhost` (default) / `lan` | Whether those ports bind `127.0.0.1` only, or every interface. |
 
-**Egress is still intercepted.** Containers the agent starts are *children* — in its mount and network namespaces — so rootless podman NATs their traffic (via `pasta`) into the agent's own network stack, subject to the agent's routes. The agent's only route out is the proxy, and the proxy's `FORWARD` policy is `DROP`. Verified: with the agent on the `--internal` isolated network, a nested container reaching for a raw IP gets `Network unreachable` from the kernel. Nesting is **not** a bypass, and the proxy needs no changes.
+**Egress is still intercepted.** Containers the agent starts are *children* — in its mount and network namespaces — so rootless podman NATs their traffic into the agent's own network stack, subject to the agent's routes. The agent's only route out is the proxy, and the proxy's `FORWARD` policy is `DROP`. Verified: with the agent on the `--internal` isolated network, a nested container reaching for a raw IP gets `Network unreachable` from the kernel. Nesting is **not** a bypass, and the proxy needs no changes.
 
 Two honest consequences:
 
@@ -380,6 +388,30 @@ Egress interception is unaffected by any of this. Verified with the final flag s
 |-----------|-----------|-----------|
 | `disable` (default) | `--security-opt label=disable` | Nested containers need no special flags — `docker compose`, testcontainers and anything driving the API socket work unmodified. The agent loses SELinux *type* confinement, but keeps the user namespace (container uid 0 is still an unprivileged host user), rootlessness, seccomp, the capability bounding set, the routing dead end, and the absence of any host socket. |
 | `engine_t` | `--security-opt label=type:container_engine_t` | The agent stays SELinux-confined, but **every** nested container must then be run with `--security-opt unmask=all` or it fails in `crun` (`mount tmpfs to proc/acpi: Permission denied`). `unmask` is not a `containers.conf` key, so this cannot be made transparent. |
+
+**Reaching a nested container's UI from the host.** A nested container's own `-p 3000:3000` publishes into the **agent's** network namespace, not the host's — a browser on the host has nothing to connect to, because the agent container is the outermost thing the host can see and it publishes no ports of its own. `ports.publish` closes that last hop by having the agent container republish the port:
+
+```yaml
+nested_containers:
+  enabled: true
+  ports:
+    expose: localhost
+    publish:
+      - 3000            # host 3000 → agent 3000
+      - 5173
+      - "18080:8080"    # host 18080 → agent 8080
+```
+
+Two things then have to line up, because pi-container only builds the outer hop:
+
+1. **The nested container must publish the agent-side port itself** — `podman run -p 3000:3000 …`, or a compose `ports:` entry. Listing `3000` here does not reach into a nested container that only listens on its own internal port.
+2. **The service must listen on all interfaces inside the nested container**, not `127.0.0.1`. A dev server bound to loopback is unreachable from outside its own container, whatever is published in front of it. (Vite: `--host`. `next dev`: `-H 0.0.0.0`.)
+
+Ports must be **declared in config** rather than discovered: a container's published ports are fixed when it starts, so pi-container cannot add one to a running agent. Changing this list takes effect on the next `pi` launch. If a host port is already taken the launch **fails immediately**, naming the port — rather than letting podman reject it after the images are built and the proxy is up. Use the `"HOSTPORT:AGENTPORT"` form to move a collision out of the way without changing what the nested container publishes.
+
+This is **inbound only and creates no egress.** The agent's only route out is still the proxy, and a published port does not change that (verified: a nested container on the isolated network still cannot reach HTTPS or a raw IP). What it does change is that something outside can now reach a service the agent controls, so `expose: localhost` — the default — keeps that to processes on your own machine. `expose: lan` binds `0.0.0.0`, which makes an unauthenticated dev server reachable by anything that can route to your machine; the mitmweb UI is at least password-gated, and this is not. Prefer an SSH tunnel to opening it to the network.
+
+Under the hood, this is also why the image sets `netns = "bridge"` in its `containers.conf` drop-in (a documented `containers.conf` key that takes the same values as `--network`), overriding podman 6's rootless default of `pasta`. Measured with the agent on the isolated network and the same outer `-p` in both cases: under `pasta` the forward reaches the agent's netns and the TCP handshake even completes, then stalls — the connection arrives carrying the agent's own address as its source, which is also the address pasta hands the nested guest, so the flow never resolves. Giving the guest the host's address is pasta's deliberate way of avoiding NAT, so this is a consequence of its design rather than a defect. Under `bridge`, `rootlessport` binds a real socket in the agent's netns, the agent's `-p` publishes it, and the host reaches the UI. Bridge is also what `docker compose` already got, since it creates a user-defined network per project, so a plain `podman run -p` now behaves like the compose path instead of differently from it.
 
 **Registries must be allowlisted.** The proxy's allowlist is `default_action: block`, so image pulls 403 until a registry is permitted. `allowlist.yaml` ships a commented-out `container-registries-allow` rule (Docker Hub, GHCR, Quay, GCR) — uncomment it, or add the registries you use. `run.py` logs a warning at startup when nesting is enabled and no registry hostname is allowed.
 

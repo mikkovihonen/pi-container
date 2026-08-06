@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+- **`nested_containers.ports`, exposing a nested container's UI to the host.** Nesting exists so the agent can run real workloads — a dev server, a compose stack, a database admin UI — and many of those are only useful if a human can look at them. That was impossible: a nested container's own `-p 3000:3000` publishes into the *agent's* network namespace, and the agent container publishes nothing onward, so the port dead-ended one layer below the host. `ports.publish` adds that outer hop as `-p` flags on the agent container (`publish: [3000, 5173, "18080:8080"]`), and `ports.expose` scopes the bind to `127.0.0.1` (default) or every interface, mirroring `proxy.expose_ui`. Ports are declared in config rather than discovered because a container's published ports are fixed at start — pi-container cannot add one to a running agent.
+- **Host-port preflight.** A conflicting port aborts the launch immediately, naming the port and the config key, rather than being rejected by `podman run` after the images are built and the proxy is up. The probe binds the address the port will actually use, so `expose: lan` is checked against `0.0.0.0` and not just loopback.
+
+### Changed
+- **Nested containers now default to a netavark bridge (`[containers] netns = "bridge"` in the image's `containers.conf` drop-in), not podman 6's rootless default of `pasta`.** This is what makes the above work, and it was measured rather than assumed: with the agent on the `--internal` network and the same outer `-p` in both cases, a plain listener in the agent's netns published to the host fine while the pasta-backed nested port timed out. The agent's socket table showed the handshake completing and then stalling — the connection arrives carrying the agent's own address as its source, which is also the address pasta hands the nested guest. On a *routed* network the same setup works (the source is the bridge gateway instead), which is why the original nested-containers verification never hit it. Bridge is also what `docker compose` already got, since it creates a user-defined network per project, so a plain `podman run -p` now behaves like the compose path instead of differently from it.
+- Egress interception is unaffected and was re-verified under the new default: with the agent on the isolated network, a nested container on a bridge still cannot reach HTTPS or a raw IP, and still gets the injected mitmproxy CA. Publishing a port is inbound only — it creates no route out.
+
 ## [0.4.2] - 2026-08-06
 
 ### Added

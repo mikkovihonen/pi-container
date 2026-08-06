@@ -210,20 +210,88 @@ _NESTED_STORAGE_MODES = ("volume", "tmpfs")
 _NESTED_SECURITY_MODES = ("disable", "engine_t")
 
 
+def _parse_port_mapping(entry: object) -> tuple[int, int] | None:
+    """Parse one ``nested_containers.ports.publish`` entry to ``(host, agent)``.
+
+    Accepts ``3000`` / ``"3000"`` (same port both sides) and ``"18080:8080"``
+    (host 18080 → agent 8080). Returns ``None`` — with a warning — for anything
+    unparseable or outside 1..65535, so one bad entry drops itself rather than
+    failing the launch.
+    """
+    text = str(entry).strip()
+    if not text:
+        return None
+    host_text, _, agent_text = text.partition(":")
+    agent_text = agent_text or host_text
+    try:
+        host, agent = int(host_text), int(agent_text)
+    except ValueError:
+        logger.warning(
+            f"Ignoring unparseable nested_containers.ports.publish entry {entry!r} (want 3000 or '18080:8080')."
+        )
+        return None
+    if not (1 <= host <= 65535 and 1 <= agent <= 65535):
+        logger.warning(f"Ignoring out-of-range nested_containers.ports.publish entry {entry!r} (ports are 1..65535).")
+        return None
+    return host, agent
+
+
+def _read_nested_ports(section: dict) -> dict:
+    """The ``nested_containers.ports`` sub-section → ``{"expose", "publish"}``.
+
+    ``publish`` is normalised to a list of ``(host_port, agent_port)`` pairs with
+    duplicate *host* ports dropped (podman would reject the second ``-p`` anyway,
+    and failing the launch over a copy-pasted line is not worth it). ``expose``
+    mirrors ``proxy.expose_ui``: ``localhost`` binds 127.0.0.1 only, ``lan``
+    binds every interface.
+    """
+    ports = section.get("ports") or {}
+    if not isinstance(ports, dict):
+        logger.warning("nested_containers.ports is not a mapping; ignoring it (no ports published).")
+        return {"expose": "localhost", "publish": []}
+
+    expose = str(ports.get("expose") or "").strip().lower()
+    if expose and expose not in ("localhost", "lan"):
+        logger.warning(f"Unknown nested_containers.ports.expose '{expose}'; using 'localhost'.")
+        expose = ""
+
+    raw = ports.get("publish") or []
+    if not isinstance(raw, list):
+        logger.warning("nested_containers.ports.publish is not a list; ignoring it (no ports published).")
+        raw = []
+
+    publish: list[tuple[int, int]] = []
+    claimed: set[int] = set()
+    for entry in raw:
+        mapping = _parse_port_mapping(entry)
+        if mapping is None:
+            continue
+        if mapping[0] in claimed:
+            logger.warning(f"Duplicate host port {mapping[0]} in nested_containers.ports.publish; keeping the first.")
+            continue
+        claimed.add(mapping[0])
+        publish.append(mapping)
+
+    return {"expose": expose or "localhost", "publish": publish}
+
+
 def read_nested_containers_config(config_dir: Path | None = None) -> dict:
     """Nested-container settings from config.yaml ``nested_containers``.
 
     Returns ``{"enabled": <bool>, "storage": "volume"|"tmpfs", "security":
-    "disable"|"engine_t"}`` — whether the agent may run its own containers
+    "disable"|"engine_t", "ports": {"expose": "localhost"|"lan", "publish":
+    [(host, agent), ...]}}`` — whether the agent may run its own containers
     (rootless podman inside the agent container), where the nested image layers
-    live, and which SELinux posture the agent container gets.
+    live, which SELinux posture the agent container gets, and which ports its
+    nested containers' UIs are reachable on from the host.
 
     Fail-safe: an absent, malformed or unrecognised value falls back to
-    :data:`_DEFAULT_NESTED_CONTAINERS`, i.e. nesting **off**. Enabling it relaxes
-    the agent container's SELinux confinement and grants ``/dev/fuse`` +
-    ``/dev/net/tun``, so it must never be turned on by accident. Traffic from
-    nested containers still egresses through the proxy — nesting is not a bypass
-    (see ``docs/design/nested-containers.md``).
+    :data:`_DEFAULT_NESTED_CONTAINERS`, i.e. nesting **off** and nothing
+    published. Enabling it relaxes the agent container's SELinux confinement and
+    grants ``/dev/fuse`` + ``/dev/net/tun``, so it must never be turned on by
+    accident. Traffic from nested containers still egresses through the proxy —
+    neither nesting nor a published port is a bypass (see
+    ``docs/design/nested-containers.md``).
     """
     section = load_project_config(config_dir).get("nested_containers") or {}
     storage = str(section.get("storage") or "").strip().lower()
@@ -236,6 +304,7 @@ def read_nested_containers_config(config_dir: Path | None = None) -> dict:
         "enabled": _egress_truthy(section.get("enabled", _DEFAULT_NESTED_CONTAINERS["enabled"])),
         "storage": storage if storage in _NESTED_STORAGE_MODES else _DEFAULT_NESTED_CONTAINERS["storage"],
         "security": security if security in _NESTED_SECURITY_MODES else _DEFAULT_NESTED_CONTAINERS["security"],
+        "ports": _read_nested_ports(section),
     }
 
 

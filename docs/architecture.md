@@ -117,24 +117,34 @@ flowchart TB
 
     eth0["agent eth0<br/>isolated-net (no gateway)"]
     proxy["<b>pi-coding-agent-proxy</b><br/>REDIRECT 80/443 → mitmproxy :8080<br/>REDIRECT 53 → DNS :5353<br/>FORWARD policy DROP"]
+    host["host browser<br/>127.0.0.1:3000"]
 
     pi --> pod
     pod --> inner
     pod -.-> store
-    inner -->|pasta userspace NAT<br/>into the agent's netns| eth0
+    inner -->|userspace NAT<br/>into the agent's netns| eth0
     eth0 --> proxy
     proxy -->|verified: no bypass| internet["internet"]
+    host -.->|inbound only<br/>nested_containers.ports| inner
 ```
 
 Containers the agent starts are **children**, not siblings: they live in the agent's
 mount and network namespaces, so they bind-mount the agent's view of `/workspace`
-directly and inherit its routing. Rootless podman connects them through
-`pasta`, which performs userspace NAT **into the parent namespace's
-stack** — so nested traffic leaves from the agent's own interface, with the agent's
-source address, subject to the agent's routes. The proxy's existing `-i eth1`
-REDIRECT rules therefore match nested traffic with **no proxy-side changes**, and a
-nested container on the `--internal` network cannot reach a raw IP at all
-(`Network unreachable`, from the kernel's routing layer in the agent's netns).
+directly and inherit its routing. Rootless podman NATs their traffic **into the
+parent namespace's stack** — so nested traffic leaves from the agent's own
+interface, with the agent's source address, subject to the agent's routes. The
+proxy's existing `-i eth1` REDIRECT rules therefore match nested traffic with **no
+proxy-side changes**, and a nested container on the `--internal` network cannot
+reach a raw IP at all (`Network unreachable`, from the kernel's routing layer in
+the agent's netns).
+
+Traffic in the other direction — a browser on the host opening a UI a nested
+container serves — is the one thing that needs plumbing, because a nested
+container's own `-p` publishes into the *agent's* namespace and the agent container
+publishes nothing to the host. `nested_containers.ports.publish` adds that outer
+hop as `-p` flags on the agent container; the ports are declared in config because
+a container's published ports are fixed at start. It is inbound only and adds no
+egress — the proxy is still the only route out.
 
 The host runtime socket is **never** mounted — `/var/run/docker.sock` is a
 full-privilege API to the host runtime and would delete this model rather than

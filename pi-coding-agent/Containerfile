@@ -209,6 +209,24 @@ RUN mkdir -p /etc/containers \
 #   * compose_providers pins podman-compose. Podman's default list tries
 #     docker-compose first, which is not installed, so `docker compose` would
 #     report the missing provider instead of using the one that is there.
+#   * netns = "bridge" overrides podman 6's rootless default of "pasta", and is
+#     what makes a nested container's published port reachable from the host
+#     (config.yaml nested_containers.ports). Measured, agent on the --internal
+#     network, with the SAME outer `-p` flag in both cases:
+#       pasta  → the outer port forward reaches the agent netns and pasta even
+#                completes the handshake, then stalls: the connection arrives
+#                with the agent's own address as its source, which is also the
+#                address pasta hands the nested guest, so the flow never
+#                resolves. Host curl times out. (A sibling container on the
+#                isolated net reaches the same port fine, so the listener works
+#                — it is specifically the published-port source address.)
+#       bridge → rootlessport binds a real socket in the agent netns, the outer
+#                `-p` publishes it, and the host reaches the UI.
+#     Bridge is also what `docker compose` already got (it creates a
+#     user-defined network per project), so this makes plain `podman run -p`
+#     behave like the compose path rather than differently from it. Egress is
+#     unaffected — re-verified on the --internal network: a nested container on
+#     a bridge still cannot reach HTTPS or a raw IP.
 RUN mkdir -p /etc/containers/containers.conf.d \
  && printf '%s\n' \
       '[containers]' \
@@ -223,6 +241,7 @@ RUN mkdir -p /etc/containers/containers.conf.d \
       '  "GIT_SSL_CAINFO=/etc/pi-container-ca.crt",' \
       ']' \
       'log_driver = "k8s-file"' \
+      'netns = "bridge"' \
       '' \
       '[engine]' \
       'cgroup_manager = "cgroupfs"' \

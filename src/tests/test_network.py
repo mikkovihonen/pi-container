@@ -610,6 +610,7 @@ class TestReadNestedContainersConfig:
             "enabled": False,
             "storage": "volume",
             "security": "disable",
+            "ports": {"expose": "localhost", "publish": []},
         }
 
     def test_section_absent_is_off(self, tmp_path):
@@ -626,16 +627,27 @@ class TestReadNestedContainersConfig:
             "enabled": True,
             "storage": "volume",
             "security": "disable",
+            "ports": {"expose": "localhost", "publish": []},
         }
 
     def test_all_values_configured(self, tmp_path):
         from network import read_nested_containers_config
 
-        self._write(tmp_path, "nested_containers:\n  enabled: true\n  storage: tmpfs\n  security: engine_t\n")
+        self._write(
+            tmp_path,
+            "nested_containers:\n"
+            "  enabled: true\n"
+            "  storage: tmpfs\n"
+            "  security: engine_t\n"
+            "  ports:\n"
+            "    expose: lan\n"
+            "    publish: [3000, '18080:8080']\n",
+        )
         assert read_nested_containers_config(tmp_path) == {
             "enabled": True,
             "storage": "tmpfs",
             "security": "engine_t",
+            "ports": {"expose": "lan", "publish": [(3000, 3000), (18080, 8080)]},
         }
 
     def test_enabled_truthy_string(self, tmp_path):
@@ -657,6 +669,60 @@ class TestReadNestedContainersConfig:
 
         self._write(tmp_path, "nested_containers: [unclosed\n")
         assert read_nested_containers_config(tmp_path)["enabled"] is False
+
+
+class TestReadNestedPorts:
+    """``nested_containers.ports`` — the host ports a nested container's UI is on."""
+
+    def _ports(self, tmp_path, body):
+        from network import read_nested_containers_config
+
+        (tmp_path / "config.yaml").write_text(f"nested_containers:\n  enabled: true\n{body}")
+        return read_nested_containers_config(tmp_path)["ports"]
+
+    def test_absent_section_publishes_nothing(self, tmp_path):
+        assert self._ports(tmp_path, "") == {"expose": "localhost", "publish": []}
+
+    def test_bare_port_maps_to_itself(self, tmp_path):
+        assert self._ports(tmp_path, "  ports:\n    publish: [3000]\n")["publish"] == [(3000, 3000)]
+
+    def test_explicit_mapping_is_host_then_agent(self, tmp_path):
+        assert self._ports(tmp_path, "  ports:\n    publish: ['18080:8080']\n")["publish"] == [(18080, 8080)]
+
+    def test_quoted_and_unquoted_forms_agree(self, tmp_path):
+        assert self._ports(tmp_path, "  ports:\n    publish: ['3000', 3001]\n")["publish"] == [
+            (3000, 3000),
+            (3001, 3001),
+        ]
+
+    def test_unknown_expose_falls_back_to_localhost(self, tmp_path):
+        assert self._ports(tmp_path, "  ports:\n    expose: everywhere\n")["expose"] == "localhost"
+
+    def test_lan_is_honoured(self, tmp_path):
+        assert self._ports(tmp_path, "  ports:\n    expose: lan\n")["expose"] == "lan"
+
+    def test_unparseable_entry_is_dropped_not_fatal(self, tmp_path):
+        assert self._ports(tmp_path, "  ports:\n    publish: ['nope', 3000]\n")["publish"] == [(3000, 3000)]
+
+    def test_out_of_range_entry_is_dropped(self, tmp_path):
+        assert self._ports(tmp_path, "  ports:\n    publish: [0, 70000, 3000]\n")["publish"] == [(3000, 3000)]
+
+    def test_duplicate_host_port_keeps_the_first(self, tmp_path):
+        # podman rejects a second -p on the same host port; dropping it beats
+        # failing the launch over a copy-pasted line.
+        assert self._ports(tmp_path, "  ports:\n    publish: ['3000:80', '3000:90']\n")["publish"] == [(3000, 80)]
+
+    def test_same_agent_port_on_two_host_ports_is_kept(self, tmp_path):
+        assert self._ports(tmp_path, "  ports:\n    publish: ['3000:80', '3001:80']\n")["publish"] == [
+            (3000, 80),
+            (3001, 80),
+        ]
+
+    def test_non_list_publish_is_ignored(self, tmp_path):
+        assert self._ports(tmp_path, "  ports:\n    publish: 3000\n")["publish"] == []
+
+    def test_non_mapping_ports_is_ignored(self, tmp_path):
+        assert self._ports(tmp_path, "  ports: [3000]\n") == {"expose": "localhost", "publish": []}
 
 
 # ---------------------------------------------------------------------------

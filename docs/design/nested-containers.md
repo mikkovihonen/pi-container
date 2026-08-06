@@ -499,6 +499,100 @@ nested_containers:
 template changed, so existing workspaces must re-seed — the existing failure message
 already explains how).
 
+### 11. Exposing nested ports to the host
+
+Added after the sections above shipped. Nesting exists so the agent can run real
+workloads — a dev server, a compose stack, a database admin UI — and a good share of
+those are only useful if a human can *look* at them. As designed, they could not be:
+the agent container publishes no ports, so a nested container's `-p 3000:3000` binds
+in the agent's netns and dead-ends there. The edge-case table said as much
+("never from the host") and treated it as a property rather than a gap.
+
+Two measurements, agent on the `--internal` network:
+
+```bash
+# 1. Publishing works on an --internal network at all.
+#    (It has no gateway, but `-p` forwards within the runtime's own namespace
+#    and never needed one.)
+podman run -d --network <internal-net> -p 127.0.0.1:38999:8000 alpine:3 <listener>
+curl http://127.0.0.1:38999/            → INTERNAL-OK                        ✅
+
+# 2. But the same outer -p in front of a NESTED container times out.
+#    Isolated within one agent container publishing two ports:
+#      :3001 plain listener in the agent netns  → host gets 200              ✅
+#      :3000 nested container (pasta)           → host times out             ❌
+#    …while a sibling on the isolated net reaches that same :3000 fine, so the
+#    listener works. It is specifically the published-port path.
+```
+
+The cause, read off the agent's own socket table during a host `curl`:
+
+```
+ESTAB  78  0  10.89.3.8:3000   10.89.3.8:34282     ← handshake completed, 78 bytes stuck
+pasta … --config-net -t 3000-3000:8000-8000 … --map-guest-addr 169.254.1.2
+```
+
+The connection arrives with **the agent's own address as its source** — which is
+also the address `pasta` hands the nested guest. Source and guest address collide,
+and the flow never resolves: pasta accepts, then stalls. On a *routed* network the
+same setup works, because the source is the bridge gateway instead; that is why this
+did not surface in the original verification, which used a routed network for
+everything except the no-bypass proof.
+
+The address collision is not a bug being worked around: assigning the guest the
+host's own address is how pasta deliberately avoids NAT, and its documented
+corollary is that the host is then not contactable at that address. The upstream
+reports of that corollary are all the *outbound* direction (a container reaching a
+host service, podman
+[#22771](https://github.com/containers/podman/issues/22771) /
+[#23782](https://github.com/containers/podman/issues/23782)); the inbound case —
+a host reaching a **nested** container's published port — appears to be undocumented,
+so the measurements above are the evidence for it. `pasta -a <addr>`, the documented
+knob for giving the guest a distinct address, is what podman exposes as
+`--network pasta:-a,<addr>`; it was tried first and the inner container failed to
+start with it.
+
+**Fix: `[containers] netns = "bridge"` in the image's `containers.conf` drop-in**,
+overriding podman 6's rootless default of `pasta`. Then `rootlessport` binds a real
+socket in the agent's netns and the outer `-p` publishes it. Measured, same agent,
+same `--internal` network, no `--network` flag on the inner run:
+
+```
+host → 127.0.0.1:39020 → agent :3020 → nested container      → OK-web         ✅
+nested container egress: NESTED-HTTPS-FAIL / NESTED-RAWIP-FAIL (no bypass)    ✅
+nested container CA:     NESTED-CA-PRESENT, SSL_CERT_FILE set                 ✅
+```
+
+Bridge is also what `docker compose` already got — it creates a user-defined network
+per project, which is why the compose path was never affected — so this makes a plain
+`podman run -p` behave like the compose path instead of differently from it. The
+rejected alternatives were per-nested-container pasta options (`-a` to give the guest
+a distinct address: the container failed to start), and a userspace forwarder in the
+agent netns in front of pasta (works, but needs a process per port and exists only to
+work around a default we can simply change).
+
+**Config surface**, under the existing section:
+
+```yaml
+nested_containers:
+  ports:
+    expose: localhost   # localhost → 127.0.0.1 only; lan → 0.0.0.0
+    publish: []         # [3000, 5173, "18080:8080"]
+```
+
+Ports are declared rather than discovered because a container's published ports are
+fixed at start — `run.py` cannot add one to a running agent. `_unavailable_host_ports()`
+probes each host port (at the address it will actually bind, so `expose: lan` is
+checked against `0.0.0.0`) and aborts the launch naming the conflict, instead of
+letting podman reject it after the images are built and the proxy is up.
+
+**Security.** This is inbound only and adds no egress — re-verified above. It does add
+an inbound surface: something outside the agent can now reach a service the agent
+controls, and an established TCP connection is bidirectional. `expose: localhost` is
+the default and keeps that to host-local processes; `lan` binds `0.0.0.0` and is
+documented as the sharper edge it is (mitmweb is at least password-gated, an arbitrary
+dev server is not). `publish` ships empty, matching how `egress.allow` ships all-false.
+
 ---
 
 ## Dropping Docker
@@ -549,7 +643,7 @@ runtime would attach, and collapsing it would be a large diff for no gain.
 | Nesting enabled, registries not allowlisted | Pulls fail with mitmproxy's 403. `_warn_about_registry_allowlist` in `run.py` catches this at startup. |
 | Registry allowlisted, its blob CDN not | The subtler half of the same failure: token and manifest succeed, then the 307 to the CDN is blocked and the pull dies part-way through the first layer. Same preflight warns, naming the missing hostname. |
 | Nested container tries to reach the internet directly | Impossible — verified `Network unreachable`. Proxy is the only route. |
-| Nested container publishes a port | Binds in the agent's netns; reachable from the isolated network only, never from the host. |
+| Nested container publishes a port | Binds in the agent's netns. Reachable from the isolated network; reachable from the **host** only for ports listed in `nested_containers.ports.publish`, which adds the outer `-p` hop — see [Exposing nested ports to the host](#11-exposing-nested-ports-to-the-host). |
 | Nested container bind-mounts `/workspace/...` | Works — nested containers are children in the agent's mount namespace. Cannot reach beyond what the agent already sees. |
 | TLS from inside a nested container | Works for tools honouring `SSL_CERT_FILE`/`NODE_EXTRA_CA_CERTS`/etc. Images with a hardcoded bundle path need a per-image `COPY`. |
 | `storage: volume`, project directory deleted | Volume is labelled with `pi-container.project.path`; the orphan-cleanup pass reclaims it exactly as it does project images. |

@@ -90,6 +90,30 @@ nested_containers:
   #   engine_t → label=type:container_engine_t (agent stays confined, but every
   #              nested container must be run with --security-opt unmask=all)
   security: disable
+  # Host ports for user interfaces served by nested containers (a dev server, a
+  # database admin UI, a compose stack's frontend). A nested container's own
+  # `-p 3000:3000` only binds inside the AGENT's network namespace, which the
+  # host cannot reach — the agent container must publish the same port onward.
+  #
+  # Ports must be declared here because a container's published ports are fixed
+  # at start: pi-container cannot add one to a running agent. Each entry is a
+  # port the nested container publishes inside the agent, mapped to the same
+  # host port, or "HOSTPORT:AGENTPORT" to remap. The launch fails fast if a host
+  # port is already taken.
+  #
+  # This is inbound only — it does NOT create egress. The proxy is still the
+  # agent's only route out. But anything that can reach the published port can
+  # talk to whatever the agent serves there, so keep `expose: localhost` unless
+  # you specifically need other hosts to reach it.
+  ports:
+    #   localhost → 127.0.0.1 only (default; not reachable from other hosts)
+    #   lan       → 0.0.0.0 (reachable across the network — NOT authenticated)
+    expose: localhost
+    #   publish:
+    #     - 3000            # host 3000 → agent 3000
+    #     - 5173
+    #     - "18080:8080"    # host 18080 → agent 8080
+    publish: []
 
 # Transient tmpfs mounts inside the agent container. Each path (under /workspace)
 # is a volatile RAM disk — data is lost when the container stops. Use it for build

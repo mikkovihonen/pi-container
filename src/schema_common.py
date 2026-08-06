@@ -108,6 +108,13 @@ SCHEMA: dict = {
             "enabled": {"type": (bool, str, int)},  # YAML bools, "true"/"1"/0/1 strings
             "storage": {"type": str},  # volume | tmpfs
             "security": {"type": str},  # disable | engine_t
+            "ports": {
+                "type": dict,
+                "keys": {
+                    "expose": {"type": str},  # localhost | lan
+                    "publish": {"type": list},  # [3000, "18080:8080", ...]
+                },
+            },
         },
     },
     "tmpfs": {

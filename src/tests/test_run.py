@@ -1725,3 +1725,64 @@ class TestHostnameAllowed:
     )
     def test_matching(self, host, patterns, expected):
         assert run._hostname_allowed(host, patterns) is expected
+
+
+class TestUnavailableHostPorts:
+    """Preflight for ``nested_containers.ports.publish``.
+
+    ``podman run`` rejects a conflicting ``-p`` too, but only after the images are
+    built and the proxy is up; this probe aborts the launch before any of that.
+    """
+
+    @staticmethod
+    def _bound(host: str) -> tuple[int, object]:
+        """Bind an ephemeral port on ``host`` and return it with the live socket."""
+        import socket
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((host, 0))
+        sock.listen(1)
+        return sock.getsockname()[1], sock
+
+    def test_empty_list_is_trivially_available(self):
+        assert run._unavailable_host_ports([], "localhost") == []
+
+    def test_free_port_is_available(self):
+        port, sock = self._bound("127.0.0.1")
+        sock.close()  # released again — nothing is holding it now
+        assert run._unavailable_host_ports([(port, port)], "localhost") == []
+
+    def test_bound_port_is_reported(self):
+        port, sock = self._bound("127.0.0.1")
+        try:
+            assert run._unavailable_host_ports([(port, port)], "localhost") == [port]
+        finally:
+            sock.close()
+
+    def test_only_the_conflicting_port_is_reported(self):
+        port, sock = self._bound("127.0.0.1")
+        free, free_sock = self._bound("127.0.0.1")
+        free_sock.close()
+        try:
+            assert run._unavailable_host_ports([(free, free), (port, port)], "localhost") == [port]
+        finally:
+            sock.close()
+
+    def test_the_host_port_is_probed_not_the_agent_port(self):
+        """The mapping is (host, agent); only the host side is ours to bind."""
+        port, sock = self._bound("127.0.0.1")
+        try:
+            # host port free, agent port = the bound one → nothing to report
+            free, free_sock = self._bound("127.0.0.1")
+            free_sock.close()
+            assert run._unavailable_host_ports([(free, port)], "localhost") == []
+        finally:
+            sock.close()
+
+    def test_lan_scope_probes_the_wildcard_address(self):
+        """A free 127.0.0.1:N says nothing about 0.0.0.0:N — probe what podman binds."""
+        port, sock = self._bound("0.0.0.0")
+        try:
+            assert run._unavailable_host_ports([(port, port)], "lan") == [port]
+        finally:
+            sock.close()

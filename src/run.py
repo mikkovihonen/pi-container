@@ -1024,6 +1024,32 @@ def _warn_about_registry_allowlist(config_dir: Path) -> None:
             )
 
 
+def _unavailable_host_ports(publish: list[tuple[int, int]], expose: str) -> list[int]:
+    """Which of the requested host ports are already taken. Fail fast, not mid-run.
+
+    ``podman run`` rejects a conflicting ``-p`` too, but only after the images are
+    built and the proxy is up, and its error names the port without saying what
+    holds it. Probing here lets the launch abort before any of that with a message
+    that points at the config line to change.
+
+    Probes the same address the port will actually be bound to — a free
+    ``127.0.0.1:3000`` says nothing about ``0.0.0.0:3000`` under ``expose: lan``.
+    ``SO_REUSEADDR`` is deliberately NOT set: it would let the probe bind a port
+    still held in TIME-WAIT that podman would then refuse.
+    """
+    import socket
+
+    host = "127.0.0.1" if expose != "lan" else "0.0.0.0"  # noqa: S104 — mirrors the bind podman will make
+    taken: list[int] = []
+    for host_port, _ in publish:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind((host, host_port))
+            except OSError:
+                taken.append(host_port)
+    return taken
+
+
 # ─── Main ──────────────────────────────────────────────────────────────────
 
 
@@ -1063,6 +1089,7 @@ def main() -> None:
     llama_cfg = read_llama_config(pi_container_dir)
     agent_extras = read_agent_extras(pi_container_dir)
     nested_cfg = read_nested_containers_config(pi_container_dir)
+    nested_ports = nested_cfg["ports"]
     if nested_cfg["enabled"]:
         logger.info(
             f"Nested containers enabled (storage={nested_cfg['storage']}, security={nested_cfg['security']}): "
@@ -1070,6 +1097,31 @@ def main() -> None:
             f"but the agent container's SELinux confinement is relaxed."
         )
         _warn_about_registry_allowlist(pi_container_dir)
+        if nested_ports["publish"]:
+            # Abort before building anything if a port is already taken — podman
+            # would only reject it after the images are built and the proxy is up.
+            taken = _unavailable_host_ports(nested_ports["publish"], nested_ports["expose"])
+            if taken:
+                logger.error(
+                    f"Host port(s) already in use: {', '.join(str(p) for p in taken)}. "
+                    f"Free them, or change nested_containers.ports.publish in "
+                    f"{config_yaml_path} (an entry may be written 'HOSTPORT:AGENTPORT' to remap)."
+                )
+                sys.exit(1)
+            bind = "127.0.0.1" if nested_ports["expose"] != "lan" else "all interfaces"
+            logger.info(
+                "Publishing nested-container ports on "
+                + f"{bind}: "
+                + ", ".join(f"{host}→agent {agent}" for host, agent in nested_ports["publish"])
+                + ". A nested container must publish the agent-side port itself "
+                + "(e.g. `podman run -p 3000:3000`) for the host port to serve anything."
+            )
+    elif nested_ports["publish"]:
+        logger.warning(
+            f"nested_containers.ports.publish lists port(s) "
+            f"{', '.join(str(host) for host, _ in nested_ports['publish'])} but "
+            f"nested_containers.enabled is false; nothing is published."
+        )
 
     with config_path.open("r") as file:
         data = json.load(file)
@@ -1297,6 +1349,11 @@ def main() -> None:
                     # when disabled. Placed after the /home/pi tmpfs because the
                     # image store mounts *underneath* it.
                     *nested_args,
+                    # Host ports for UIs served by nested containers. A nested
+                    # container's own -p binds only inside this container's netns,
+                    # so the agent republishes it; the ports are fixed here because
+                    # podman cannot add one to a running container.
+                    *RUNTIME.nested_port_args(nested_cfg),
                     "--workdir",
                     "/workspace",
                     # Transient tmpfs mounts for build artifacts, caches, etc.

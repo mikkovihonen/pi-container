@@ -298,6 +298,41 @@ class ContainerRuntime(ABC):
             "NESTED_CONTAINERS=true",
         ]
 
+    def nested_port_args(self, cfg: dict) -> list[str]:
+        """``-p`` flags publishing nested-container UI ports to the host.
+
+        A nested container's own ``-p 3000:3000`` binds inside the **agent's**
+        network namespace, which the host cannot reach — the agent container has
+        to publish the same port onward, and a container's published ports are
+        fixed at start. Hence the explicit ``nested_containers.ports.publish``
+        list rather than anything discovered at runtime.
+
+        Two things had to be true for this to work, and both were measured with
+        the agent on the ``--internal`` network:
+
+        * The nested container must be on a **netavark bridge**, not podman 6's
+          rootless default of ``pasta``. Under pasta the outer port forward
+          reaches the agent netns and the handshake even completes, then the flow
+          stalls: the connection arrives carrying the agent's own address as its
+          source, which is also the address pasta hands the nested guest. Under
+          bridge, ``rootlessport`` binds a real socket in the agent netns and the
+          outer ``-p`` publishes it. That default is set image-side, in the
+          ``containers.conf`` drop-in (``[containers] netns = "bridge"``).
+        * Publishing works at all on an ``--internal`` network — it has no
+          gateway, but ``-p`` forwards within the runtime's own namespace and
+          never needed one.
+
+        This is **inbound only** and creates no egress: the proxy is still the
+        agent's only route out, verified unchanged with a nested container on a
+        bridge. It does widen what can reach the agent, which is why ``expose``
+        defaults to ``localhost`` and ``publish`` ships empty.
+        """
+        if not cfg.get("enabled"):
+            return []
+        ports = cfg.get("ports") or {}
+        host_bind = "127.0.0.1:" if ports.get("expose", "localhost") != "lan" else ""
+        return [flag for host, agent in ports.get("publish") or [] for flag in ("-p", f"{host_bind}{host}:{agent}")]
+
     @staticmethod
     def nested_volume_name(project_hash: str) -> str:
         """Name of this workspace's persistent nested-image-store volume."""
