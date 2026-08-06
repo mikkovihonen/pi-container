@@ -13,10 +13,10 @@ schema_version: "0.4.2"
 # not passed). Applies to the containers this workspace launches.
 resources:
   agent:
-    memory: 16g
+    memory: 6g
     cpus: 8
   proxy:
-    memory: 4g
+    memory: 2g
     cpus: 4
 
 # llama-server startup tuning. Large models load slowly; raise startup_timeout
