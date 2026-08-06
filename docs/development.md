@@ -17,16 +17,16 @@ uv run ruff format src
 uv run --group proxy pytest pi-coding-agent-proxy/addons
 ```
 
-The Python sources run directly from `src/` (uv treats the project as a
-*virtual* project via `[tool.uv] package = false` — dependencies are installed
-into `.venv` but the project itself is not built or installed). `build.sh` and
-`run.sh` wrap `uv run --project <repo>`, so they use this environment while
+The Python sources run directly from `src/`. uv treats the project as a
+*virtual* project via `[tool.uv] package = false`. Dependencies are installed
+into `.venv`. The project itself is not built or installed. `build.sh` and
+`run.sh` wrap `uv run --project <repo>`. They use this environment while
 still operating on the caller's working directory.
 
 <a name="coverage"></a>
 ## Coverage
 
-Test coverage is enforced by CI (minimum 90%). Coverage is measured with `pytest-cov` and a badge SVG is auto-committed to `docs/assets/coverage.svg` on every push to `main`.
+CI enforces test coverage (minimum 90%). The system measures coverage with `pytest-cov`. The CI auto-commits a badge SVG to `docs/assets/coverage.svg` on every push to `main`.
 
 Run locally:
 
@@ -37,7 +37,7 @@ uv run pytest --cov --cov-report=term-missing
 <a name="schema-validation"></a>
 ## Schema validation
 
-Per-project configuration (`.pi-container/config.yaml`) is validated at launch
+The system validates per-project configuration (`.pi-container/config.yaml`) at launch
 against the pi-container version and the expected schema. The validation checks:
 
 1. **Schema version** — The `schema_version` field in the config matches the
@@ -46,8 +46,8 @@ against the pi-container version and the expected schema. The validation checks:
 2. **Required fields** — All fields defined in the schema must be present with
    the correct types.
 
-If validation fails, the launch exits with a clear error message listing the
-issues and suggesting the fix (delete `.pi-container` and re-run).
+Validation failure makes the launch exit with a clear error message. The message lists the
+issues and suggests the fix (delete `.pi-container` and re-run).
 
 The validation logic lives in `src/config_schema.py` and is tested in
 `src/tests/test_config_schema.py`.

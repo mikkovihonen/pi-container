@@ -4,7 +4,7 @@ This guide covers writing addons (scripts) for [mitmproxy](https://mitmproxy.org
 
 ## How mitmproxy Loads Addons
 
-mitmproxy loads Python scripts via the `--set scripts=` command-line option (or the equivalent in `config.yaml`). The built-in `ScriptLoader` addon watches this option, loads each script file, and registers it as an addon.
+mitmproxy loads Python scripts via the `--set scripts=` command-line option (or the equivalent in `config.yaml`). The built-in `ScriptLoader` addon watches this option. The addon loads each script file and registers it as an addon.
 
 The loading pipeline is:
 
@@ -20,7 +20,7 @@ mitmproxy starts
 
 ## Required: Module-Level `addons` List
 
-Your script **must** expose a module-level `addons` **list** containing your addon instance(s). mitmproxy discovers addons via this list — a bare `addon = MyAddon()` variable is imported (so its `__init__` runs) but its event hooks are **never registered**, which silently disables the addon:
+Your script **must** expose a module-level `addons` **list** containing your addon instance(s). mitmproxy discovers addons via this list. A bare `addon = MyAddon()` variable is imported (so its `__init__` runs), but its event hooks are **never registered**. This silently disables the addon:
 
 ```python
 # my_addon.py
@@ -39,8 +39,8 @@ addons = [addon]
 
 > **Why this matters:** if you only assign `addon = MyAddon()` and forget
 > `addons = [addon]`, the module still imports and any config loading done in
-> `__init__` runs — so it *looks* loaded — but `request`/`response` are never
-> called and traffic passes through untouched.
+> `__init__` runs (so it *looks* loaded), but `request`/`response` are never
+> called. Traffic passes through untouched.
 
 ## Addon Lifecycle Hooks
 
@@ -59,7 +59,7 @@ mitmproxy invokes the following methods on your addon instance at specific point
 | `server_connect(conn)`, `server_connected(conn)`, `server_disconnected(conn)` | Server connection events | Track upstream connections |
 | `add_log(log_entry)` | New log entry | Process log messages |
 
-Only the hooks your addon defines are called. Undeclared hooks are ignored — and because dispatch is by **exact method name**, a misnamed hook (e.g. `on_request` instead of `request`) is silently never invoked.
+mitmproxy calls only the hooks your addon defines. It ignores undeclared hooks. Dispatch uses **exact method name**. A misnamed hook (e.g. `on_request` instead of `request`) is silently never invoked.
 
 ## The Flow Object
 

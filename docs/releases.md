@@ -1,12 +1,12 @@
 # Releases
 
-This project is installed by cloning. Releases are **git tags** on `main`. Docker
-images are built locally with `build.sh` — no image registry publishing. The
-version is authoritative from the latest git tag (not `pyproject.toml`).
+This project is installed by cloning. Releases are **git tags** on `main`. The system builds Docker
+images locally with `build.sh`. The system does not publish images to a registry.
+The latest git tag determines the authoritative version, not `pyproject.toml`.
 
 ## Development model: trunk-based
 
-Everyone works on short-lived branches off `main`. Changes land via pull requests.
+Work on short-lived branches off `main`. Land changes via pull requests.
 
 ```
 git checkout -b feat/entrypoint-seed main
@@ -28,7 +28,7 @@ branch. Hotfixes follow the same PR flow from `main`.
 
 ### Commit messages
 
-Use the conventional-commit prefix pattern for clarity (not enforced by a hook):
+Use the conventional-commit prefix pattern for clarity. A hook does not enforce it:
 
 ```
 feat: seed entrypoint.sh into .pi-container/agent
@@ -46,23 +46,23 @@ vMAJOR.MINOR.PATCH
  └────────────── Breaking change
 ```
 
-- **0.x.y** — Pre-release. Breaking changes are possible without a major bump,
-  but we try to avoid them.
+- **0.x.y** — Pre-release. Breaking changes are possible without a major bump.
+  The team tries to avoid them.
 - **1.x.y** — Stable. `MAJOR` bumps only for breaking changes.
 
-The version is authoritative from the latest git tag (e.g., `git tag -l | head -1`).
-`pyproject.toml` is informational only — the launch reads the version from git.
+The latest git tag (e.g., `git tag -l | head -1`) determines the authoritative version.
+`pyproject.toml` is informational only. The launch reads the version from git.
 
 ## Schema version: config compatibility
 
-Every pi-container release includes a template for the per-project configuration
-at `pi-coding-agent/default/`. This template is seeded into each workspace's
+Every pi-container release ships a template for the per-project configuration
+at `pi-coding-agent/default/`. The system seeds this template into each workspace's
 `.pi-container/` on first run.
 
 The template `config.yaml` includes a `schema_version` field that matches the
-pi-container version (e.g., `"0.1.0"`). At launch, the schema version in the
-seeded config is checked against the app version (from the latest git tag). If
-they don't match, the launch fails with a clear error message.
+pi-container version (e.g., `"0.1.0"`). At launch, the system checks the schema version in the
+seeded config against the app version (from the latest git tag). A mismatch makes
+the launch fail with a clear error message.
 
 ### When to bump the schema version
 
@@ -73,8 +73,8 @@ Bump the `schema_version` in `pi-coding-agent/default/config.yaml` whenever you:
 - Remove a field that users might still have in their configs
 - Add a new file to `pi-coding-agent/default/` (e.g., a new addon config)
 
-The schema version is separate from the pi-container version — they should be
-kept in sync, but the schema version is what triggers the compatibility check.
+The schema version is separate from the pi-container version. Keep them
+in sync. The schema version triggers the compatibility check.
 
 ### User-facing behavior
 
@@ -82,17 +82,17 @@ When a user has an outdated config:
 
 1. The launch fails with: "Configuration incompatible with this version of pi-container"
 2. The error message lists the specific issues (missing fields, type mismatches, version mismatch)
-3. The error message gives the remedy **for that specific failure** — the two kinds
+3. The error message gives the remedy **for that specific failure**. The two kinds
    are not interchangeable
 
-**Stale version, valid shape.** Only the `schema_version` string is behind; every
+**Stale version, valid shape.** Only the `schema_version` string is behind. Every
 field the new template requires is already present. Editing the string is
-sufficient *and* lossless — it keeps whatever the user configured. Re-seeding here
+sufficient *and* lossless. It keeps whatever the user configured. Re-seeding here
 would discard their settings to fix a string.
 
-**A missing or mistyped field.** The template changed shape, and no edit to
+**A missing or mistyped field.** The template changed shape. No edit to
 `schema_version` produces a key that is not in the file. Bumping the version alone
-sends the user in a circle: they clear the version check and fail the field check
+sends the user in a circle. They clear the version check and fail the field check
 immediately after, one line further down. The file has to be re-seeded.
 
 Re-seeding is **one file, not the directory**:
@@ -101,19 +101,19 @@ Re-seeding is **one file, not the directory**:
 rm .pi-container/config.yaml && <re-run>
 ```
 
-`_ensure_project_config()` only writes files that are absent, so deleting the one
+`_ensure_project_config()` only writes files that are absent. Deleting the one
 file whose shape changed leaves `allowlist.yaml`, `token_replacer.yaml`,
-`models.json`, `chat-templates/` and `dependencies/` exactly as they were. Reach
-for `rm -rf .pi-container` only when several of those are out of date at once —
+`models.json`, `chat-templates/`, and `dependencies/` exactly as they were. Reach
+for `rm -rf .pi-container` only when several of those are out of date at once.
 it takes every hand-edited file in the workspace with it.
 
-The user's own edits to `config.yaml` are not merged, so the error tells them to
+The user's own edits to `config.yaml` are not merged. The error tells them to
 note their settings before deleting it.
 
 > **During development, the version gate does not fire.** `schema_version` is
-> bumped at release time, so on an unreleased `main` the template still carries the
+> bumped at release time. On an unreleased `main` the template still carries the
 > *shipped* version. A workspace seeded at that same version therefore **passes**
-> the version check and fails only on the field — which is why the remedy must
+> the version check and fails only on the field. This is why the remedy must
 > never assume a version mismatch is what went wrong. This is the ordinary case for
 > anyone developing pi-container in a workspace seeded before the field was added.
 
@@ -130,9 +130,9 @@ custom:
   enabled: false
 ```
 
-Users with `schema_version: "0.1.0"` in their local config will see an error on
-next launch. Because a *field* was added, bumping their version string is not
-enough — they must `rm .pi-container/config.yaml` and re-run to get the new field.
+Users with `schema_version: "0.1.0"` in their local config see an error on
+next launch. A *field* was added, so bumping their version string is not
+enough. They must `rm .pi-container/config.yaml` and re-run to get the new field.
 Everything else in `.pi-container/` is preserved.
 
 ## Release skill
@@ -147,19 +147,19 @@ pi> Release 0.2.0
 
 ### How it works
 
-1. **Determine the version** — asks the user for the version number, or
+1. **Determine the version**. It asks the user for the version number, or
    suggests patch/minor/major based on the changes since the last tag.
-2. **Run `release.sh`** — checks the release preconditions (semver format, on
+2. **Run `release.sh`**. It checks the release preconditions (semver format, on
    `main`, clean tree, tag still free), bumps `pyproject.toml` and both
    `schema_version` fields, regenerates `uv.lock`, commits the bumps, then runs
    `validate_versions.py` + lint + tests.
-3. **Update `CHANGELOG.md`** — moves `Unreleased` entries into a new version
+3. **Update `CHANGELOG.md`**. It moves `Unreleased` entries into a new version
    block with today's date, then confirms the ordering with
    `release.sh --check-changelog`.
-4. **Amend the release commit** — adds the changelog update to the existing
+4. **Amend the release commit**. It adds the changelog update to the existing
    commit created by the script (never re-run the script, or versions get
    double-bumped).
-5. **Tag and push** — creates `v<version>` and pushes to `origin`.
+5. **Tag and push**. It creates `v<version>` and pushes to `origin`.
 
 CI triggers on the tag push and creates the GitHub Release automatically.
 
@@ -171,7 +171,7 @@ CI triggers on the tag push and creates the GitHub Release automatically.
 | You need to do a release from a different machine | Manual steps in the next section |
 | You need to inspect or customise each step | Manual steps |
 
-The skill performs the same operations as the manual steps — it is a
+The skill performs the same operations as the manual steps. It is a
 convenience wrapper.
 
 ## Creating a release
@@ -186,26 +186,23 @@ stay in sync:
 | Config schema version | `pi-coding-agent/default/config.yaml` → `schema_version` |
 | Runtime config version | `.pi-container/config.yaml` → `schema_version` |
 
-The `validate_versions.py` script runs in CI (not pre-commit) because git has
-no `pre-tag` hook — the version cross-check can only pass once the tag exists,
-which happens after the commit. The runtime config
-(`.pi-container/config.yaml`) is checked at launch time by `src/config_schema.py`
-— if it does not match the latest git tag, the container refuses to start.
+The `validate_versions.py` script runs in CI (not pre-commit). git has
+no `pre-tag` hook. The version cross-check can only pass once the tag exists.
+That happens after the commit. The runtime config
+(`.pi-container/config.yaml`) is checked at launch time by `src/config_schema.py`. If it does not match the latest git tag, the container refuses to start.
 
 ### Steps
 
-1. **Make sure `main` is green** — CI must pass on the commit you want to
+1. **Make sure `main` is green**. CI must pass on the commit you want to
    release (`check` and `test` jobs).
-2. **Update `CHANGELOG.md`** — Move the `[Unreleased]` entries into a new
+2. **Update `CHANGELOG.md`**. Move the `[Unreleased]` entries into a new
    version block with the release date, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 3. **Bump the version** in `pyproject.toml` (`[project] version`).
-4. **Regenerate `uv.lock`** — `uv lock` (the lockfile embeds the project
+4. **Regenerate `uv.lock`** with `uv lock` (the lockfile embeds the project
    version).
-5. **Bump `schema_version` in the seed template** —
-   `pi-coding-agent/default/config.yaml`. This is what new workspaces get on
+5. **Bump `schema_version` in the seed template** (`pi-coding-agent/default/config.yaml`). This is what new workspaces get on
    first run.
-6. **Bump `schema_version` in the runtime config** —
-   `.pi-container/config.yaml`. This is what the currently running container
+6. **Bump `schema_version` in the runtime config** (`.pi-container/config.yaml`). This is what the currently running container
    uses. Seeding is copy-once (missing-only), so updating the template alone
    will not update the runtime config.
 7. **Validate locally** before pushing:
@@ -269,17 +266,17 @@ step 5 above), the launch fails with:
 > schema_version mismatch: config has '0.1.1', the latest pi-container
 > version is '0.2.0'.
 
-If that is the **only** error, the shape still validates and editing
+If that is the **only** error, the shape still validates. Editing
 `schema_version` fixes it without losing any settings. If the release also added
-or changed a field, the error list says so, and the fix is
-`rm .pi-container/config.yaml` plus a re-run — see
+or changed a field, the error list says so. The fix is
+`rm .pi-container/config.yaml` plus a re-run (see
 [User-facing behavior](#user-facing-behavior) for why the two are not
-interchangeable.
+interchangeable).
 
 ## Rolling back
 
 To revert a release, revert the commit on `main` and create a new patch release
-(e.g., `v1.0.1`). Do not delete tags — they are historical record.
+(e.g., `v1.0.1`). Do not delete tags. They are historical record.
 
 ## Environment variables for the release job
 

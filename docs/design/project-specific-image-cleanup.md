@@ -2,9 +2,9 @@
 
 ## Problem
 
-When a workspace has dependency definition files (`.pi-container/dependencies/root/commands.sh`), `run.py` builds a **project-specific** agent image with the project's setup scripts baked in. Each new build produces a new image tagged `pi-coding-agent-<hash>.local`.
+When a workspace has dependency definition files (`.pi-container/dependencies/root/commands.sh`), `run.py` builds a **project-specific** agent image. The build bakes the project's setup scripts into the image. Each new build produces a new image tagged `pi-coding-agent-<hash>.local`.
 
-**There is no mechanism to remove older project-specific images.** The lifecycle is:
+**The system has no mechanism to remove older project-specific images.** The lifecycle is:
 
 ```
 build.sh          →  pi-coding-agent:local  (shared, rebuilt via build.sh only)
@@ -14,9 +14,9 @@ run.sh (modify)   →  pi-coding-agent-q1w2e3r4t5y6u7i8.local  (another orphan)
 ...
 ```
 
-Over time this **leaks disk space** on the host — each image is often several GB, and the old ones are never garbage-collected. Worse, there is **no way to identify which images belong to which project**, making manual cleanup painful:
+Over time this pattern **leaks disk space** on the host. Each image is often several GB. The old ones are never garbage-collected. Worse, there is **no way to identify which images belong to which project**. Manual cleanup is painful:
 
-- Image tags are opaque (`pi-coding-agent-<hash>.local`) — no project name, no project directory.
+- Image tags are opaque (`pi-coding-agent-<hash>.local`). No project name, no project directory.
 - No metadata links an image back to the workspace that produced it.
 - The tag pattern `pi-coding-agent-*` collides with the shared image prefix, so a blanket `docker image prune` or `podman system prune` could accidentally remove images that should be kept.
 
@@ -32,17 +32,17 @@ The current implementation has three gaps:
 project_image_tag = f"pi-coding-agent-{image_hash}.local"
 ```
 
-The `image_hash` encodes the content of `Containerfile` + `entrypoint.sh` + `root/commands.sh`, but **not the project's identity**. Two different projects with identical definition files produce images with the **same** tag, which is technically correct (same content → same image), but it means a single tag can be shared across projects — and conversely, there's no way to find all images that *belong* to a specific project.
+The `image_hash` encodes the content of `Containerfile` + `entrypoint.sh` + `root/commands.sh`, but **not the project's identity**. Two different projects with identical definition files produce images with the **same** tag. This is technically correct (same content → same image), but it means a single tag can be shared across projects. There is no way to find all images that *belong* to a specific project.
 
 The only label set on the image is `pi-container.hash` (the content hash). There is no `pi-container.project.*` label.
 
 ### 2. No replacement semantics
 
-Container runtimes (Docker, Podman) don't have an atomic "replace image" operation. `docker build --tag foo:bar` creates a new image; if `foo:bar` already exists, it becomes an intermediate layer or gets overwritten only in specific cases. There is **no code path** that calls `image rm` or `rmi` anywhere in the codebase — a grep for `image rm`, `image.remove`, `prune`, or `delete.*image` returns nothing.
+Container runtimes (Docker, Podman) do not have an atomic "replace image" operation. `docker build --tag foo:bar` creates a new image. If `foo:bar` already exists, it becomes an intermediate layer or gets overwritten only in specific cases. There is **no code path** that calls `image rm` or `rmi` anywhere in the codebase. A grep for `image rm`, `image.remove`, `prune`, or `delete.*image` returns nothing.
 
 ### 3. No tracking / registry
 
-The code does not persist any record of which project-specific images exist. The only reference is the tag itself, and it's computed freshly each run. There is no manifest, no database, no sidecar file tracking: "project X at time T used image Y with hash Z."
+The code does not persist any record of which project-specific images exist. The only reference is the tag itself, and it's computed freshly each run. There is no manifest, no database, no sidecar file tracking. The phrase "project X at time T used image Y with hash Z" describes the intent.
 
 ## Design: Project-Scoped Image Lifecycle
 
@@ -65,7 +65,7 @@ Example: `pi-container-project-a1b2c-d4e5f6a7b8c9d0e1.local`
 **Why this matters:**
 - The `project-hash` component makes it possible to **enumerate all images for a given project** via `docker/podman image ls --filter "label=pi-container.project.hash=<hash>"` or by tag glob.
 - The `image-hash` component makes it possible to **detect stale images** by comparing the label against the current content hash.
-- The prefix `pi-container-project-` is **distinct from** the shared image prefix `pi-coding-agent`, so `docker image prune` will never accidentally touch these.
+- The prefix `pi-container-project-` is **distinct from** the shared image prefix `pi-coding-agent`. `docker image prune` will never accidentally touch these.
 
 ### 2. Image Labels
 
@@ -90,7 +90,7 @@ The existing `pi-container.hash` label is **preserved** (backwards compatible wi
 |-------|---------|
 | `pi-container.type` | Distinguishes project images from shared images (`project` vs `shared`). Enables `--filter "label=pi-container.type=project"` to find all project images system-wide. |
 | `pi-container.project.hash` | The project's identity hash (first 10 chars of `SHA-256(project_dir)`). Enables finding all images that belong to a specific workspace. |
-| `pi-container.project.path` | **Absolute path of the project directory at build time.** Enables detection of orphaned images when a project directory is deleted — if the stored path no longer exists, the image can be safely removed. |
+| `pi-container.project.path` | **Absolute path of the project directory at build time.** Enables detection of orphaned images when a project directory is deleted. If the stored path no longer exists, the image can be safely removed. |
 | `pi-container.build.time` | ISO 8601 timestamp. Enables sorting by age and identifying the most recent image for a project. |
 
 ### 3. Pre-Build Cleanup: `_cleanup_stale_project_images()`
@@ -100,7 +100,7 @@ Before building a new project-specific image, the following sequence runs:
 ```
 for each project-specific image on the host:
     if its pi-container.project.hash != current_project_hash:
-        skip  (belongs to a different project — do not touch)
+        skip  (belongs to a different project. do not touch)
     if its pi-container.hash == current_image_hash:
         skip  (this IS the new image or an identical cached image — no build needed)
     else:
@@ -348,7 +348,7 @@ The `--cleanup` variant would:
 
 ## Backwards Compatibility
 
-- The `pi-container.hash` label is **preserved** — current cache invalidation logic works unchanged.
+- The `pi-container.hash` label is **preserved**. Current cache invalidation logic works unchanged.
 - Old images (tagged `pi-coding-agent-<hash>.local`) without the new labels are **not touched** by cleanup. They remain as orphans until manually removed or until a future cleanup migration pass identifies them by their `pi-container.hash` label.
 - The shared image tag `pi-coding-agent:local` is **unaffected**.
 
@@ -370,24 +370,24 @@ This migration is **out of scope for v1**.
 | Scenario | Behavior |
 |----------|----------|
 | Build fails mid-way | Old image remains (cleanup happens *before* build, not after). No data loss. |
-| Two projects with identical definition files | Both produce the same `image-hash`; if project-hashes differ, they get distinct tags. Correct. |
+| Two projects with identical definition files | Both produce the same `image-hash`. If project-hashes differ, they get distinct tags. Correct. |
 | Same project, same definition files (re-run) | `_image_is_current()` returns True → no build, no cleanup. Correct. |
 | Project directory deleted between builds | `_cleanup_orphaned_project_images()` detects the missing path and removes all images for that project. **Fully automatic cleanup.** |
 | Project moved to new path | Old images retain the old path label → detected as orphaned and removed. New images get the new path label. Correct. |
-| Concurrent runs of the same project | Both compute the same hashes. The first build succeeds; the second finds the image already current. Cleanup finds no stale images. Correct. |
+| Concurrent runs of the same project | Both compute the same hashes. The first build succeeds. The second finds the image already current. Cleanup finds no stale images. Correct. |
 | Concurrent runs of different projects | Each cleans up only its own project's images. No cross-contamination. Correct. |
-| Container runtime not available | All subprocess calls are guarded by try/except → warning logged, no build, no crash. |
-| Image without `pi-container.project.path` label | Removed by orphan cleanup — unverifiable source, treated as orphan. |
+| Container runtime not available | All subprocess calls are guarded by try/except. The system logs a warning. No build, no crash. |
+| Image without `pi-container.project.path` label | Removed by orphan cleanup. Unverifiable source, treated as orphan. |
 
 ---
 
 ## Open Questions
 
-1. **Should we also clean up the shared image (`pi-coding-agent:local`) when `build.sh` runs?** This is a separate concern — `build.sh` already rebuilds the shared image, but it doesn't remove the old one. Could add similar cleanup there in v2.
+1. **Should we also clean up the shared image (`pi-coding-agent:local`) when `build.sh` runs?** This is a separate concern. `build.sh` already rebuilds the shared image, but it does not remove the old one. Could add similar cleanup there in v2.
 
-2. **Should `pi/commands.sh` changes trigger a new image?** Currently they don't (they run at runtime, not bake into the image). This is by design — but if users expect `pi/commands.sh` changes to affect the image, the hash function would need updating. Out of scope.
+2. **Should `pi/commands.sh` changes trigger a new image?** Currently they do not (they run at runtime, not bake into the image). This is by design. If users expect `pi/commands.sh` changes to affect the image, the hash function would need updating. Out of scope.
 
-3. **What about the `pi-coding-agent-proxy:local` image?** Same issue exists there (no cleanup after `build.sh`), but the proxy image is rebuilt every time `build.sh` runs (not per-project), so the accumulation rate is much lower. Can address in v2 if needed.
+3. **What about the `pi-coding-agent-proxy:local` image?** Same issue exists there (no cleanup after `build.sh`), but the proxy image is rebuilt every time `build.sh` runs (not per-project). The accumulation rate is much lower. Can address in v2 if needed.
 
 4. **Should we add a `--dry-run` flag to `_cleanup_stale_project_images()` for safety?** Useful for debugging and for the future `--cleanup` command. Could be a parameter on the function.
 
@@ -482,11 +482,11 @@ rather than logging a skip on every startup.
 `_cleanup_orphaned_nested_volumes()` had the same gap and got the same treatment,
 via `_unused_volumes()`. The query is inverted there because that is the form podman
 answers directly: `ps --format {{.Mounts}}` reports mount *destinations*, which cannot
-be mapped back to a volume name, while `volume ls --filter dangling=true` lists
+be mapped back to a volume name. `volume ls --filter dangling=true` lists
 exactly the volumes nothing references. A merely created, never-started container is
-enough to keep a volume off that list, which matches the `ps --all` semantics used for
-images. A failed query returns None rather than an empty set, so "cannot tell" falls
+e enough to keep a volume off that list. This matches the `ps --all` semantics used for
+images. A failed query returns None rather than an empty set. "cannot tell" falls
 back to attempting the removal instead of silently skipping every volume.
 
-The blank-path correction (3) applied to the volume pass too — it shared the
+The blank-path correction (3) applied to the volume pass too. It shared the
 `Path("")` bug verbatim.
