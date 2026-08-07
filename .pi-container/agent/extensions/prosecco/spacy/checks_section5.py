@@ -22,7 +22,7 @@ import spacy
 from constants import CONDITIONAL_WORDS, IMPERATIVE_VERB_LEMMAS
 
 
-def check_sentence_length(doc):
+def check_sentence_length_procedural(doc):
     """Check sentence length (Rule 5.1).
     
     Rule 5.1: "Write short sentences. Use a maximum of 20 words in each sentence."

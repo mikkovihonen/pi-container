@@ -32,6 +32,7 @@ from checks_section1 import (
 # Import check functions from Section 2 (Multi-word nouns)
 from checks_section2 import (
     check_multi_word_nouns,
+    check_technical_noun_clarity,
 )
 
 # Import check functions from Section 3 (Verbs)
@@ -49,7 +50,6 @@ from checks_section3 import (
 from checks_section4 import (
     check_short_sentences,
     check_contractions,
-    check_sentence_length,
     check_forbidden_modals,
     check_vertical_lists,
     check_connecting_words,
@@ -59,7 +59,7 @@ from checks_section4 import (
 
 # Import check functions from Section 5 (Procedural writing)
 from checks_section5 import (
-    check_sentence_length,
+    check_sentence_length_procedural as check_sentence_length_5,
     check_multiple_instructions,
     check_non_imperative_in_procedures,
     check_descriptive_statement_first,
@@ -70,7 +70,7 @@ from checks_section5 import (
 from checks_section6 import (
     check_information_structure,
     check_key_words,
-    check_sentence_length,
+    check_sentence_length_descriptive as check_sentence_length_6,
     check_paragraph_structure,
     check_paragraph_topic,
     check_paragraph_length,
@@ -117,9 +117,6 @@ from gr_recommendations import (
     check_possessive_form,
 )
 
-# Import for SentenceLength (used in multiple sections)
-from checks_section4 import check_contractions as _
-
 def main():
     """Main entry point."""
     # Read input from file or stdin
@@ -142,7 +139,7 @@ def main():
 
     doc = nlp(text)
 
-    # Run all ASD-STE100 checks
+    # Run all ASD-STE100 checks (Section 1: Words)
     all_issues = []
     all_issues.extend(check_approved_words(doc))
     all_issues.extend(check_part_of_speech(doc))
@@ -158,57 +155,76 @@ def main():
     all_issues.extend(check_technical_verb_category(doc))
     all_issues.extend(check_technical_verb_as_noun(doc))
     all_issues.extend(check_british_english(doc))
-    all_issues.extend(check_contractions(doc))
-    all_issues.extend(check_short_sentences(doc))
-    all_issues.extend(check_sentence_length(doc))
+    
+    # Section 2: Multi-word nouns
+    all_issues.extend(check_multi_word_nouns(doc))
+    all_issues.extend(check_technical_noun_clarity(doc))
+    
+    # Section 3: Verbs
     all_issues.extend(check_verb_forms(doc))
     all_issues.extend(check_verb_tenses(doc))
     all_issues.extend(check_past_participle_as_adjective(doc))
     all_issues.extend(check_passive_voice(doc))
-    all_issues.extend(check_ing_forms(doc))
-    all_issues.extend(check_multi_word_nouns(doc))
-    all_issues.extend(check_information_structure(doc))
-    all_issues.extend(check_sentence_length(doc))
-    all_issues.extend(check_paragraph_structure(doc))
-    all_issues.extend(check_paragraph_topic(doc))
-    all_issues.extend(check_paragraph_length(doc))
-    all_issues.extend(check_conjunction_that(doc))
-    all_issues.extend(check_false_friends(doc))
-    all_issues.extend(check_possessive_form(doc))
-    all_issues.extend(check_technical_noun_as_verb(doc))
-    all_issues.extend(check_technical_verb_as_noun(doc))
-    all_issues.extend(check_word_usage(doc))
-    all_issues.extend(check_consistent_style(doc))
-    all_issues.extend(check_hyphens(doc))
-    all_issues.extend(check_vertical_lists(doc))
-    all_issues.extend(check_article_usage(doc))
-    all_issues.extend(check_word_count_with_parentheses(doc))
-    all_issues.extend(check_semicolons(doc))
-    all_issues.extend(check_parentheses_usage(doc))
-    all_issues.extend(check_hyphenation_patterns(doc))
-    all_issues.extend(check_vertical_list_colons(doc))
-    all_issues.extend(check_word_count_all(doc))
     all_issues.extend(check_passive_voice_with_agent(doc))
+    all_issues.extend(check_ing_forms(doc))
     all_issues.extend(check_noun_as_verb(doc))
+    
+    # Section 4: Sentences
+    all_issues.extend(check_short_sentences(doc))
+    all_issues.extend(check_contractions(doc))
+    all_issues.extend(check_forbidden_modals(doc))
+    all_issues.extend(check_vertical_lists(doc))
     all_issues.extend(check_connecting_words(doc))
-    all_issues.extend(check_key_words(doc))
-    all_issues.extend(check_word_count_with_numbers(doc))
-    all_issues.extend(check_british_english(doc))
-    all_issues.extend(check_safety_instruction_format(doc))
-    all_issues.extend(check_different_sentence_constructions(doc))
-    all_issues.extend(check_consistent_terminology(doc))
-    all_issues.extend(check_word_for_word_replacement(doc))
     all_issues.extend(check_missing_articles(doc))
-    all_issues.extend(check_too_long_technical_nouns(doc))
+    all_issues.extend(check_article_usage(doc))
+    
+    # Section 5: Procedural writing
+    all_issues.extend(check_sentence_length_5(doc))
     all_issues.extend(check_multiple_instructions(doc))
     all_issues.extend(check_non_imperative_in_procedures(doc))
     all_issues.extend(check_descriptive_statement_first(doc))
     all_issues.extend(check_notes(doc))
+    
+    # Section 6: Descriptive writing
+    all_issues.extend(check_information_structure(doc))
+    all_issues.extend(check_key_words(doc))
+    all_issues.extend(check_sentence_length_6(doc))
+    all_issues.extend(check_paragraph_structure(doc))
+    all_issues.extend(check_paragraph_topic(doc))
+    all_issues.extend(check_paragraph_length(doc))
+    
+    # Section 7: Safety instructions
+    all_issues.extend(check_safety_instruction_format(doc))
     all_issues.extend(check_safety_instruction_explanation(doc))
+    
+    # Section 8: Punctuation and word count
+    all_issues.extend(check_semicolons(doc))
+    all_issues.extend(check_hyphens(doc))
+    all_issues.extend(check_parentheses_usage(doc))
+    all_issues.extend(check_word_count_with_parentheses(doc))
+    all_issues.extend(check_word_count_with_numbers(doc))
     all_issues.extend(check_hyphenation_patterns(doc))
+    all_issues.extend(check_vertical_list_colons(doc))
+    all_issues.extend(check_word_count_all(doc))
+    
+    # Section 9: Writing practices
+    all_issues.extend(check_word_usage(doc))
+    all_issues.extend(check_consistent_style(doc))
+    all_issues.extend(check_phrasal_verbs(doc))
+    all_issues.extend(check_consistent_terminology(doc))
+    all_issues.extend(check_different_sentence_constructions(doc))
+    all_issues.extend(check_word_for_word_replacement(doc))
+    all_issues.extend(check_non_approved_words(doc))
+    
+    # General Recommendations (GR-1 to GR-8)
+    all_issues.extend(check_conjunction_that(doc))
     all_issues.extend(check_ambiguous_with(doc))
     all_issues.extend(check_ambiguous_pronouns(doc))
     all_issues.extend(check_ambiguous_this(doc))
+    all_issues.extend(check_false_friends(doc))
+    all_issues.extend(check_latin_abbreviations(doc))
+    all_issues.extend(check_gender_pronouns(doc))
+    all_issues.extend(check_possessive_form(doc))
 
     # Sort by offset
     all_issues.sort(key=lambda x: x["offset"])

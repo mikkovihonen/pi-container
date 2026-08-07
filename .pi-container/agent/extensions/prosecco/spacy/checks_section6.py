@@ -130,7 +130,7 @@ def check_key_words(doc):
     return issues
 
 
-def check_sentence_length(doc):
+def check_sentence_length_descriptive(doc):
     """Check sentence length for descriptive writing (Rule 6.3).
     
     Rule 6.3: "Write short sentences. Use a maximum of 25 words in each sentence."
