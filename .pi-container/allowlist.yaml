@@ -3,7 +3,7 @@
 # traffic is blocked by default.
 global:
   mode: "allow"
-  default_action: "block"
+  default_action: "allow"
   status_code: 403
   rules:
     - name: "pypi-org-allow"

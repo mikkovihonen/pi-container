@@ -99,27 +99,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
  && locale-gen en_US.UTF-8
 
-# ─── Vale prose linter (errata-ai/vale v3.17.1) ─────────────────────────────
-# Pinned official release. We download the Go binary, verify its SHA-256, and
-# install it to /usr/local/bin/vale. pip install vale is NOT used — that PyPI
-# package is an unaffiliated wrapper that downloads the Go binary on first
-# execution, as root at build time, into a cache the pi user may not be able to
-# read.
-ARG VALE_VERSION=3.17.1
-ARG TARGETARCH
-RUN set -eux; \
-    case "${TARGETARCH:-amd64}" in \
-      amd64) asset="Linux_64-bit"; sum="db947f89f2292e6a0381a61de155f6a5f5cb4cb460ca178ea412ef605559cefd" ;; \
-      arm64) asset="Linux_arm64";  sum="92d91ebf9ee69ec077379be95cd09e6710ab33d3d5bab66bb482e66ebc80dc23" ;; \
-      *) echo "unsupported arch: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSL -o /tmp/vale.tgz \
-      "https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_${asset}.tar.gz"; \
-    echo "${sum}  /tmp/vale.tgz" | sha256sum -c -; \
-    tar -xzf /tmp/vale.tgz -C /usr/local/bin vale; \
-    rm /tmp/vale.tgz; \
-    vale --version
-
 # ─── Toolchain from the builder image ────────────────────────────────────────
 # Node, CPython + uv + podman-compose, podman built with our own build tags, and the
 # netavark/aardvark-dns release podman 6 requires. Each is staged at its own root by
@@ -149,21 +128,9 @@ ENV UV_SYSTEM_CERTS=1
 # The manifest is assembled from one fragment per build script — see stage_record() in
 # pi-coding-agent-builder/common.sh for why they arrive separately — into a single file
 # the agent can read: /usr/local/share/pi-container/toolchain-versions.txt.
-# Podman's automatic platform args populate TARGETARCH at build time. The
-# Vale install below depends on it to pick the right tarball. If the build
-# never passes it, TARGETARCH defaults to amd64 (the case branch in the shell
-# script) and vale --version at the bottom of that step fails loudly when the
-# wrong binary was downloaded. build.py does not pass --build-arg TARGETARCH
-# explicitly — this is a documented dependency, not a defect.
-
-# ─── Vale global styles and fallback config ──────────────────────────────────
-# Root-owned, read-only for the agent. The fallback config at
-# /usr/local/share/vale/fallback.ini is linked into $XDG_CONFIG_HOME/vale/
-# by entrypoint.sh, because /home/pi is a tmpfs at runtime and the image
-# cannot pre-create that directory. See pi-coding-agent/vale/ for the source.
-# Placed at the end so a YAML rule edit does not bust the npm install, Python
-# staging and CA-cert layers that follow.
-COPY pi-coding-agent/vale/ /usr/local/share/vale/
+# Podman's automatic platform args populate TARGETARCH at build time.
+# build.py does not pass --build-arg TARGETARCH explicitly — this is a
+# documented dependency, not a defect.
 
 RUN ldconfig \
  && node --version \
@@ -177,6 +144,9 @@ RUN ldconfig \
  && cat /usr/local/share/pi-container/toolchain-versions.d/*.txt \
       | sort > /usr/local/share/pi-container/toolchain-versions.txt \
  && cat /usr/local/share/pi-container/toolchain-versions.txt
+# NOTE: Vale is no longer installed in this image. It is a project dev
+# dependency (pyproject.toml [dependency-groups].dev) and is provided by `uv
+# sync` at runtime. The fallback config is written inline by entrypoint.sh.
 
 # ─── Nested container toolchain ──────────────────────────────────────────────
 # Lets the agent run its own rootless podman *inside* this container (podman

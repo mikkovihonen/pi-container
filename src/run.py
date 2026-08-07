@@ -155,7 +155,7 @@ def _ensure_project_config() -> Path:
     # Only the subpaths listed below are eligible. A user can turn off an
     # extension by deleting its directory — the seeder will not resurrect it.
     # To add a new seeded subpath, append it here.
-    _AGENT_SEED_SUBPATHS = ("extensions/vale/index.js",)
+    _AGENT_SEED_SUBPATHS = ("extensions/prosecco/index.js", "extensions/prosecco/.vale.ini",)
     agent_template = template_root / "agent"
     agent_project = project_root / "agent"
     if agent_template.is_dir():
@@ -211,10 +211,9 @@ def _ensure_project_config() -> Path:
 # only hashed when non-empty.
 _IMAGE_DEFINITION_FILES = ("Containerfile", "entrypoint.sh")
 # Directories under ``pi-coding-agent/`` whose contents must also enter the hash.
-# A change to any file in any of these trees (Vale rules, Vale config, ...) must
-# invalidate the project-specific image, so the files walk, sort and hash in
-# deterministic order.
-_IMAGE_DEFINITION_DIRS = ("vale",)
+# A change to any file in any of these trees must invalidate the project-specific
+# image, so the files walk, sort and hash in deterministic order.
+_IMAGE_DEFINITION_DIRS = ()
 
 
 def _compute_image_hash(project_dir: Path) -> str | None:
@@ -223,8 +222,6 @@ def _compute_image_hash(project_dir: Path) -> str | None:
     Returns a hex digest of the concatenated SHA-256 hashes of:
     - `pi-coding-agent/Containerfile` (at REPO_ROOT, to detect image definition changes)
     - `pi-coding-agent/entrypoint.sh` (at REPO_ROOT, to detect entrypoint changes)
-    - `pi-coding-agent/vale/` (recursively — Vale rules and fallback config are
-      baked into the image and reach the agent via the bind-mounted config dir)
     - `.pi-container/dependencies/root/commands.sh` (if it exists and is non-empty)
     - `.pi-container/dependencies/pi/commands.sh` (if it exists and is non-empty)
 

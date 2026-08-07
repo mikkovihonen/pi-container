@@ -1,11 +1,15 @@
 /**
- * Vale prose linting extension.
+ * Prose linting extension.
  *
  * Provides:
- * - Tool: `vale_lint` — run Vale on a file or directory.
- * - Command: `/vale [path] [--minAlertLevel=suggestion|warning|error] [--ste-only]`
+ * - Tool: `prose_lint` — run Vale + spaCy on a file or directory.
+ * - Command: `/prose-lint [path] [--minAlertLevel=suggestion|warning|error] [--ste-only] [--spacy]`
  *
  * Both entry points share one implementation so they cannot disagree.
+ *
+ * Combines:
+ * - Vale CLI for general prose checks (spelling, capitalization, etc.)
+ * - spaCy for NLP-powered ASD-STE100 checks (contractions, passive voice, etc.)
  *
  * Vale contract (errata-ai/vale v3.17.1):
  *   --output=line   one alert per line: "path:line:col:CheckName:message"
@@ -35,6 +39,7 @@ const LintParams = Type.Object({
 		Type.Union([Type.Literal("text"), Type.Literal("json")]),
 	),
 	steOnly: Type.Optional(Type.Boolean()),
+	spacy: Type.Optional(Type.Boolean({ description: "Enable ASD-STE100 checks via spaCy." })),
 });
 
 /**
@@ -92,10 +97,11 @@ function countAlertsFromJson(data) {
  * @param {"suggestion"|"warning"|"error"} minAlertLevel
  * @param {"text"|"json"} outputFormat
  * @param {boolean} steOnly
+ * @param {boolean} spacy  Enable ASD-STE100 checks via spaCy.
  * @param {object} ctx  ExtensionContext: {cwd, mode, hasUI, signal, ui}
  * @returns {{content, details}}
  */
-async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, ctx) {
+async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy, ctx) {
 	// 1. Resolve path against ctx.cwd.
 	const resolved = userPath
 		? pathResolve(ctx.cwd, userPath)
@@ -286,6 +292,24 @@ async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, ctx) 
 
 	const stdout = result.stdout;
 
+	// 5b. Run spaCy checks if requested.
+	let spacyOutput = "";
+	if (spacy && filePaths.length > 0 && filePaths[0].endsWith('.md')) {
+		const spacyModule = pathResolve("/home/pi/.pi/agent/extensions/prosecco/spacy", "spacy_asd-ste100.py");
+		try {
+			const spacyResult = await pi.exec("uv", ["run", "python", spacyModule, filePaths[0]], {
+				cwd: ctx.cwd,
+				signal: ctx.signal,
+				env: { PYTHONIOENCODING: "utf-8" },
+			});
+			if (!spacyResult.killed && spacyResult.code === 0) {
+				spacyOutput = spacyResult.stdout;
+			}
+		} catch {
+			// spaCy script failed; continue without it
+		}
+	}
+
 	if (outputFormat === "json") {
 		// 5. Parse JSON and count alerts.
 		let data;
@@ -331,20 +355,37 @@ async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, ctx) 
 	// 6. Text (line) output.
 	const lines = stdout.trim() === "" ? [] : stdout.trim().split("\n");
 	const formatted = lines.map(formatLineAlert);
-	// Count distinct source paths — one file may have many alerts.
-	const filesScanned = new Set(lines.map((l) => l.split(":")[0])).size;
+
+	// Parse spaCy output if present.
+	let spacyAlerts = [];
+	if (spacyOutput) {
+		const spacyLines = spacyOutput.trim().split("\n").filter(l => l && !l.startsWith("No ") && !l.startsWith("Found ") && !l.startsWith("---"));
+		spacyAlerts = spacyLines.map(l => l.trim()).filter(l => l && l.includes(":"));
+	}
+
+	// Combine Vale and spaCy results.
+	const allAlerts = [...formatted, ...spacyAlerts];
+	const filesScanned = new Set([...formatted.map((l) => l.split(":")[0]), ...spacyAlerts.map((l) => l.split(":")[0])]).size;
+
 	const body =
-		lines.length === 0
+		allAlerts.length === 0
 			? "No problems found."
-			: formatted.join("\n");
+			: allAlerts.join("\n");
+
+	const totalViolations = allAlerts.length;
+	const spacyCount = spacyAlerts.length;
+	const valeCount = formatted.length;
+
 	return {
 		content: [{ type: "text", text: body }],
 		details: {
 			isError: false,
-			violationCount: lines.length,
+			violationCount: totalViolations,
 			filesScanned,
 			bySeverity: {},
 			raw: undefined,
+			valeCount,
+			spacyCount,
 		},
 	};
 }
@@ -364,31 +405,33 @@ function buildStatus(total, filesScanned, bySeverity) {
 }
 
 export default function (pi) {
-	// ── Tool: vale_lint ──────────────────────────────────────────────────
+	// ── Tool: prosecco_lint ──────────────────────────────────────────────────
 	pi.registerTool({
-		name: "vale_lint",
-		label: "Vale Lint",
+		name: "prosecco-lint",
+		label: "Prose Lint",
 		description:
-			"Run Vale prose linting on a file or directory. Reports ASD-STE100 problems.",
-		promptSnippet: "Run prose linting with Vale",
+			"Run Vale + spaCy prose linting on a file or directory. Reports ASD-STE100 problems.",
+		promptSnippet: "Run prose linting with Vale and spaCy",
 		parameters: LintParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const userPath = params.path ?? undefined;
 			const minAlertLevel = params.minAlertLevel ?? "suggestion";
 			const outputFormat = params.outputFormat ?? "text";
 			const steOnly = Boolean(params.steOnly);
-			return runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, ctx);
+			const spacy = Boolean(params.spacy);
+			return runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy, ctx);
 		},
 	});
 
-	// ── Command: /vale ───────────────────────────────────────────────────
-	pi.registerCommand("vale", {
-		description: "Lint prose with Vale. Usage: /vale [path] [--minAlertLevel=suggestion|warning|error] [--ste-only]",
+	// ── Command: /prosecco ─────────────────────────────────────────────
+	pi.registerCommand("prosecco", {
+		description: "Lint prose with Vale + spaCy. Usage: /prose-lint [path] [--minAlertLevel=suggestion|warning|error] [--ste-only] [--spacy]",
 		handler: async (args, ctx) => {
 			// Parse arguments. The first non-flag token is the path.
 			let userPath = undefined;
 			let minAlertLevel = "suggestion";
 			let steOnly = false;
+			let spacy = false;
 			const tokens = String(args || "").trim().split(/\s+/);
 			for (const tok of tokens) {
 				if (tok.startsWith("--minAlertLevel=")) {
@@ -398,17 +441,19 @@ export default function (pi) {
 					}
 				} else if (tok === "--ste-only") {
 					steOnly = true;
+				} else if (tok === "--spacy") {
+					spacy = true;
 				} else if (!tok.startsWith("--")) {
 					userPath = tok;
 				}
 			}
 
 			if (!userPath) {
-				ctx.ui.notify("Usage: /vale <path> [--minAlertLevel=suggestion|warning|error] [--ste-only]");
+				ctx.ui.notify("Usage: /vale <path> [--minAlertLevel=suggestion|warning|error] [--ste-only] [--spacy]");
 				return;
 			}
 
-			const result = await runLint(pi, userPath, minAlertLevel, "text", steOnly, ctx);
+			const result = await runLint(pi, userPath, minAlertLevel, "text", steOnly, spacy, ctx);
 
 			// Print the result regardless of UI mode — the user may be in
 			// print-only mode and needs to see the output.
@@ -431,7 +476,7 @@ export default function (pi) {
 
 				// Status line: always show a count.
 				ctx.ui.setStatus(
-					"vale",
+					"prose-lint",
 					buildStatus(
 						result.details.violationCount,
 						result.details.filesScanned,

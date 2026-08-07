@@ -159,18 +159,19 @@ class TestEnsureProjectConfigExistingAgentDir:
     """Tests for the per-file seed of an existing ``agent/`` directory (D1)."""
 
     def _make_template_with_extension(self, root):
-        """Build a template that ships an ``extensions/vale/index.js`` under agent/."""
+        """Build a template that ships an ``extensions/prosecco/index.js`` and ``.vale.ini`` under agent/."""
         template = root / "pi-coding-agent" / "default"
         agent = template / "agent"
         agent.mkdir(parents=True)
         (agent / "models.json").write_text("{}")
-        ext_dir = agent / "extensions" / "vale"
+        ext_dir = agent / "extensions" / "prosecco"
         ext_dir.mkdir(parents=True, exist_ok=True)
-        (ext_dir / "index.js").write_text("// vale extension\n")
+        (ext_dir / "index.js").write_text("// prosecco extension\n")
+        (ext_dir / ".vale.ini").write_text("MinAlertLevel = suggestion\n")
         return template
 
     def test_seeds_extension_into_existing_agent_dir(self, tmp_path, monkeypatch):
-        """A workspace with an existing .pi-container/agent/ gains extensions/vale/index.js on the next run."""
+        """A workspace with an existing .pi-container/agent/ gains extensions/vale/index.js and .vale.ini on the next run."""
         repo = tmp_path / "repo"
         project = tmp_path / "project"
         project.mkdir()
@@ -184,7 +185,8 @@ class TestEnsureProjectConfigExistingAgentDir:
 
         run._ensure_project_config()
 
-        assert (agent_dir / "extensions" / "vale" / "index.js").exists()
+        assert (agent_dir / "extensions" / "prosecco" / "index.js").exists()
+        assert (agent_dir / "extensions" / "prosecco" / ".vale.ini").exists()
 
     def test_does_not_overwrite_existing_extension(self, tmp_path, monkeypatch):
         """A user-edited extension file is never overwritten by seeding."""
@@ -222,7 +224,7 @@ class TestEnsureProjectConfigExistingAgentDir:
         # The custom file must remain untouched.
         assert (agent_dir / "custom.sh").read_text() == "#!/bin/bash\n"
         # The extension must be seeded.
-        assert (agent_dir / "extensions" / "vale" / "index.js").exists()
+        assert (agent_dir / "extensions" / "prosecco" / "index.js").exists()
 
 
 class TestComputeImageHash:
@@ -311,41 +313,42 @@ class TestComputeImageHash:
         result = run._compute_image_hash(repo)
         assert result is None
 
-    def test_vale_rule_edit_changes_hash(self, tmp_path, monkeypatch):
-        """Editing a Vale rule file changes _compute_image_hash."""
+    def test_vale_rule_edit_does_not_change_hash(self, tmp_path, monkeypatch):
+        """Editing a Vale rule file does NOT change _compute_image_hash.
+
+        Vale is now a project dev dependency installed via `uv sync`, not baked
+        into the image. Changes to pi-coding-agent/vale/ no longer affect the
+        project-specific image hash.
+        """
         repo = tmp_path / "repo"
         deps = repo / ".pi-container" / "dependencies"
         deps.parent.mkdir(parents=True, exist_ok=True)
         deps.mkdir(parents=True, exist_ok=True)
         (deps / "root" / "commands.sh").parent.mkdir(parents=True, exist_ok=True)
         (deps / "root" / "commands.sh").write_text("#!/bin/bash\necho install\n")
-        # Create minimal pi-coding-agent/ with Containerfile + entrypoint.sh + vale/
         pi_agent = repo / "pi-coding-agent"
         pi_agent.mkdir(parents=True, exist_ok=True)
         (pi_agent / "Containerfile").write_text("FROM ubuntu:22.04\n")
         (pi_agent / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
         vale_dir = pi_agent / "vale"
         vale_dir.mkdir(parents=True, exist_ok=True)
-        (vale_dir / "fallback.ini").write_text("StylesPath = /usr/local/share/vale/styles\n")
-        ste100 = vale_dir / "styles" / "STE100"
-        ste100.mkdir(parents=True, exist_ok=True)
-        (ste100 / "SentenceLength.yml").write_text(
-            "extends: occurrence\nmessage: short\nlevel: suggestion\nscope: sentence\nmax: 20\ntoken: '\\w+'\n"
-        )
+        (vale_dir / "fallback.ini").write_text("MinAlertLevel = suggestion\n")
         monkeypatch.setattr(run, "REPO_ROOT", repo)
         project = tmp_path / "workspace"
         project.mkdir()
 
         hash1 = run._compute_image_hash(project)
-        # Edit the rule file.
-        (ste100 / "SentenceLength.yml").write_text(
-            "extends: occurrence\nmessage: longer message\nlevel: suggestion\nscope: sentence\nmax: 20\ntoken: '\\w+'\n"
-        )
+        # Edit the fallback config.
+        (vale_dir / "fallback.ini").write_text("MinAlertLevel = warning\n")
         hash2 = run._compute_image_hash(project)
-        assert hash1 != hash2
+        assert hash1 == hash2
 
-    def test_empty_vale_dir_changes_hash(self, tmp_path, monkeypatch):
-        """Adding an empty vale/ directory to a repo without one changes the hash."""
+    def test_adding_vale_dir_does_not_change_hash(self, tmp_path, monkeypatch):
+        """Adding vale/ to a repo without one does NOT change the hash.
+
+        Vale is now a project dev dependency installed via `uv sync`, not baked
+        into the image.
+        """
         repo = tmp_path / "repo"
         deps = repo / ".pi-container" / "dependencies"
         deps.parent.mkdir(parents=True, exist_ok=True)
@@ -365,7 +368,7 @@ class TestComputeImageHash:
         (pi_agent / "vale").mkdir(parents=True, exist_ok=True)
         (pi_agent / "vale" / "fallback.ini").write_text("minAlertLevel = warning\n")
         hash2 = run._compute_image_hash(project)
-        assert hash1 != hash2
+        assert hash1 == hash2
 
 
 class TestHasDependencyFiles:

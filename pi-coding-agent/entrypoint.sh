@@ -61,13 +61,14 @@ fi
 
 # ─── Vale fallback config ────────────────────────────────────────────────
 # /home/pi is a tmpfs at runtime, so the image cannot pre-create this
-# directory. Link the read-only fallback config into the XDG location so Vale
-# never exits 2 ("no .vale.ini found"). A project .vale.ini still wins over the
-# fallback by Vale's own config search rules. See docs/design/vale-prose-linting.md.
+# directory. Link the Vale config bundled with the extension into the XDG
+# location so Vale never exits 2 ("no .vale.ini found"). A project .vale.ini
+# still wins over the fallback by Vale's own config search rules. See
+# docs/design/vale-prose-linting.md.
 # A prose linter must not block the container from starting, so a failure here
 # warns but does not abort (set -e is on above).
 install -d -o pi -g pi /home/pi/.config/vale 2>/dev/null \
-  && ln -sfn /usr/local/share/vale/fallback.ini /home/pi/.config/vale/.vale.ini \
+  && ln -sfn /home/pi/.pi/agent/extensions/prosecco/.vale.ini /home/pi/.config/vale/.vale.ini \
   || echo "WARNING: could not install the Vale fallback config"
 
 exec gosu pi bash -c '
