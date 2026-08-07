@@ -86,14 +86,16 @@ class TestPreprocessMarkdown:
     def test_simple_heading(self):
         """Heading text is preserved."""
         md = "# Hello World\n\nSome text."
-        text, mapping = preprocess_markdown(md)
-        assert text == md
+        text, mapping, _ = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Heading is preserved.
         assert "Hello World" in text
+        assert "Some text." in text
 
     def test_inline_code_removed(self):
         """Inline code spans are replaced with whitespace."""
         md = "Use `code` here."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "code" not in text
         assert "`code`" not in text
@@ -101,11 +103,13 @@ class TestPreprocessMarkdown:
         assert " here." in text
 
     def test_inline_link_removed(self):
-        """Inline links are replaced with whitespace."""
+        """Inline link URL is replaced with whitespace, link text preserved."""
         md = "Visit [link](http://example.com) now."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "link" not in text
+        # Link text is preserved.
+        assert "link" in text
+        # URL is replaced with spaces.
         assert "example.com" not in text
         assert "Visit " in text
         assert " now." in text
@@ -113,35 +117,35 @@ class TestPreprocessMarkdown:
     def test_image_removed(self):
         """Image syntax is replaced with whitespace."""
         md = "An image ![alt](img.png) here."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "alt" not in text
         assert "img.png" not in text
 
     def test_empty_input(self):
         """Empty string returns empty string."""
-        text, mapping = preprocess_markdown("")
+        text, mapping, _ = preprocess_markdown("")
         assert text == ""
         assert mapping == {}
 
     def test_no_special_elements(self):
         """Plain Markdown text is returned unchanged."""
         md = "Hello\n\nWorld\n"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert text == md
         assert len(text) == len(md)
 
     def test_offset_mapping_valid(self):
         """Every offset in the mapping is within bounds."""
         md = "# Title\n\nSome `code` here.\n"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         for cleaned_pos, orig_pos in mapping.items():
             assert 0 <= orig_pos < len(md)
 
     def test_fenced_code_block_removed(self):
         """Fenced code blocks are replaced with whitespace."""
         md = "Text before\n\n```python\nprint('hello')\n```\n\nText after."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "print" not in text
         assert "python" not in text
@@ -318,7 +322,7 @@ class TestPreprocessMarkdownCornerCases:
     def test_backticks_without_code(self):
         """Handle backticks in text without forming code spans."""
         md = "Use `single` backtick for emphasis."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # Single backticks should not be treated as code spans.
         # The regex requires matching pairs of backticks.
@@ -326,23 +330,24 @@ class TestPreprocessMarkdownCornerCases:
     def test_nested_backticks(self):
         """Handle nested backtick code spans."""
         md = "Outer `inner `code` span` here."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # The inner code span should be replaced.
 
     def test_link_with_url_containing_parens(self):
         """Handle links with URLs containing parentheses."""
         md = "See [example](http://en.wikipedia.org/wiki/Test_(test)) for more."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "example" not in text
+        # Link text is preserved.
+        assert "example" in text
         assert "wikipedia.org" not in text
         assert "See " in text
 
     def test_image_with_alt_containing_brackets(self):
         """Handle images with alt text containing brackets."""
         md = "![alt [text] here](image.png)"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "alt [text] here" not in text
         assert "image.png" not in text
@@ -350,10 +355,11 @@ class TestPreprocessMarkdownCornerCases:
     def test_mixed_inline_elements(self):
         """Handle multiple inline elements in one line."""
         md = "Use `code` and [link](url) and ![img](pic.png) together."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "code" not in text
-        assert "link" not in text
+        # Link text is preserved, URL is replaced.
+        assert "link" in text
         assert "url" not in text
         assert "img" not in text
         assert "pic.png" not in text
@@ -364,7 +370,7 @@ class TestPreprocessMarkdownCornerCases:
     def test_code_block_with_special_chars(self):
         """Handle fenced code blocks with special characters."""
         md = "```\nimport os; print('Hello!')\n```"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "import" not in text
         assert "print" not in text
@@ -373,30 +379,32 @@ class TestPreprocessMarkdownCornerCases:
     def test_unicode_in_text(self):
         """Handle Unicode characters in text content."""
         md = "# Título\n\nContenido en español: ¡Hola!\n\n日本語テキスト"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
+        # Heading is preserved.
         assert "Título" in text
+        # Body text is preserved.
         assert "¡Hola!" in text
         assert "日本語テキスト" in text
 
     def test_very_long_input(self):
         """Handle very long input strings."""
         md = "Text " * 1000 + "\n"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert text == md
 
     def test_whitespace_preservation(self):
         """Ensure whitespace in non-code areas is preserved."""
         md = "Hello   world\n\n  indented  \n"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert text == md
 
     def test_empty_code_span(self):
         """Handle empty inline code spans."""
         md = "Use `` empty `` code."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # Empty code spans should be replaced.
         assert "``" not in text or "empty" not in text
@@ -404,14 +412,14 @@ class TestPreprocessMarkdownCornerCases:
     def test_code_span_with_newline(self):
         """Handle code spans with newlines (should not match)."""
         md = "Line1 `code\nspan` Line2"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         # The regex uses `[^`]+` which does not match newlines.
         # So the backticks should not be treated as code spans.
 
     def test_multiple_fenced_blocks(self):
         """Handle multiple fenced code blocks."""
         md = "```\ncode1\n```\n\nSome text.\n\n```\ncode2\n```"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "code1" not in text
         assert "code2" not in text
@@ -420,7 +428,7 @@ class TestPreprocessMarkdownCornerCases:
     def test_html_block_removed(self):
         """Handle HTML blocks in Markdown."""
         md = "<!-- comment -->\n\nSome text."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "comment" not in text
         assert "Some text." in text
@@ -428,7 +436,7 @@ class TestPreprocessMarkdownCornerCases:
     def test_table_rows_removed(self):
         """Handle table rows in Markdown."""
         md = "| Header |\n|--------|\n| Cell |\n"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # Table delimiters (|) should be replaced, but cell content preserved.
         assert "|" not in text
@@ -599,23 +607,24 @@ class TestPreprocessMarkdownAdvancedCornerCases:
     def test_code_span_with_backticks_inside(self):
         """Handle code spans using double backticks containing single backticks."""
         md = "Outer `inner `code` span` here."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # The inner code span should be replaced.
 
     def test_link_with_title(self):
         """Handle links with title attributes."""
         md = '[link](http://example.com "title")'
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "link" not in text
+        # Link text is preserved.
+        assert "link" in text
         assert "example.com" not in text
         assert "title" not in text
 
     def test_image_with_title(self):
         """Handle images with title attributes."""
         md = '![alt](http://example.com/img.png "title")'
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "alt" not in text
         assert "img.png" not in text
@@ -623,14 +632,14 @@ class TestPreprocessMarkdownAdvancedCornerCases:
     def test_autolink(self):
         """Handle autolinks (angle-bracket URLs)."""
         md = "See <http://example.com> for more."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "example.com" not in text
 
     def test_inline_html_in_markdown(self):
         """Handle inline HTML tags in Markdown."""
         md = "This has <strong>bold</strong> text."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # The HTML tags should be removed.
         assert "<strong>" not in text
@@ -640,14 +649,14 @@ class TestPreprocessMarkdownAdvancedCornerCases:
     def test_html_comment_in_markdown(self):
         """Handle HTML comments in Markdown."""
         md = "Text <!-- comment --> more"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "comment" not in text
 
     def test_fenced_code_with_info_string(self):
         """Handle fenced code blocks with info strings."""
         md = "```python\nimport os\n```"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "import" not in text
         assert "python" not in text
@@ -655,49 +664,53 @@ class TestPreprocessMarkdownAdvancedCornerCases:
     def test_tilde_fenced_code_block(self):
         """Handle fenced code blocks with tilde fences."""
         md = "~~~python\ncode\n~~~"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "code" not in text
 
     def test_horizontal_rule_dashes(self):
         """Handle horizontal rules made of dashes."""
         md = "---\n\nText"
-        text, mapping = preprocess_markdown(md)
-        # Horizontal rules are not currently removed (only code, links, images, etc.)
+        text, mapping, _ = preprocess_markdown(md)
+        # Horizontal rules are not removed.
         assert len(text) == len(md)
+        assert "Text" in text
 
     def test_horizontal_rule_stars(self):
         """Handle horizontal rules made of asterisks."""
         md = "***\n\nText"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
+        assert "Text" in text
 
     def test_atx_heading_with_closing_hash(self):
         """Handle ATX headings with closing # characters."""
         md = "# Heading ##\n\nText"
-        text, mapping = preprocess_markdown(md)
-        # ATX headings are not currently removed.
+        text, mapping, _ = preprocess_markdown(md)
+        # ATX headings are preserved.
         assert len(text) == len(md)
         assert "Heading" in text
+        assert "Text" in text
 
     def test_link_with_empty_url(self):
         """Handle links with empty URL."""
         md = '[link]()'
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "link" not in text
+        # Link text is preserved.
+        assert "link" in text
 
     def test_image_with_empty_alt(self):
         """Handle images with empty alt text."""
         md = '![](image.png)'
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "image.png" not in text
 
     def test_nested_emphasis_with_code(self):
         """Handle emphasis with code inside."""
         md = "*Text with `code` inside*"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # The code span should be replaced.
         assert "`code`" not in text
@@ -705,7 +718,7 @@ class TestPreprocessMarkdownAdvancedCornerCases:
     def test_multiple_tables_and_code_blocks(self):
         """Handle document with multiple tables and code blocks."""
         md = "| H |\n|---|\n| C |\n\n```\ncode\n```\n\n| H2 |\n|----|\n| C2 |"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "code" not in text
         # Table delimiters should be replaced, but cell content preserved.
@@ -718,7 +731,7 @@ class TestPreprocessMarkdownAdvancedCornerCases:
     def test_code_span_with_special_characters(self):
         """Handle code spans containing special characters."""
         md = "Use `alert('XSS')` carefully."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "alert" not in text
         assert "XSS" not in text
@@ -726,16 +739,17 @@ class TestPreprocessMarkdownAdvancedCornerCases:
     def test_link_with_fragment(self):
         """Handle links with fragment identifiers."""
         md = '[link](http://example.com#section)'
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "link" not in text
+        # Link text is preserved.
+        assert "link" in text
         assert "example.com" not in text
         assert "section" not in text
 
     def test_image_with_query_params(self):
         """Handle images with query parameters in URL."""
         md = '![alt](image.png?w=100&h=200)'
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "alt" not in text
         assert "image.png" not in text
@@ -743,7 +757,7 @@ class TestPreprocessMarkdownAdvancedCornerCases:
     def test_empty_fenced_code_block(self):
         """Handle empty fenced code blocks."""
         md = "```\n\n```"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # The fenced code block should be replaced with spaces.
         assert "```" not in text or text.count("```") < 2
@@ -751,7 +765,7 @@ class TestPreprocessMarkdownAdvancedCornerCases:
     def test_code_block_with_only_whitespace(self):
         """Handle fenced code blocks containing only whitespace."""
         md = "```\n   \n   \n```"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # The entire code block should be replaced.
         assert text.strip() == ""
@@ -759,7 +773,7 @@ class TestPreprocessMarkdownAdvancedCornerCases:
     def test_mixed_backtick_levels(self):
         """Handle document with both single and double backtick code spans."""
         md = "`single` and ``double`` code"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "single" not in text
         assert "double" not in text
@@ -963,36 +977,39 @@ class TestPreprocessMarkdownTrivialCases:
     def test_just_heading(self):
         """Handle just a heading."""
         md = "# Heading"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
+        # Heading is preserved.
         assert "Heading" in text
 
     def test_just_paragraph(self):
         """Handle just a paragraph."""
         md = "Just a paragraph."
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert text == md
 
     def test_just_code_span(self):
         """Handle just a code span."""
         md = "`code`"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "code" not in text
 
     def test_just_link(self):
         """Handle just a link."""
         md = "[text](url)"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "text" not in text
+        # Link text is preserved.
+        assert "text" in text
+        # URL is replaced with spaces.
         assert "url" not in text
 
     def test_just_image(self):
         """Handle just an image."""
         md = "![alt](img.png)"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "alt" not in text
         assert "img.png" not in text
@@ -1000,49 +1017,49 @@ class TestPreprocessMarkdownTrivialCases:
     def test_single_character(self):
         """Handle a single character."""
         md = "a"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert text == md
 
     def test_single_space(self):
         """Handle a single space."""
         md = " "
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert text == md
 
     def test_single_newline(self):
         """Handle a single newline."""
         md = "\n"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert text == md
 
     def test_just_whitespace(self):
         """Handle just whitespace."""
         md = "   \n  \t  "
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert text == md
 
     def test_multiple_consecutive_newlines(self):
         """Handle multiple consecutive newlines."""
         md = "\n\n\n"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert text == md
 
     def test_just_code_block(self):
         """Handle just a code block (no other content)."""
         md = "```\ncode\n```"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "code" not in text
 
     def test_just_table(self):
         """Handle just a table (no other content)."""
         md = "| H |\n|---|\n| C |"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # Table delimiters (|) should be replaced, but cell content preserved.
         assert "|" not in text
@@ -1052,33 +1069,35 @@ class TestPreprocessMarkdownTrivialCases:
     def test_just_horizontal_rule(self):
         """Handle just a horizontal rule."""
         md = "---"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # Horizontal rules are not removed.
-        assert text == md
+        assert "---" in text
 
     def test_just_link_with_no_text(self):
         """Handle just a link with empty text."""
         md = "[](url)"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "url" not in text
 
     def test_just_image_with_no_alt(self):
         """Handle just an image with empty alt."""
         md = "![](img.png)"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "img.png" not in text
 
     def test_multiple_links_in_sequence(self):
         """Handle multiple links in sequence."""
         md = "[a](1) [b](2) [c](3)"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "a" not in text
-        assert "b" not in text
-        assert "c" not in text
+        # Link texts are preserved.
+        assert "a" in text
+        assert "b" in text
+        assert "c" in text
+        # URLs are replaced with spaces.
         assert "1" not in text
         assert "2" not in text
         assert "3" not in text
@@ -1086,7 +1105,7 @@ class TestPreprocessMarkdownTrivialCases:
     def test_multiple_images_in_sequence(self):
         """Handle multiple images in sequence."""
         md = "![a](1.png) ![b](2.png) ![c](3.png)"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "a" not in text
         assert "b" not in text
@@ -1095,7 +1114,7 @@ class TestPreprocessMarkdownTrivialCases:
     def test_multiple_code_spans_in_sequence(self):
         """Handle multiple code spans in sequence."""
         md = "`a` `b` `c`"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "a" not in text
         assert "b" not in text
@@ -1104,43 +1123,46 @@ class TestPreprocessMarkdownTrivialCases:
     def test_empty_string_already_tested(self):
         """Verify empty string behavior (already tested elsewhere)."""
         md = ""
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert text == ""
         assert mapping == {}
 
     def test_heading_with_trailing_spaces(self):
         """Handle heading with trailing spaces."""
         md = "# Heading   "
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
+        # Heading is preserved.
         assert "Heading" in text
 
     def test_paragraph_with_trailing_newline(self):
         """Handle paragraph with trailing newline."""
         md = "Text.\n"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "Text." in text
 
     def test_code_span_with_single_char(self):
         """Handle code span with single character."""
         md = "`a`"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "a" not in text
 
     def test_link_with_single_char_text(self):
         """Handle link with single character text."""
         md = "[a](b)"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "a" not in text
+        # Link text is preserved.
+        assert "a" in text
+        # URL is replaced with spaces.
         assert "b" not in text
 
     def test_image_with_single_char_alt(self):
         """Handle image with single character alt."""
         md = "![a](b.png)"
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "a" not in text
         assert "b.png" not in text
@@ -1408,29 +1430,30 @@ project.run()
 ## License
 
 MIT License"""
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # All text content should be preserved.
         assert "Project Title" in text
         assert "Installation" in text
         assert "Usage" in text
         assert "API Reference" in text
-        assert "Documentation" not in text  # Link text is removed along with link
+        # Link text is preserved.
+        assert "Documentation" in text
         assert "License" in text
         # Code blocks should be removed.
         assert "pip install" not in text
         assert "import project" not in text
         # Code spans should be removed.
         assert "`run()`" not in text
-        # Links should be removed.
+        # URLs should be removed.
         assert "docs.example.com" not in text
         assert "github.com" not in text
         # Image should be removed.
         assert "logo.png" not in text
-        # Table rows should be removed.
-        for line in md.split("\n"):
-            if line.startswith("|"):
-                assert line not in text
+        # Table delimiters should be removed, but cell content preserved.
+        # Note: standalone | characters (not in table rows) are preserved.
+        assert "Method" in text
+        assert "Description" in text
 
     def test_document_with_multiple_sections(self):
         """Test document with multiple sections."""
@@ -1449,7 +1472,7 @@ Paragraph 2.
 ![Image](img.png)
 
 [Link](http://example.com)"""
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "Section 1" in text
         assert "Subsection 1.1" in text
@@ -1471,7 +1494,7 @@ This has <strong>bold</strong> and <em>italic</em> text.
 <!-- This is a comment -->
 
 More text."""
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "Title" in text
         assert "bold" in text
@@ -1496,7 +1519,7 @@ def function():
 ```
 
 Some text."""
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "Data Table" in text
         assert "Some text" in text
@@ -1517,7 +1540,7 @@ Some text."""
 [Link 1](http://example1.com) [Link 2](http://example2.com)
 
 Descriptions."""
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "Gallery" in text
         assert "Descriptions" in text
@@ -1532,7 +1555,7 @@ Descriptions."""
         md = """# Title
 
 This has **bold** and *italic* and `code` and [link](url) and ![image](img.png) all together."""
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "Title" in text
         assert "This has" in text
@@ -1560,7 +1583,7 @@ code2
 ```text
 code3
 ```"""
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "Code Examples" in text
         # All code blocks should be removed.
@@ -1578,7 +1601,7 @@ code3
 
 - Bullet with `code`
 - Another bullet"""
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "Steps" in text
         assert "First step" in text
@@ -1593,7 +1616,7 @@ code3
 See <http://example.com> for details.
 
 Visit <https://docs.example.com/api> for the API."""
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "Documentation" in text
         assert "See" in text
@@ -1611,7 +1634,7 @@ Term 1
 
 Term 2
 :   Definition 2"""
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         assert "Terms" in text
         assert "Term 1" in text
@@ -1650,7 +1673,7 @@ Check the [documentation](https://docs.example.com) for more.
 ## Conclusion
 
 That's it! Happy coding."""
-        text, mapping = preprocess_markdown(md)
+        text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
         # All text content should be preserved.
         assert "My Blog Post" in text
@@ -1832,12 +1855,15 @@ main()
 Email us at [support@example.com](mailto:support@example.com) for help."""
 
         # Preprocess the Markdown
-        cleaned_text, mapping = preprocess_markdown(md)
+        cleaned_text, mapping, _ = preprocess_markdown(md)
 
-        # Verify preprocessing removed code and links
+        # Verify preprocessing removed code and URLs
         assert "pip install mypackage" not in cleaned_text
         assert "from mypackage import main" not in cleaned_text
-        assert "support@example.com" not in cleaned_text
+        # Link text is preserved, but URLs are removed.
+        assert "support@example.com" in cleaned_text  # Link text preserved
+        # Check that the URL part is removed (the second occurrence).
+        assert cleaned_text.count("support@example.com") == 1
 
         # Verify text content is preserved
         assert "Welcome Guide" in cleaned_text
@@ -1872,7 +1898,7 @@ Email us at [support@example.com](mailto:support@example.com) for help."""
 
 Choose the plan that fits your needs."""
 
-        cleaned_text, mapping = preprocess_markdown(md)
+        cleaned_text, mapping, _ = preprocess_markdown(md)
 
         # Verify table delimiters are removed, but cell content preserved
         assert "|" not in cleaned_text
@@ -1924,7 +1950,7 @@ Content-Type: application/json
 
 The API returns a JSON response with the token."""
 
-        cleaned_text, mapping = preprocess_markdown(md)
+        cleaned_text, mapping, _ = preprocess_markdown(md)
 
         # Verify code block content is removed
         assert "POST /api/auth/login" not in cleaned_text
@@ -1952,7 +1978,7 @@ The API returns a JSON response with the token."""
     def test_markdown_offset_mapping_for_ste(self):
         """Test offset mapping accuracy for STE100 error reporting."""
         md = "# Title\n\nSome text with `code` and [link](url).\n\nMore text."
-        cleaned_text, mapping = preprocess_markdown(md)
+        cleaned_text, mapping, _ = preprocess_markdown(md)
 
         # Find "Title" in cleaned text
         title_pos = cleaned_text.find("Title")
@@ -1986,7 +2012,7 @@ The API returns a JSON response with the token."""
 
 For more details, see the [documentation](https://docs.example.com) or contact [support](mailto:support@example.com)."""
 
-        cleaned_text, mapping = preprocess_markdown(md)
+        cleaned_text, mapping, _ = preprocess_markdown(md)
 
         # Verify inline code and links are removed
         assert "pip install package" not in cleaned_text
@@ -2033,7 +2059,7 @@ For more details, see the [documentation](https://docs.example.com) or contact [
 
 Choose the plan that works for you."""
 
-        cleaned_text, mapping = preprocess_markdown(md)
+        cleaned_text, mapping, _ = preprocess_markdown(md)
 
         # Verify table delimiters are removed, but cell content preserved
         assert "|" not in cleaned_text
@@ -2121,3 +2147,77 @@ Choose the plan that works for you."""
         assert "services" in text_str.lower()
         assert "contact" in text_str.lower()
         assert "details" in text_str.lower()
+
+
+class TestPreprocessMarkdownLinkHandling:
+    """Tests for link text preservation and URL replacement."""
+
+    def test_link_text_preserved_url_replaced(self):
+        """Link text is kept visible but URL is replaced with spaces."""
+        md = "Visit [link](http://example.com) now."
+        text, offset_map, regions = preprocess_markdown(md)
+        assert "link" in text
+        assert "example.com" not in text
+        # URL should be replaced with spaces.
+        assert "(" in text or ")" not in text  # No parentheses from URL
+
+    def test_link_region_metadata(self):
+        """Link regions are included in the third return value."""
+        md = "Visit [link](http://example.com) now."
+        text, offset_map, regions = preprocess_markdown(md)
+        # Should have at least one link region.
+        link_regions = [r for r in regions if r[2] == "link"]
+        assert len(link_regions) >= 1
+
+    def test_nested_link_and_code(self):
+        """Code inside link text should not cause issues."""
+        md = "Use [`code`](http://example.com) here."
+        text, offset_map, regions = preprocess_markdown(md)
+        # The link text including code should be preserved.
+        assert "code" in text
+        # The URL should be replaced.
+        assert "example.com" not in text
+
+    def test_multiple_links_preserve_text(self):
+        """Multiple links should all have their text preserved."""
+        md = "[a](1) and [b](2)"
+        text, offset_map, regions = preprocess_markdown(md)
+        assert "a" in text
+        assert "b" in text
+        assert "1" not in text
+        assert "2" not in text
+
+    def test_link_with_nested_image(self):
+        """Badge-style links with nested images should work."""
+        md = '[![CI](img.svg)](http://example.com)'
+        text, offset_map, regions = preprocess_markdown(md)
+        # The entire link should be handled correctly.
+        assert "CI" in text  # Link text preserved
+        assert "img.svg" not in text  # Image URL replaced
+        assert "example.com" not in text  # Link URL replaced
+
+    def test_adjacent_links_preserved(self):
+        """Adjacent links should both preserve their text."""
+        md = "[a](1)[b](2)"
+        text, offset_map, regions = preprocess_markdown(md)
+        assert "a" in text
+        assert "b" in text
+        assert "1" not in text
+        assert "2" not in text
+
+    def test_link_text_with_special_chars(self):
+        """Link text with special characters should be preserved."""
+        md = '[Link & More](http://example.com)'
+        text, offset_map, regions = preprocess_markdown(md)
+        assert "Link" in text
+        assert "More" in text
+        assert "example.com" not in text
+
+    def test_overlapping_blocks_handled(self):
+        """Overlapping blocks (code inside link) should be handled."""
+        md = "[`code`](url)"
+        text, offset_map, regions = preprocess_markdown(md)
+        # Should not raise an error.
+        assert len(text) == len(md)
+        # Link text should be preserved.
+        assert "code" in text

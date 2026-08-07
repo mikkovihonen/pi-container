@@ -214,15 +214,33 @@ def _get_markdown_blocks(md: str) -> list[tuple[int, int, str]]:
         blocks.append((m.start(), m.end(), "code_inline"))
 
     # Collect inline links [text](url) and images ![alt](url).
-    # The alt text can contain brackets (nested), so we use a non-greedy match
-    # and look for the pattern ]( to close the alt text.
-    # The URL can contain parentheses, but we stop at the first unmatched closing paren.
+    # For links, we keep the link text visible but replace the URL with spaces.
+    # The entire link region is marked so the linter can suppress errors on
+    # the visible link text.
     image_pattern = re.compile(r"!\[.*?\]\([^)]*\)", re.DOTALL)
-    link_pattern = re.compile(r"(?<!!)\[.*?\]\([^)]*\)", re.DOTALL)
+    # Match a link that may contain nested images: [ ... (url) ] where ... can
+    # include ![alt](img) sequences (e.g. badge links like [![CI](img)](url)).
+    link_pattern = re.compile(
+        r"\[(?:[^\[\]]|!\[[^\[\]]*\]\([^)]*\))*\]\([^)]*\)",
+        re.DOTALL,
+    )
     for m in image_pattern.finditer(md):
         blocks.append((m.start(), m.end(), "image"))
     for m in link_pattern.finditer(md):
-        blocks.append((m.start(), m.end(), "link"))
+        full_match = m.group()
+        # Find where the URL part starts (the opening paren of the URL).
+        url_start_in_match = full_match.find('(')
+        if url_start_in_match >= 0:
+            # Replace only the URL part with spaces, keep link text visible.
+            # The entire link is marked as "link" region.
+            text_part = full_match[:url_start_in_match]
+            url_part = full_match[url_start_in_match:]
+            # Add the text part as visible (not replaced)
+            # Add the URL part as replaced with spaces
+            blocks.append((m.start(), m.start() + len(text_part), "link_text"))
+            blocks.append((m.start() + len(text_part), m.start() + len(full_match), "link_url"))
+        else:
+            blocks.append((m.start(), m.end(), "link"))
 
     # Collect fenced code blocks.
     # Match from opening fence (``` or ~~~) to closing fence on a line by itself.
@@ -246,11 +264,11 @@ def _get_markdown_blocks(md: str) -> list[tuple[int, int, str]]:
         blocks.append((m.start(), m.end(), "html_block"))
 
     # Collect table row delimiters (| characters).
-    # We only remove the | delimiters, keeping the cell content as prose.
     # Match | characters that are part of table rows (not standalone pipes).
+    # Only replace the | delimiters, keeping cell content visible.
     table_delimiter_pattern = re.compile(r"\|")
     for m in table_delimiter_pattern.finditer(md):
-        # Check if this | is part of a table row (has content before and after on the same line)
+        # Check if this | is part of a table row.
         line_start = md.rfind('\n', 0, m.start()) + 1
         line_end = md.find('\n', m.start())
         if line_end == -1:
@@ -258,54 +276,80 @@ def _get_markdown_blocks(md: str) -> list[tuple[int, int, str]]:
         
         line = md[line_start:line_end]
         # Only treat as table delimiter if line has multiple | characters
-        # (indicating it's a table row, not a standalone pipe)
+        # (indicating it's a table row, not a standalone pipe).
         if line.count('|') >= 2:
             blocks.append((m.start(), m.end(), "table_delimiter"))
 
-    # Sort and merge overlapping blocks.
-    blocks.sort(key=lambda b: b[0])
+    # Collect Markdown headers: # heading text
+    # Match from the first # to the end of the line.
+    # Headers are kept visible but marked so the linter can add metadata.
+    header_pattern = re.compile(r"^#+\s+[^\n]*$", re.MULTILINE)
+    for m in header_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "header"))
+
+    # Sort and merge overlapping blocks. When blocks overlap, keep the outer
+    # block (smaller start) and discard the inner one. Adjacent blocks with
+    # different types are preserved.
+    blocks.sort(key=lambda b: (b[0], -b[1]))
     merged: list[tuple[int, int, str]] = []
     for start, end, btype in blocks:
-        if merged and start <= merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end), btype)
+        if merged and start < merged[-1][1]:
+            # Block overlaps with the previous one. Discard the inner block
+            # (the one that starts later) by skipping it.
+            continue
+        elif merged and start == merged[-1][1] and merged[-1][2] == btype:
+            # Adjacent blocks with the same type: merge them.
+            merged[-1] = (merged[-1][0], end, btype)
         else:
             merged.append((start, end, btype))
 
+    # Return the list of merged blocks (regions) alongside the block list.
+    # The regions list is used by downstream linting tools to annotate errors
+    # with the type of non-prose region they occur in.
     return merged
 
 
 def preprocess_markdown(
     md: str,
-) -> tuple[str, dict[int, int]]:
+) -> tuple[str, dict[int, int], list[tuple[int, int, str]]]:
     """Parse Markdown and remove non-text elements while preserving offsets.
 
     This function uses markdown-it-py's parsing to identify non-text regions
-    (code blocks, code spans, links, images, HTML blocks, and table rows) and
-    replaces them with whitespace. The output has the same length as the
-    input, so character offsets remain valid.
+    (headers, code blocks, code spans, links, images, HTML blocks, and table
+    rows) and replaces them with whitespace. The output has the same length
+    as the input, so character offsets remain valid.
 
     Args:
         md: Raw Markdown string to process.
 
     Returns:
-        A tuple of ``(cleaned_text, offset_map)`` where:
+        A tuple of ``(cleaned_text, offset_map, regions)`` where:
             * ``cleaned_text`` contains the original text with all non-text
               elements replaced by whitespace.
             * ``offset_map`` maps each character position in ``cleaned_text``
               to the corresponding position in the original ``md`` string.
+            * ``regions`` is a list of ``(start, end, region_type)`` tuples
+              describing each non-text region. ``region_type`` is one of
+              ``"header"``, ``"code_fence"``, ``"code_inline"``, ``"link"``,
+              ``"image"``, ``"html_block"``, or ``"table_row"``.
 
     Example:
-        >>> text, mapping = preprocess_markdown("# Hello\\n\\n`code` and [link](url)")
+        >>> text, mapping, regions = preprocess_markdown("# Hello\\n\\n`code` and [link](url)")
         >>> assert "Hello" in text
         >>> assert mapping[0] == 0
+        >>> assert len(regions) >= 2
     """
-    blocks = _get_markdown_blocks(md)
+    # _get_markdown_blocks returns the merged blocks, which we use both for
+    # replacement and as the regions list.
+    merged = _get_markdown_blocks(md)
 
     parts: list[str] = []
     offset_map: list[int | None] = [None] * len(md)
     last_end = 0
+    # Track link text regions separately so the linter can suppress errors.
+    link_text_regions: list[tuple[int, int]] = []
 
-    for start, end, btype in blocks:
+    for start, end, btype in merged:
         # Text before this block.
         text_before = md[last_end:start]
         for i, ch in enumerate(text_before):
@@ -313,15 +357,30 @@ def preprocess_markdown(
             offset_map[pos] = pos
             parts.append(ch)
 
-        # Replace block with spaces.
-        # For table_delimiter blocks, we only replace the | character itself.
-        # For other blocks (code, links, images, HTML), we replace the entire span.
-        if btype == "table_delimiter":
-            # Just replace the | with a space
+        # Handle different block types.
+        if btype == "link_text":
+            # Keep link text visible.
+            link_text_regions.append((start, end))
+            for i, ch in enumerate(md[start:end]):
+                offset_map[start + i] = start + i
+                parts.append(ch)
+        elif btype == "link_url":
+            # Replace URL with spaces.
+            span_length = end - start
+            parts.append(" " * span_length)
+            for i in range(start, end):
+                offset_map[i] = i
+        elif btype == "table_delimiter":
+            # Replace only the | delimiter with a space.
             parts.append(" ")
             offset_map[start] = start
+        elif btype == "header":
+            # Keep header text visible.
+            for i, ch in enumerate(md[start:end]):
+                offset_map[start + i] = start + i
+                parts.append(ch)
         else:
-            # Replace entire block with spaces
+            # Replace entire block with spaces.
             span_length = end - start
             parts.append(" " * span_length)
             for i in range(start, end):
@@ -337,7 +396,14 @@ def preprocess_markdown(
         parts.append(ch)
 
     cleaned_text = "".join(parts)
-    return cleaned_text, {i: offset_map[i] for i in range(len(cleaned_text))}
+    offset_map = {i: offset_map[i] for i in range(len(cleaned_text))}
+
+    # Add link text regions to the regions list with type "link" so the
+    # linter can suppress errors on visible link text.
+    for start, end in link_text_regions:
+        merged.append((start, end, "link"))
+
+    return cleaned_text, offset_map, merged
 
 
 # Module-level documentation.

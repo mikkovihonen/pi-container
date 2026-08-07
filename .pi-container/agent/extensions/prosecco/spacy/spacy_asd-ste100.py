@@ -137,7 +137,37 @@ def main():
         print("No problems found.")
         return
 
-    doc = nlp(text)
+    # Preprocess the markdown to strip non-prose elements (code blocks,
+    # links, images, HTML blocks, table rows, headers). The preprocessor
+    # returns cleaned text (same length as input), an offset map that maps
+    # cleaned-text positions back to original-text positions, and a list of
+    # non-text regions with their types.
+    from preprocess_text import preprocess_markdown
+    cleaned_text, offset_map, regions = preprocess_markdown(text)
+
+    doc = nlp(cleaned_text)
+
+    # Helper to look up the region type for a cleaned-text position.
+    # Returns the region type string (e.g. "header", "table_row") or None.
+    def _get_region_type(cleaned_offset: int) -> str | None:
+        for start, end, rtype in regions:
+            if start <= cleaned_offset < end:
+                return rtype
+        return None
+
+    # Helper to check if a cleaned-text position is in or near a link region.
+    # Link regions contain visible link text that should be suppressed.
+    # We suppress errors that overlap with or are within 10 characters of a
+    # link region, since errors often start just before the link text.
+    LINK_PADDING = 10
+
+    def _is_in_link(cleaned_offset: int) -> bool:
+        for start, end, rtype in regions:
+            if rtype == "link":
+                # Check if the offset is within the link region or within padding.
+                if start - LINK_PADDING <= cleaned_offset < end + LINK_PADDING:
+                    return True
+        return False
 
     # Run all ASD-STE100 checks (Section 1: Words)
     all_issues = []
@@ -230,24 +260,39 @@ def main():
     all_issues.sort(key=lambda x: x["offset"])
 
     # Output in Vale-compatible format: file:line:col CheckName:message
-    lines = text.split('\n')
+    # Map cleaned-text offsets back to original-text positions via the
+    # offset_map, then convert to line:col in the original file.
+    # Annotate each error with the region type (header, table_row, etc.)
+    # when the error occurs in a non-prose region.
+    original_lines = text.split('\n')
 
     for issue in all_issues:
-        offset = issue["offset"]
+        cleaned_offset = issue["offset"]
+        
+        # Skip errors in link regions (visible link text).
+        if _is_in_link(cleaned_offset):
+            continue
+        
+        original_offset = offset_map.get(cleaned_offset, cleaned_offset)
+        region_type = _get_region_type(cleaned_offset)
+
+        # Calculate line and column from original character offset.
         line = 1
         col = 1
-
-        # Calculate line and column from character offset
         current_offset = 0
-        for i, line_text in enumerate(lines):
+        for i, line_text in enumerate(original_lines):
             line_end = current_offset + len(line_text) + 1  # +1 for newline
-            if current_offset <= offset < line_end:
+            if current_offset <= original_offset < line_end:
                 line = i + 1
-                col = offset - current_offset + 1
+                col = original_offset - current_offset + 1
                 break
             current_offset = line_end
 
-        print(f"{filepath}:{line}:{col} STE100.{issue['type']}: {issue['message']}")
+        # Add region context to the message if the error is in a non-prose region.
+        if region_type:
+            print(f"{filepath}:{line}:{col} STE100.{issue['type']}: [{region_type}] {issue['message']}")
+        else:
+            print(f"{filepath}:{line}:{col} STE100.{issue['type']}: {issue['message']}")
 
     if not all_issues:
         print("No ASD-STE100 issues found.")
