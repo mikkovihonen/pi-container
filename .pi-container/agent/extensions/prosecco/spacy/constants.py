@@ -24,196 +24,8 @@ import re
 import sys
 import spacy
 
-# Contractions mapping (matches Contractions.yml and Rule 4.2)
-# Rule 4.2: "Do not omit words or use contractions to make your sentences shorter."
-CONTRACTIONS = {
-    "ain't": "am not; are not; is not; has not; have not",
-    "aren't": "are not",
-    "can't": "cannot",
-    "couldn't": "could not",
-    "didn't": "did not",
-    "doesn't": "does not",
-    "don't": "do not",
-    "daren't": "dare not",
-    "hadn't": "had not",
-    "hasn't": "has not",
-    "haven't": "have not",
-    "he's": "he is; he has",
-    "here's": "here is",
-    "how's": "how is; how has",
-    "i'm": "i am",
-    "isn't": "is not",
-    "it's": "it is; it has",
-    "let's": "let us",
-    "mightn't": "might not",
-    "mustn't": "must not",
-    "needn't": "need not",
-    "oughtn't": "ought not",
-    "she's": "she is; she has",
-    "shouldn't": "should not",
-    "wouldn't": "would not",
-    "that's": "that is; that has",
-    "they're": "they are",
-    "they've": "they have",
-    "wasn't": "was not",
-    "we're": "we are",
-    "we've": "we have",
-    "weren't": "were not",
-    "what's": "what is; what has",
-    "when's": "when is; when has",
-    "where's": "where is; where has",
-    "who's": "who is; who has",
-    "won't": "will not",
-    "you're": "you are",
-    "you've": "you have",
-}
 
-# Passive voice exceptions (matches PassiveVoice.yml and Rule 3.6)
-# Rule 3.6: "Use the active voice. In descriptive writing, you can use the passive voice only if the agent is unknown."
-PASSIVE_EXCEPTIONS = {
-    "is here", "is there", "is where", "is when", "is who", "is why", "is how",
-    "was here", "was there", "are here", "are there",
-}
-
-# Forbidden modals (matches List of recurring errors)
-# shall → MUST, should → MUST, may → CAN
-FORBIDDEN_MODALS = {
-    "shall": "must",
-    "should": "must",
-    "may": "can",
-}
-
-# Be verbs for IngForms detection
-BE_VERBS = {"is", "are", "was", "were", "be", "been", "being", "am"}
-
-# Approved -ing words (matches Rule 3.5 exceptions)
-# Rule 3.5: "Use the -ing form of a verb only as a technical noun or as a modifier in a technical noun."
-# Exceptions from the dictionary:
-# - Nouns (lighting, opening, routing, servicing)
-# - Adjectives (mating, missing, remaining)
-# - A pronoun (something)
-# - A preposition (during)
-APPROVED_ING_WORDS = {
-    "lighting", "opening", "routing", "servicing",
-    "mating", "missing", "remaining",
-    "something",
-    "during",
-}
-
-# Phrasal verbs to detect (Rule 9.3)
-# Rule 9.3: "When you use two words together, do not make phrasal verbs."
-# These are approved words used together in ways that create phrasal verb meanings.
-# Format: (word1, word2) -> suggested replacement
-PHRASAL_VERBS = {
-    # 2-word phrasal verbs
-    ("add", "up"): "add",
-    ("back", "up"): "backup",
-    ("break", "down"): "stop working",
-    ("bring", "up"): "mention",
-    ("call", "off"): "cancel",
-    ("carry", "out"): "do",
-    ("check", "out"): "verify",
-    ("clear", "up"): "explain",
-    ("come", "across"): "find",
-    ("come", "up"): "appear",
-    ("come", "up with"): "think of",
-    ("cut", "back"): "reduce",
-    ("cut", "off"): "disconnect",
-    ("deal", "with"): "handle",
-    ("drop", "off"): "decrease",
-    ("drop", "out"): "leave",
-    ("end", "up"): "finish",
-    ("face", "up to"): "accept",
-    ("fill", "in"): "complete",
-    ("figure", "out"): "solve",
-    ("find", "out"): "discover",
-    ("get", "along"): "have a good relationship",
-    ("get", "by"): "manage",
-    ("get", "over"): "recover",
-    ("give", "up"): "stop",
-    ("go", "ahead"): "proceed",
-    ("go", "back"): "return",
-    ("go", "down"): "decrease",
-    ("go", "through"): "experience",
-    ("grow", "up"): "mature",
-    ("hand", "in"): "submit",
-    ("hold", "up"): "delay",
-    ("keep", "up"): "continue",
-    ("kind", "of"): "somewhat",
-    ("let", "down"): "disappoint",
-    ("let", "off"): "excuse",
-    ("look", "after"): "care for",
-    ("look", "for"): "search",
-    ("look", "into"): "investigate",
-    ("make", "up"): "invent",
-    ("pick", "up"): "lift",
-    ("put", "off"): "postpone",
-    ("put", "out"): "extinguish",
-    ("put", "up"): "build",
-    ("run", "out"): "exhaust",
-    ("show", "up"): "appear",
-    ("take", "off"): "remove",
-    ("take", "over"): "replace",
-    ("take", "up"): "start",
-    ("turn", "down"): "refuse",
-    ("turn", "off"): "switch off",
-    ("turn", "on"): "switch on",
-    ("turn", "up"): "increase",
-    ("wake", "up"): "awaken",
-    ("work", "out"): "exercise",
-    
-    # Additional phrasal verbs from PDF examples
-    ("give", "off"): "release",
-    ("let", "go"): "release",
-    ("fill", "up"): "fill",
-    ("clean", "up"): "clean",
-    ("put", "away"): "store",
-    ("hand", "out"): "distribute",
-    ("break", "off"): "detach",
-    ("break", "up"): "separate",
-    ("call", "back"): "return",
-    ("call", "out"): "summon",
-    ("carry", "on"): "continue",
-    ("close", "down"): "shut",
-    ("count", "on"): "rely",
-    ("drop", "off"): "deliver",
-    ("fall", "apart"): "disassemble",
-    ("get", "back"): "return",
-    ("get", "off"): "exit",
-    ("get", "on"): "enter",
-    ("get", "up"): "stand",
-    ("hold", "on"): "wait",
-    ("keep", "up"): "maintain",
-    ("move", "in"): "install",
-    ("move", "out"): "remove",
-    ("pass", "out"): "distribute",
-    ("pay", "back"): "repay",
-    ("plug", "in"): "connect",
-    ("point", "out"): "indicate",
-    ("pull", "out"): "extract",
-    ("set", "up"): "install",
-    ("slow", "down"): "decelerate",
-    ("step", "down"): "resign",
-    ("take", "back"): "retrieve",
-    ("take", "out"): "remove",
-    ("team", "up"): "combine",
-    ("throw", "away"): "discard",
-    ("throw", "out"): "discard",
-    ("turn", "down"): "reject",
-    ("wake", "up"): "awaken",
-    ("write", "down"): "record",
-    
-    # Context-specific phrasal verbs
-    ("put", "on"): "wear",
-    ("come", "on"): "start",
-    ("go", "off"): "explode",
-    ("run", "out", "of"): "exhaust",
-    ("look", "at"): "examine",
-    ("switch", "off"): "de-energize",
-    ("switch", "on"): "energize",
-}
-
-# Non-approved words (from List of recurring errors)
+# Rule 1.x: Words
 # These are common words that writers use incorrectly in STE
 NON_APPROVED_WORDS = {
     "acceptable": "permitted",
@@ -544,6 +356,105 @@ NON_APPROVED_WORDS = {
 
 # Regional, slang, and jargon words (Rule 1.10)
 # Rule 1.10: "Do not use regional, slang, or jargon words as technical nouns."
+
+# correct meaning in the applicable context.
+RESTRICTED_WORDS = {
+    "wear": "use or put on",  # "wear" means "to become damaged by friction"
+    "extend": "apply to",  # "extend" means "to increase in dimension or range"
+    "go down": "decrease",  # "go down" refers to physical movement
+    "go through": "pass through",  # "go through" refers to physical movement
+    "see": "make sure",  # "see" means "to perceive with eyes"
+    "turn": "rotate",  # "turn" means "to move around an axis"
+    "work": "do work",  # "work" is approved as a noun, not a verb
+    "help": "use help",  # "help" is approved as a verb, not a noun
+    "damage": "cause damage",  # "damage" is approved as a noun, not verb
+}
+
+# Consistent style patterns (Rule 9.4)
+# Rule 9.4: "When you select terminology or wording, always use a consistent style."
+# When you select terminology or wording for a work step, use the same terminology
+# or wording each time that type of work step occurs. Different terminology or
+# wording can cause confusion and delays.
+
+# These are words that are commonly misused with incorrect part of speech
+RESTRICTED_WORDS_POS = {
+    "oil": ("NOUN", "VERB"),
+    "grease": ("NOUN", "VERB"),
+    "clean": ("ADJ", "VERB"),
+    "level": ("NOUN", "VERB"),
+    "track": ("NOUN", "VERB"),
+    "drive": ("NOUN", "VERB"),
+    "run": ("NOUN", "VERB"),
+    "set": ("NOUN", "VERB"),
+    "check": ("NOUN", "VERB"),
+    "hold": ("NOUN", "VERB"),
+    "cover": ("NOUN", "VERB"),
+    "case": ("NOUN", "VERB"),
+    "box": ("NOUN", "VERB"),
+    "pack": ("NOUN", "VERB"),
+    "packaging": ("NOUN", "VERB"),
+}
+
+# Rule 1.3: Words with restricted meanings in STE
+# Format: word -> {"approved": [...], "disapproved": [...]}
+# These are words that have different meanings in STE vs standard English
+
+# These are words that have different meanings in STE vs standard English
+RESTRICTED_WORDS_MEANING = {
+    "apply": {
+        "approved": ["surface", "coating", "paint", "oil", "grease", "adhesive"],
+        "disapproved": ["rule", "law", "regulation", "pressure", "force"]
+    },
+    "clean": {
+        "approved": ["dirt", "contamination", "surface", "filter", "part"],
+        "disapproved": ["house", "room", "building", "office", "car"]
+    },
+    "connect": {
+        "approved": ["wire", "cable", "hose", "pipe", "connector"],
+        "disapproved": ["meeting", "person", "event", "relationship"]
+    },
+    "check": {
+        "approved": ["condition", "status", "value", "level", "position"],
+        "disapproved": ["mail", "email", "box", "list", "name"]
+    },
+    "close": {
+        "approved": ["door", "valve", "switch", "circuit", "cap"],
+        "disapproved": ["meeting", "deal", "sale", "shop", "business"]
+    },
+    "open": {
+        "approved": ["cap", "cover", "door", "valve", "switch"],
+        "disapproved": ["meeting", "event", "show", "store", "business"]
+    },
+    "operate": {
+        "approved": ["device", "system", "equipment", "machine", "vehicle"],
+        "disapproved": ["business", "company", "organization"]
+    },
+    "position": {
+        "approved": ["object", "component", "part", "assembly", "device"],
+        "disapproved": ["person", "employee", "worker", "staff"]
+    },
+    "put": {
+        "approved": ["object", "component", "part", "item"],
+        "disapproved": ["effort", "time", "energy", "work"]
+    },
+    "remove": {
+        "approved": ["object", "substance", "part", "component", "assembly"],
+        "disapproved": ["duty", "responsibility", "position", "job"]
+    },
+    "set": {
+        "approved": ["value", "parameter", "limit", "threshold", "level"],
+        "disapproved": ["table", "alarm", "clock", "timer", "date"]
+    },
+    "turn": {
+        "approved": ["knob", "switch", "valve", "handle", "wheel"],
+        "disapproved": ["around", "corner", "page", "head", "body"]
+    },
+}
+
+# Rule 1.4: Approved -ing forms that can be used as technical nouns
+# These are common -ing forms that are approved in STE for technical writing
+
+# Rule 1.10: "Do not use regional, slang, or jargon words as technical nouns."
 REGIONAL_SLANG_JARGON = {
     "choker": "cable",  # Regional term in logging operations
     "brick": "set to OFF",  # Technical slang in IT
@@ -577,6 +488,8 @@ REGIONAL_SLANG_JARGON = {
 # Rule 1.14: "Use American English spelling unless other official directives tell you differently."
 # Use the spelling specified in the STE dictionary (American English spelling).
 # Use a different spelling only if other technical publication specifications,
+# style guides, contracts, or other official directives are applicable.
+
 # style guides, contracts, or other official directives are applicable.
 BRITISH_ENGLISH = {
     "colour": "color",
@@ -655,103 +568,7 @@ BRITISH_ENGLISH = {
 # with gender-neutral language requirements. When you write in STE, make sure that
 # you always use gender-neutral language. Gender-specific pronouns, for example
 # 'he' or 'she' are not permitted in STE."
-GENDER_PRONOUNS = {
-    "he": "they",
-    "him": "them",
-    "his": "their",
-    "she": "they",
-    "her": "them",
-    "man": "person",
-    "woman": "person",
-}
 
-# False friends to detect (GR-5)
-# GR-5: "False friends"
-# A false friend is a word that looks the same as one in a person's native language
-# but has a different meaning in English.
-FALSE_FRIENDS = {
-    "actually": "currently",
-    "assist": "help",
-    "capital": "city",
-    "curious": "strange",
-    "eventually": "finally",
-    "fabric": "cloth",
-    "familiar": "relative",
-    "gift": "present",
-    "lie": "recline",
-    "mass": "crowd",
-    "mind": "think",
-    "note": "observe",
-    "pain": "hurt",
-    "pretty": "attractive",
-    "real": "actual",
-    "scene": "view",
-    "sensitive": "sensible",
-    "soap": "clean",
-    "start": "begin",
-    "tape": "band",
-    "train": "education",
-    "trousers": "pants",
-    "vacant": "empty",
-    "waste": "trash",
-}
-
-# Words with restricted meanings (Rule 9.2)
-# Rule 9.2: "Use each approved word correctly."
-# Some STE-approved words have meanings that are applicable only in some contexts
-# (restricted meaning). Always make sure that the word that you select has the
-# correct meaning in the applicable context.
-RESTRICTED_WORDS = {
-    "wear": "use or put on",  # "wear" means "to become damaged by friction"
-    "extend": "apply to",  # "extend" means "to increase in dimension or range"
-    "go down": "decrease",  # "go down" refers to physical movement
-    "go through": "pass through",  # "go through" refers to physical movement
-    "see": "make sure",  # "see" means "to perceive with eyes"
-    "turn": "rotate",  # "turn" means "to move around an axis"
-    "work": "do work",  # "work" is approved as a noun, not a verb
-    "help": "use help",  # "help" is approved as a verb, not a noun
-    "damage": "cause damage",  # "damage" is approved as a noun, not verb
-}
-
-# Consistent style patterns (Rule 9.4)
-# Rule 9.4: "When you select terminology or wording, always use a consistent style."
-# When you select terminology or wording for a work step, use the same terminology
-# or wording each time that type of work step occurs. Different terminology or
-# wording can cause confusion and delays.
-CONSISTENT_STYLE_PATTERNS = {
-    # Different terms for the same item
-    "main body": "body assembly",
-    "body": "body assembly",
-    "servo control unit": "actuator",
-    "control unit": "actuator",
-    
-    # Different wordings for the same action
-    "torque-tighten": "torque",
-    "lubricate the .* bolts": "apply a small quantity of oil to the threads of the .* bolts",
-    "apply a small quantity of oil to the threads of the .* bolts": "lubricate the .* bolts",
-    
-    # Different terms for the same component
-    "fastener": "bolt",
-    "nut": "nut",
-    "washer": "washer",
-    "seal": "seal",
-    "O-ring": "O-ring",
-    
-    # Different terms for the same position
-    "open position": "OPEN",
-    "closed position": "CLOSED",
-    "middle position": "MIDDLE",
-    
-    # Different terms for the same tool
-    "torque wrench": "torque wrench",
-    "wrench": "torque wrench",
-    "screwdriver": "screwdriver",
-}
-
-
-# Technical nouns that should not be used as verbs (Rule 1.7)
-# Rule 1.7: "Do not use words that are technical nouns as verbs."
-# Use a technical noun only as a noun or as an adjective that is part of a
 # different technical noun. Do not use the same word as a verb.
 TECHNICAL_NOUNS_NOT_AS_VERBS = {
     "oil": "apply oil to",
@@ -778,6 +595,8 @@ TECHNICAL_NOUNS_NOT_AS_VERBS = {
 # Technical verbs that should not be used as nouns (Rule 1.13)
 # Rule 1.13: "Do not use technical verbs as nouns."
 # Use a technical verb only as a verb. Do not use the same word as a noun.
+
+# Use a technical verb only as a verb. Do not use the same word as a noun.
 TECHNICAL_VERBS_NOT_AS_NOUNS = {
     "drill": "use drilling",
     "sample": "take a sample",
@@ -802,121 +621,7 @@ TECHNICAL_VERBS_NOT_AS_NOUNS = {
 # GR-6: "STE recommends that you do not use Latin abbreviations because they can
 # confuse your readers if they do not know them. Always use English words to make
 # the text clear."
-LATIN_ABBREVIATIONS = {
-    "e.g.": "for example",
-    "i.e.": "that is",
-    "etc.": "and so on",
-    "viz.": "namely",
-    "ibid.": "in the same place",
-    "op. cit.": "work cited",
-    "vol.": "volume",
-    "vs.": "versus",
-}
 
-# Section 1 Constants (Words)
-# Rule 1.1-1.14: Words, Part of Speech, Approved Meaning, Technical Nouns, etc.
-
-# Rule 1.2: Words with restricted POS in STE dictionary
-# Format: word -> (approved_pos, disapproved_pos)
-# These are words that are commonly misused with incorrect part of speech
-RESTRICTED_WORDS_POS = {
-    "oil": ("NOUN", "VERB"),
-    "grease": ("NOUN", "VERB"),
-    "clean": ("ADJ", "VERB"),
-    "level": ("NOUN", "VERB"),
-    "track": ("NOUN", "VERB"),
-    "drive": ("NOUN", "VERB"),
-    "run": ("NOUN", "VERB"),
-    "set": ("NOUN", "VERB"),
-    "check": ("NOUN", "VERB"),
-    "hold": ("NOUN", "VERB"),
-    "cover": ("NOUN", "VERB"),
-    "case": ("NOUN", "VERB"),
-    "box": ("NOUN", "VERB"),
-    "pack": ("NOUN", "VERB"),
-    "packaging": ("NOUN", "VERB"),
-}
-
-# Rule 1.3: Words with restricted meanings in STE
-# Format: word -> {"approved": [...], "disapproved": [...]}
-# These are words that have different meanings in STE vs standard English
-RESTRICTED_WORDS_MEANING = {
-    "apply": {
-        "approved": ["surface", "coating", "paint", "oil", "grease", "adhesive"],
-        "disapproved": ["rule", "law", "regulation", "pressure", "force"]
-    },
-    "clean": {
-        "approved": ["dirt", "contamination", "surface", "filter", "part"],
-        "disapproved": ["house", "room", "building", "office", "car"]
-    },
-    "connect": {
-        "approved": ["wire", "cable", "hose", "pipe", "connector"],
-        "disapproved": ["meeting", "person", "event", "relationship"]
-    },
-    "check": {
-        "approved": ["condition", "status", "value", "level", "position"],
-        "disapproved": ["mail", "email", "box", "list", "name"]
-    },
-    "close": {
-        "approved": ["door", "valve", "switch", "circuit", "cap"],
-        "disapproved": ["meeting", "deal", "sale", "shop", "business"]
-    },
-    "open": {
-        "approved": ["cap", "cover", "door", "valve", "switch"],
-        "disapproved": ["meeting", "event", "show", "store", "business"]
-    },
-    "operate": {
-        "approved": ["device", "system", "equipment", "machine", "vehicle"],
-        "disapproved": ["business", "company", "organization"]
-    },
-    "position": {
-        "approved": ["object", "component", "part", "assembly", "device"],
-        "disapproved": ["person", "employee", "worker", "staff"]
-    },
-    "put": {
-        "approved": ["object", "component", "part", "item"],
-        "disapproved": ["effort", "time", "energy", "work"]
-    },
-    "remove": {
-        "approved": ["object", "substance", "part", "component", "assembly"],
-        "disapproved": ["duty", "responsibility", "position", "job"]
-    },
-    "set": {
-        "approved": ["value", "parameter", "limit", "threshold", "level"],
-        "disapproved": ["table", "alarm", "clock", "timer", "date"]
-    },
-    "turn": {
-        "approved": ["knob", "switch", "valve", "handle", "wheel"],
-        "disapproved": ["around", "corner", "page", "head", "body"]
-    },
-}
-
-# Rule 1.4: Approved -ing forms that can be used as technical nouns
-# These are common -ing forms that are approved in STE for technical writing
-APPROVED_ING_FORMS = {
-    "opening", "closing", "putting", "taking", "making",
-    "giving", "getting", "going", "coming", "doing",
-    "setting", "holding", "checking", "cleaning",
-    "connecting", "disconnecting", "installing",
-    "removing", "testing", "adjusting",
-    "tightening", "lubricating", "filling", "draining"
-}
-
-# Rule 1.9: Long technical noun patterns that should be shortened
-# Format: [(regex_pattern, replacement)]
-# These are patterns where a shorter, more common term should be used
-LONG_TECHNICAL_NOUN_PATTERNS = [
-    (r"(?i)stainless\s+steel\s+pan\s+head\s+machine\s+screws", "screws"),
-    (r"(?i)metallic\s+machined\s+flange", "flange"),
-    (r"(?i)front\s+housing\s+cover", "cover"),
-    (r"(?i)servo\s+control\s+unit", "actuator"),
-    (r"(?i)\bcontrol\s+unit\b", "actuator"),
-    (r"(?i)main\s+body", "body assembly"),
-    (r"(?i)\bbody\b", "body assembly"),
-]
-
-# Rule 1.11: Inconsistent technical noun patterns
-# Format: [(regex_pattern, replacement)]
 # These are patterns where terminology should be consistent throughout the document
 INCONSISTENT_TECHNICAL_NOUN_PATTERNS = [
     (r"(?i)servo\s+control\s+unit", "actuator"),
@@ -938,6 +643,75 @@ INCONSISTENT_TECHNICAL_NOUN_PATTERNS = [
 # VBP: present tense (except 3rd person singular)
 # MD: modal (only "can", "may", "must")
 # VP: auxiliary (be, have, do)
+
+# These nouns are commonly used as part of compound technical terms
+COMMON_COMPOUND_NOUNS = {
+    "body", "head", "base", "main", "top", "bottom",
+    "left", "right", "front", "rear", "inner", "outer",
+}
+
+
+# Rule 2.x: Multi-word nouns
+# These are patterns where a shorter, more common term should be used
+LONG_TECHNICAL_NOUN_PATTERNS = [
+    (r"(?i)stainless\s+steel\s+pan\s+head\s+machine\s+screws", "screws"),
+    (r"(?i)metallic\s+machined\s+flange", "flange"),
+    (r"(?i)front\s+housing\s+cover", "cover"),
+    (r"(?i)servo\s+control\s+unit", "actuator"),
+    (r"(?i)\bcontrol\s+unit\b", "actuator"),
+    (r"(?i)main\s+body", "body assembly"),
+    (r"(?i)\bbody\b", "body assembly"),
+]
+
+# Rule 1.11: Inconsistent technical noun patterns
+# Format: [(regex_pattern, replacement)]
+# These are patterns where terminology should be consistent throughout the document
+
+
+# Rule 3.x: Verbs
+# Rule 3.6: "Use the active voice. In descriptive writing, you can use the passive voice only if the agent is unknown."
+PASSIVE_EXCEPTIONS = {
+    "is here", "is there", "is where", "is when", "is who", "is why", "is how",
+    "was here", "was there", "are here", "are there",
+}
+
+# Forbidden modals (matches List of recurring errors)
+# shall → MUST, should → MUST, may → CAN
+
+# shall → MUST, should → MUST, may → CAN
+FORBIDDEN_MODALS = {
+    "shall": "must",
+    "should": "must",
+    "may": "can",
+}
+
+# Be verbs for IngForms detection
+
+# Be verbs for IngForms detection
+BE_VERBS = {"is", "are", "was", "were", "be", "been", "being", "am"}
+
+# Approved -ing words (matches Rule 3.5 exceptions)
+# Rule 3.5: "Use the -ing form of a verb only as a technical noun or as a modifier in a technical noun."
+# Exceptions from the dictionary:
+# - Nouns (lighting, opening, routing, servicing)
+# - Adjectives (mating, missing, remaining)
+# - A pronoun (something)
+# - A preposition (during)
+
+# - A preposition (during)
+APPROVED_ING_WORDS = {
+    "lighting", "opening", "routing", "servicing",
+    "mating", "missing", "remaining",
+    "something",
+    "during",
+}
+
+# Phrasal verbs to detect (Rule 9.3)
+# Rule 9.3: "When you use two words together, do not make phrasal verbs."
+# These are approved words used together in ways that create phrasal verb meanings.
+# Format: (word1, word2) -> suggested replacement
+
+# VP: auxiliary (be, have, do)
 APPROVED_VERB_TAGS = {"VB", "VBD", "VBN", "VBZ", "VBP", "MD", "VP"}
 
 # Rule 3.7: Common patterns where nouns are used instead of approved verbs
@@ -945,6 +719,8 @@ APPROVED_VERB_TAGS = {"VB", "VBD", "VBN", "VBZ", "VBP", "MD", "VP"}
 # These are common patterns where a noun phrase should be replaced with an approved verb
 # Patterns use word boundaries (\b) to match complete words
 # Case-insensitive matching is enabled by default in check_noun_as_verb
+# Verb conjugations are handled by matching the lemma form with optional endings
+
 # Verb conjugations are handled by matching the lemma form with optional endings
 NOUN_AS_VERB_PATTERNS = [
     # "give" patterns (handles gives, gave, given, giving)
@@ -1011,6 +787,70 @@ NOUN_AS_VERB_PATTERNS = [
 
 # Rule 4.4: Common connecting words and phrases
 # These are used to connect sentences that contain related topics
+
+# These are common -ing forms that are approved in STE for technical writing
+APPROVED_ING_FORMS = {
+    "opening", "closing", "putting", "taking", "making",
+    "giving", "getting", "going", "coming", "doing",
+    "setting", "holding", "checking", "cleaning",
+    "connecting", "disconnecting", "installing",
+    "removing", "testing", "adjusting",
+    "tightening", "lubricating", "filling", "draining"
+}
+
+# Rule 1.9: Long technical noun patterns that should be shortened
+# Format: [(regex_pattern, replacement)]
+# These are patterns where a shorter, more common term should be used
+
+
+# Rule 4.x: Sentences
+# Rule 4.2: "Do not omit words or use contractions to make your sentences shorter."
+CONTRACTIONS = {
+    "ain't": "am not; are not; is not; has not; have not",
+    "aren't": "are not",
+    "can't": "cannot",
+    "couldn't": "could not",
+    "didn't": "did not",
+    "doesn't": "does not",
+    "don't": "do not",
+    "daren't": "dare not",
+    "hadn't": "had not",
+    "hasn't": "has not",
+    "haven't": "have not",
+    "he's": "he is; he has",
+    "here's": "here is",
+    "how's": "how is; how has",
+    "i'm": "i am",
+    "isn't": "is not",
+    "it's": "it is; it has",
+    "let's": "let us",
+    "mightn't": "might not",
+    "mustn't": "must not",
+    "needn't": "need not",
+    "oughtn't": "ought not",
+    "she's": "she is; she has",
+    "shouldn't": "should not",
+    "wouldn't": "would not",
+    "that's": "that is; that has",
+    "they're": "they are",
+    "they've": "they have",
+    "wasn't": "was not",
+    "we're": "we are",
+    "we've": "we have",
+    "weren't": "were not",
+    "what's": "what is; what has",
+    "when's": "when is; when has",
+    "where's": "where is; where has",
+    "who's": "who is; who has",
+    "won't": "will not",
+    "you're": "you are",
+    "you've": "you have",
+}
+
+# Passive voice exceptions (matches PassiveVoice.yml and Rule 3.6)
+# Rule 3.6: "Use the active voice. In descriptive writing, you can use the passive voice only if the agent is unknown."
+
+# These are used to connect sentences that contain related topics
 CONNECTING_WORDS = {
     "additionally", "furthermore", "moreover", "also", "besides",
     "however", "nevertheless", "nonetheless", "yet", "but",
@@ -1027,11 +867,17 @@ CONNECTING_WORDS = {
 
 # Rule 5.4: Conditional words used to detect conditional clauses
 # These words indicate a condition that should come first in the sentence
+
+
+# Rule 5.x: Procedural writing
+# These words indicate a condition that should come first in the sentence
 CONDITIONAL_WORDS = {
     "if", "when", "before", "after", "while", "although", "unless",
 }
 
 # Rule 5.5: Imperative verb lemmas that should not be in notes
+# Notes must not contain instructions, so these verbs indicate a violation
+
 # Notes must not contain instructions, so these verbs indicate a violation
 IMPERATIVE_VERB_LEMMAS = {
     "make", "set", "install", "put", "remove", "adjust",
@@ -1045,6 +891,10 @@ IMPERATIVE_VERB_LEMMAS = {
 
 # Rule 6.2: Common determiners to skip when extracting key terms
 # These words are not considered key terms for terminology tracking
+
+
+# Rule 6.x: Descriptive writing
+# These words are not considered key terms for terminology tracking
 COMMON_DETERMINERS = {
     "the", "a", "an", "this", "that", "these", "those",
 }
@@ -1054,17 +904,25 @@ COMMON_DETERMINERS = {
 
 # Rule 7.1: Safety instruction keywords
 # These words identify the level of risk in safety instructions
+
+
+# Rule 7.x: Safety instructions
+# These words identify the level of risk in safety instructions
 SAFETY_KEYWORDS = {
     "WARNING", "CAUTION", "DANGER", "NOTE",
 }
 
 # Rule 7.1-7.2: High-risk safety keywords
 # These keywords require imperative form and risk explanation
+
+# These keywords require imperative form and risk explanation
 HIGH_RISK_SAFETY_KEYWORDS = {
     "WARNING", "CAUTION", "DANGER",
 }
 
 # Rule 7.3: Risk and explanation indicators
+# These words/phrases indicate a risk explanation in safety instructions
+
 # These words/phrases indicate a risk explanation in safety instructions
 RISK_INDICATORS = {
     "can", "may", "will", "might", "could",  # Modal verbs
@@ -1079,9 +937,15 @@ RISK_INDICATORS = {
 
 # Rule 8.1: Forbidden punctuation
 # Semicolons are not permitted in STE
+
+
+# Rule 8.x: Punctuation and word count
+# Semicolons are not permitted in STE
 FORBIDDEN_PUNCTUATION = {";"}
 
 # Rule 8.3: Allowed uses for parentheses
+# Parentheses are allowed for these specific purposes
+
 # Parentheses are allowed for these specific purposes
 PARENTHESES_ALLOWED_CONTEXTS = {
     "reference",  # Make references to illustrations or text
@@ -1094,6 +958,8 @@ PARENTHESES_ALLOWED_CONTEXTS = {
 }
 
 # Rule 8.6: Common units of measurement
+# Numbers together with units count as one word
+
 # Numbers together with units count as one word
 COMMON_UNITS = {
     "mm", "cm", "m", "km",  # Length
@@ -1115,6 +981,8 @@ COMMON_UNITS = {
 
 # Rule 8.6: Common abbreviations
 # Abbreviations count as one word
+
+# Abbreviations count as one word
 COMMON_ABBREVIATIONS = {
     "e.g.", "i.e.", "etc.", "vs.", "v.s.",
     "approx.", "approx",  # approximately
@@ -1133,6 +1001,8 @@ COMMON_ABBREVIATIONS = {
 # Rule 8.2: Common hyphenated technical terms
 # Hyphenated words count as one word (Rule 8.7)
 # These are examples of correctly hyphenated terms
+
+# These are examples of correctly hyphenated terms
 COMMON_HYPHENATED_TERMS = {
     "multi-word", "multi-word-noun",  # Technical nouns
     "single-step", "multi-step",  # Process descriptors
@@ -1144,6 +1014,8 @@ COMMON_HYPHENATED_TERMS = {
 
 # Rule 8.3: Explanation words for parentheses
 # These words indicate an explanation in parentheses
+
+# These words indicate an explanation in parentheses
 EXPLANATION_WORDS = {
     "that", "is", "meaning", "which", "means",
 }
@@ -1154,104 +1026,122 @@ EXPLANATION_WORDS = {
 # Rule 9.3: Phrasal verbs to avoid
 # These are combinations of approved words that form phrasal verbs with different meanings
 # The value is the recommended replacement
+
+
+# Rule 9.x: Writing practices
+# Format: (word1, word2) -> suggested replacement
 PHRASAL_VERBS = {
     # 2-word phrasal verbs
-    ("clean", "up"): "remove dirt from",
-    ("clean", "off"): "remove dirt from",
-    ("clean", "out"): "remove dirt from",
-    ("close", "down"): "close",
-    ("come", "from"): "originate in",
-    ("come", "off"): "detach",
-    ("come", "out"): "appear",
-    ("come", "to"): "reach",
-    ("cover", "up"): "hide",
-    ("cut", "down"): "reduce",
-    ("cut", "off"): "isolate",
-    ("cut", "up"): "divide into pieces",
+    ("add", "up"): "add",
+    ("back", "up"): "backup",
+    ("break", "down"): "stop working",
+    ("bring", "up"): "mention",
+    ("call", "off"): "cancel",
+    ("carry", "out"): "do",
+    ("check", "out"): "verify",
+    ("clear", "up"): "explain",
+    ("come", "across"): "find",
+    ("come", "up"): "appear",
+    ("come", "up with"): "think of",
+    ("cut", "back"): "reduce",
+    ("cut", "off"): "disconnect",
+    ("deal", "with"): "handle",
+    ("drop", "off"): "decrease",
+    ("drop", "out"): "leave",
+    ("end", "up"): "finish",
+    ("face", "up to"): "accept",
     ("fill", "in"): "complete",
-    ("fill", "out"): "complete",
-    ("fill", "up"): "fill completely",
-    ("get", "back"): "return",
-    ("get", "off"): "disembark",
-    ("get", "on"): "embark",
-    ("get", "out"): "exit",
-    ("get", "up"): "rise",
-    ("give", "back"): "return",
-    ("give", "in"): "surrender",
-    ("give", "up"): "abandon",
-    ("go", "against"): "oppose",
+    ("figure", "out"): "solve",
+    ("find", "out"): "discover",
+    ("get", "along"): "have a good relationship",
+    ("get", "by"): "manage",
+    ("get", "over"): "recover",
+    ("give", "up"): "stop",
     ("go", "ahead"): "proceed",
-    ("go", "off"): "explode",
-    ("go", "on"): "continue",
-    ("go", "over"): "review",
-    ("go", "through"): "examine",
-    ("go", "up"): "increase",
-    ("hold", "back"): "restrain",
-    ("hold", "on"): "wait",
+    ("go", "back"): "return",
+    ("go", "down"): "decrease",
+    ("go", "through"): "experience",
+    ("grow", "up"): "mature",
+    ("hand", "in"): "submit",
     ("hold", "up"): "delay",
-    ("keep", "away"): "stay away",
-    ("keep", "down"): "suppress",
-    ("keep", "off"): "stay away",
-    ("keep", "out"): "stay outside",
-    ("keep", "up"): "maintain",
+    ("keep", "up"): "continue",
+    ("kind", "of"): "somewhat",
     ("let", "down"): "disappoint",
-    ("let", "in"): "admit",
-    ("let", "out"): "release",
-    ("look", "after"): "take care of",
-    ("look", "at"): "examine",
-    ("look", "for"): "search for",
+    ("let", "off"): "excuse",
+    ("look", "after"): "care for",
+    ("look", "for"): "search",
     ("look", "into"): "investigate",
-    ("look", "out"): "be careful",
-    ("look", "up"): "research",
     ("make", "up"): "invent",
-    ("pass", "out"): "distribute",
     ("pick", "up"): "lift",
-    ("put", "away"): "store",
     ("put", "off"): "postpone",
-    ("put", "on"): "wear",
     ("put", "out"): "extinguish",
-    ("take", "after"): "resemble",
-    ("take", "apart"): "disassemble",
-    ("take", "away"): "remove",
-    ("take", "back"): "return",
-    ("take", "down"): "write down",
+    ("put", "up"): "build",
+    ("run", "out"): "exhaust",
+    ("show", "up"): "appear",
     ("take", "off"): "remove",
-    ("take", "out"): "remove",
-    ("take", "over"): "assume control",
-    ("take", "up"): "begin",
-    ("throw", "away"): "discard",
-    ("throw", "out"): "discard",
-    ("turn", "around"): "rotate",
-    ("turn", "down"): "reject",
+    ("take", "over"): "replace",
+    ("take", "up"): "start",
+    ("turn", "down"): "refuse",
     ("turn", "off"): "switch off",
     ("turn", "on"): "switch on",
-    ("turn", "up"): "appear",
-    ("wash", "up"): "clean",
+    ("turn", "up"): "increase",
+    ("wake", "up"): "awaken",
+    ("work", "out"): "exercise",
+    
+    # Additional phrasal verbs from PDF examples
+    ("give", "off"): "release",
+    ("let", "go"): "release",
+    ("fill", "up"): "fill",
+    ("clean", "up"): "clean",
+    ("put", "away"): "store",
+    ("hand", "out"): "distribute",
+    ("break", "off"): "detach",
+    ("break", "up"): "separate",
+    ("call", "back"): "return",
+    ("call", "out"): "summon",
+    ("carry", "on"): "continue",
+    ("close", "down"): "shut",
+    ("count", "on"): "rely",
+    ("drop", "off"): "deliver",
+    ("fall", "apart"): "disassemble",
+    ("get", "back"): "return",
+    ("get", "off"): "exit",
+    ("get", "on"): "enter",
+    ("get", "up"): "stand",
+    ("hold", "on"): "wait",
+    ("keep", "up"): "maintain",
+    ("move", "in"): "install",
+    ("move", "out"): "remove",
+    ("pass", "out"): "distribute",
+    ("pay", "back"): "repay",
+    ("plug", "in"): "connect",
+    ("point", "out"): "indicate",
+    ("pull", "out"): "extract",
+    ("set", "up"): "install",
+    ("slow", "down"): "decelerate",
+    ("step", "down"): "resign",
+    ("take", "back"): "retrieve",
+    ("take", "out"): "remove",
+    ("team", "up"): "combine",
+    ("throw", "away"): "discard",
+    ("throw", "out"): "discard",
+    ("turn", "down"): "reject",
+    ("wake", "up"): "awaken",
     ("write", "down"): "record",
     
-    # 3-word phrasal verbs
-    ("come", "up", "with"): "propose",
-    ("get", "away", "with"): "escape",
-    ("get", "along", "with"): "have a good relationship",
-    ("look", "forward", "to"): "anticipate",
+    # Context-specific phrasal verbs
+    ("put", "on"): "wear",
+    ("come", "on"): "start",
+    ("go", "off"): "explode",
     ("run", "out", "of"): "exhaust",
-    ("take", "advantage", "of"): "exploit",
-    ("make", "use", "of"): "utilize",
-    ("put", "up", "with"): "tolerate",
-    ("catch", "up", "with"): "reach",
-    ("keep", "up", "with"): "maintain pace",
-    ("live", "up", "to"): "fulfill",
-    ("look", "down", "on"): "despise",
-    ("look", "forward", "to"): "anticipate",
-    ("make", "fun", "of"): "mock",
-    ("pay", "attention", "to"): "heed",
-    ("run", "away", "from"): "flee",
-    ("take", "care", "of"): "handle",
-    ("turn", "out", "to", "be"): "prove to be",  # Note: this has 4 words, but included for completeness
+    ("look", "at"): "examine",
+    ("switch", "off"): "de-energize",
+    ("switch", "on"): "energize",
 }
 
-# Rule 9.2: Restricted verb phrase replacements
-# These are combinations of approved words that have restricted meanings
+# Non-approved words (from List of recurring errors)
+# These are common words that writers use incorrectly in STE
+
 # The value is the recommended replacement
 RESTRICTED_VERB_PHRASES = {
     ("go", "down"): "decrease",
@@ -1264,6 +1154,8 @@ RESTRICTED_VERB_PHRASES = {
 
 # Rule 9.2: Restricted word usage patterns
 # Structure: {pattern_name: {"base": lemma, "conditions": [...], "replacement": str}}
+# Each pattern defines a rule for detecting incorrect word usage
+
 # Each pattern defines a rule for detecting incorrect word usage
 RESTRICTED_WORD_USAGE = {
     # Pattern 1: "go" + preposition/adverb (already handled by RESTRICTED_VERB_PHRASES)
@@ -1297,7 +1189,112 @@ RESTRICTED_WORD_USAGE = {
 
 # Rule 9.4: Common technical nouns that may need compound forms
 # These nouns are commonly used as part of compound technical terms
-COMMON_COMPOUND_NOUNS = {
-    "body", "head", "base", "main", "top", "bottom",
-    "left", "right", "front", "rear", "inner", "outer",
+
+# wording can cause confusion and delays.
+CONSISTENT_STYLE_PATTERNS = {
+    # Different terms for the same item
+    "main body": "body assembly",
+    "body": "body assembly",
+    "servo control unit": "actuator",
+    "control unit": "actuator",
+    
+    # Different wordings for the same action
+    "torque-tighten": "torque",
+    "lubricate the .* bolts": "apply a small quantity of oil to the threads of the .* bolts",
+    "apply a small quantity of oil to the threads of the .* bolts": "lubricate the .* bolts",
+    
+    # Different terms for the same component
+    "fastener": "bolt",
+    "nut": "nut",
+    "washer": "washer",
+    "seal": "seal",
+    "O-ring": "O-ring",
+    
+    # Different terms for the same position
+    "open position": "OPEN",
+    "closed position": "CLOSED",
+    "middle position": "MIDDLE",
+    
+    # Different terms for the same tool
+    "torque wrench": "torque wrench",
+    "wrench": "torque wrench",
+    "screwdriver": "screwdriver",
 }
+
+
+# Technical nouns that should not be used as verbs (Rule 1.7)
+# Rule 1.7: "Do not use words that are technical nouns as verbs."
+# Use a technical noun only as a noun or as an adjective that is part of a
+# different technical noun. Do not use the same word as a verb.
+
+
+# GR-1 to GR-8: General recommendations
+# but has a different meaning in English.
+FALSE_FRIENDS = {
+    "actually": "currently",
+    "assist": "help",
+    "capital": "city",
+    "curious": "strange",
+    "eventually": "finally",
+    "fabric": "cloth",
+    "familiar": "relative",
+    "gift": "present",
+    "lie": "recline",
+    "mass": "crowd",
+    "mind": "think",
+    "note": "observe",
+    "pain": "hurt",
+    "pretty": "attractive",
+    "real": "actual",
+    "scene": "view",
+    "sensitive": "sensible",
+    "soap": "clean",
+    "start": "begin",
+    "tape": "band",
+    "train": "education",
+    "trousers": "pants",
+    "vacant": "empty",
+    "waste": "trash",
+}
+
+# Words with restricted meanings (Rule 9.2)
+# Rule 9.2: "Use each approved word correctly."
+# Some STE-approved words have meanings that are applicable only in some contexts
+# (restricted meaning). Always make sure that the word that you select has the
+# correct meaning in the applicable context.
+
+# 'he' or 'she' are not permitted in STE."
+GENDER_PRONOUNS = {
+    "he": "they",
+    "him": "them",
+    "his": "their",
+    "she": "they",
+    "her": "them",
+    "man": "person",
+    "woman": "person",
+}
+
+# False friends to detect (GR-5)
+# GR-5: "False friends"
+# A false friend is a word that looks the same as one in a person's native language
+# but has a different meaning in English.
+
+# the text clear."
+LATIN_ABBREVIATIONS = {
+    "e.g.": "for example",
+    "i.e.": "that is",
+    "etc.": "and so on",
+    "viz.": "namely",
+    "ibid.": "in the same place",
+    "op. cit.": "work cited",
+    "vol.": "volume",
+    "vs.": "versus",
+}
+
+# Section 1 Constants (Words)
+# Rule 1.1-1.14: Words, Part of Speech, Approved Meaning, Technical Nouns, etc.
+
+# Rule 1.2: Words with restricted POS in STE dictionary
+# Format: word -> (approved_pos, disapproved_pos)
+# These are words that are commonly misused with incorrect part of speech
+
