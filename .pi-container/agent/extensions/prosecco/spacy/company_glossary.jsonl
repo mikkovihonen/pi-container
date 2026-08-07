@@ -1,0 +1,2 @@
+{"namespace":"words","name":"NON_APPROVED_WORDS","rules":["Company Policy"],"type":"mapping","data":{"bollocks":"nonsense","bugger":"dammit"}}
+{"namespace":"general","name":"FALSE_FRIENDS","rules":["Company Policy"],"type":"mapping","data":{"actually":"currently","current":"present"}}
