@@ -29,7 +29,15 @@ GR-8: Possessive form
 The possessive form (also known as the Saxon genitive) adds an apostrophe and "s" to form the possessive. While permitted in STE, use it correctly. If not sure, do not use it.
 """
 import re
-from glossary import FALSE_FRIENDS, LATIN_ABBREVIATIONS, GENDER_PRONOUNS, GR_CONFIGURATION
+from glossary import (
+    FALSE_FRIENDS,
+    LATIN_ABBREVIATIONS,
+    GENDER_PRONOUNS,
+    CONJUNCTION_THAT_PATTERNS,
+    AMBIGUOUS_PRONOUNS,
+    AMBIGUOUS_WITH_VERB_GROUPS,
+    AMBIGUOUS_THIS_CONTEXTS,
+)
 
 
 def check_conjunction_that(doc):
@@ -40,13 +48,13 @@ def check_conjunction_that(doc):
     Use the conjunction "that" after verbs like "make sure," "show," and "recommend"
     to prevent ambiguity.
     
-    Configurable via GR_CONFIGURATION[conjunction_that_patterns].
+    Configurable via CONJUNCTION_THAT_PATTERNS.
     """
     issues = []
     text = doc.text
     
     # Load patterns from configuration
-    patterns = GR_CONFIGURATION.get('conjunction_that_patterns', [])
+    patterns = CONJUNCTION_THAT_PATTERNS
     
     for pattern_config in patterns:
         pattern = pattern_config['pattern']
@@ -111,13 +119,13 @@ def check_ambiguous_pronouns(doc):
     it refers to.
     
     Uses spaCy noun_chunks to detect pronouns that may refer to multiple nouns.
-    Configurable via GR_CONFIGURATION[ambiguous_pronouns].
+    Configurable via AMBIGUOUS_PRONOUNS.
     """
     issues = []
     seen = set()
     
     # Load ambiguous pronouns from configuration
-    ambiguous_pronouns = set(GR_CONFIGURATION.get('ambiguous_pronouns', []))
+    ambiguous_pronouns = set(AMBIGUOUS_PRONOUNS)
     
     # Get all noun chunks in the document
     noun_chunks = list(doc.noun_chunks)
