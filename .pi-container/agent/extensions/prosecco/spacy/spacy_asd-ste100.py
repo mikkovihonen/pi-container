@@ -119,6 +119,12 @@ from checks_gr_recommendations import (
 
 def main():
     """Main entry point."""
+    # Parse command-line arguments.
+    # --no-metadata: Suppress warnings that have metadata annotations (e.g. [bold_marker], [header]).
+    no_metadata = "--no-metadata" in sys.argv
+    # Filter argv to remove our custom flag before passing to the rest of the script.
+    sys.argv = [arg for arg in sys.argv if arg != "--no-metadata"]
+    
     # Read input from file or stdin
     filepath = None
     if len(sys.argv) > 1:
@@ -155,17 +161,15 @@ def main():
                 return rtype
         return None
 
-    # Helper to check if a cleaned-text position is in or near a link region.
+    # Helper to check if an error span overlaps with a link region.
     # Link regions contain visible link text that should be suppressed.
-    # We suppress errors that overlap with or are within 10 characters of a
-    # link region, since errors often start just before the link text.
-    LINK_PADDING = 10
-
-    def _is_in_link(cleaned_offset: int) -> bool:
+    # We suppress errors whose span overlaps with a link region.
+    def _is_in_link(cleaned_offset: int, length: int) -> bool:
+        error_end = cleaned_offset + length
         for start, end, rtype in regions:
             if rtype == "link":
-                # Check if the offset is within the link region or within padding.
-                if start - LINK_PADDING <= cleaned_offset < end + LINK_PADDING:
+                # Check if the error span overlaps with the link region.
+                if not (error_end < start or cleaned_offset > end):
                     return True
         return False
 
@@ -268,9 +272,10 @@ def main():
 
     for issue in all_issues:
         cleaned_offset = issue["offset"]
+        error_length = issue.get("length", 1)
         
         # Skip errors in link regions (visible link text).
-        if _is_in_link(cleaned_offset):
+        if _is_in_link(cleaned_offset, error_length):
             continue
         
         original_offset = offset_map.get(cleaned_offset, cleaned_offset)
@@ -288,6 +293,10 @@ def main():
                 break
             current_offset = line_end
 
+        # Skip errors with metadata annotations if --no-metadata is set.
+        if no_metadata and region_type:
+            continue
+        
         # Add region context to the message if the error is in a non-prose region.
         if region_type:
             print(f"{filepath}:{line}:{col} STE100.{issue['type']}: [{region_type}] {issue['message']}")

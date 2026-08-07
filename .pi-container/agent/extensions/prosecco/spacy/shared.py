@@ -214,15 +214,18 @@ def _has_connecting_word(sent, connecting_words):
     return False
 
 
-def _are_sentences_related(sent1, sent2):
+def _are_sentences_related(sent1, sent2, common_words=None):
     """Check if two sentences are related (simplified heuristic).
     
     Uses spaCy features to extract content words and calculate overlap
-    between the two sentences.
+    between the two sentences. Filters out common words that don't indicate
+    a meaningful relationship.
     
     Args:
         sent1: spaCy Span object (first sentence)
         sent2: spaCy Span object (second sentence)
+        common_words: Optional set of words considered "common" (top X% by frequency).
+            These words are filtered out from the overlap calculation.
     
     Returns:
         bool: True if sentences are related (have significant word overlap)
@@ -235,8 +238,20 @@ def _are_sentences_related(sent1, sent2):
     if len(words1) == 0 or len(words2) == 0:
         return False
     
-    overlap = len(words1.intersection(words2))
-    overlap_ratio = overlap / min(len(words1), len(words2))
+    # Filter out common words
+    if common_words:
+        filtered_words1 = words1 - common_words
+        filtered_words2 = words2 - common_words
+    else:
+        filtered_words1 = words1
+        filtered_words2 = words2
+    
+    # Recalculate with filtered words
+    if len(filtered_words1) == 0 or len(filtered_words2) == 0:
+        return False
+    
+    overlap = len(filtered_words1.intersection(filtered_words2))
+    overlap_ratio = overlap / min(len(filtered_words1), len(filtered_words2))
     
     # If there's significant overlap, the sentences are likely related
     return overlap_ratio > 0.3
@@ -629,19 +644,21 @@ def _get_restricted_verb_replacement(phrase):
 
 
 def _iter_content_tokens(doc):
-    """Iterate over content tokens (non-punctuation, non-stop words).
+    """Iterate over content tokens (non-punctuation, non-stop words, non-symbols).
     
     Generator function that yields only content tokens from a spaCy Doc,
-    skipping punctuation and stop words.
+    skipping punctuation, stop words, and symbol tokens (pos_=X includes
+    markdown brackets, special characters, etc.).
     
     Args:
         doc: spaCy Doc object
     
     Yields:
-        spaCy Token: Content tokens (non-punctuation, non-stop words)
+        spaCy Token: Content tokens (non-punctuation, non-stop words, non-symbols)
     """
     for token in doc:
-        if not token.is_stop and token.pos_ != "PUNCT":
+        # Skip stop words, punctuation, and symbols (pos_=X includes markdown brackets, etc.)
+        if not token.is_stop and token.pos_ not in ("PUNCT", "X"):
             yield token
 
 

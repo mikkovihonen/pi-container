@@ -163,6 +163,27 @@ def check_connecting_words(doc):
     
     sentences = list(doc.sents)
     
+    # Precompute word frequencies to identify common words
+    # A word is considered "common" if it falls in the top X% by frequency
+    COMMON_WORD_PERCENTILE = 15  # Top 15% of words by frequency
+    
+    word_freq = {}
+    for sent in sentences:
+        for token in sent:
+            if not token.is_stop and token.pos_ not in ("PUNCT", "X"):
+                lemma = token.lemma_.lower()
+                if lemma and not lemma.isspace():
+                    word_freq[lemma] = word_freq.get(lemma, 0) + 1
+    
+    if word_freq:
+        # Sort by frequency descending
+        sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
+        total_words = len(sorted_words)
+        common_count = max(1, int(total_words * COMMON_WORD_PERCENTILE / 100))
+        common_words = {word for word, count in sorted_words[:common_count]}
+    else:
+        common_words = set()
+    
     # Check consecutive sentences for missing connecting words
     for i in range(len(sentences) - 1):
         sent1 = sentences[i]
@@ -179,7 +200,7 @@ def check_connecting_words(doc):
         has_connecting_word = _has_connecting_word(sent2, CONNECTING_WORDS)
         
         # Check if the sentences are related (same topic)
-        are_related = _are_sentences_related(sent1, sent2)
+        are_related = _are_sentences_related(sent1, sent2, common_words)
         
         # If sentences are related but don't have a connecting word, flag it
         if are_related and not has_connecting_word and sent1.start_char not in seen:

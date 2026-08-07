@@ -191,7 +191,7 @@ def _get_markdown_blocks(md: str) -> list[tuple[int, int, str]]:
     Returns a list of ``(start, end, block_type)`` tuples for blocks that
     should be removed from the cleaned output. Block types include
     ``"code_fence"``, ``"code_inline"``, ``"link"``, ``"image"``,
-    ``"table"``, and ``"html_block"``.
+    ``"table"``, ``"html_block"``, ``"bold_marker"``, and ``"italic_marker"``.
     """
     try:
         from markdown_it import MarkdownIt
@@ -205,6 +205,18 @@ def _get_markdown_blocks(md: str) -> list[tuple[int, int, str]]:
     tokens = md_it.parse(md)
 
     blocks: list[tuple[int, int, str]] = []
+
+    # Collect bold and italic markers.
+    # Replace ** and * characters with spaces to remove markdown formatting
+    # while keeping the inner text visible. This prevents prosecco from
+    # counting asterisks as words in multi-word noun checks.
+    bold_pattern = re.compile(r"\*\*")
+    for m in bold_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "bold_marker"))
+
+    italic_pattern = re.compile(r"(?<!\*)\*(?!\*)")
+    for m in italic_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "italic_marker"))
 
     # Collect inline code spans.
     # Match single or double backtick code spans, but not triple or more (which are fenced code blocks).
@@ -375,7 +387,30 @@ def preprocess_markdown(
             parts.append(" ")
             offset_map[start] = start
         elif btype == "header":
-            # Keep header text visible.
+            # Keep header text visible but replace the # markers with spaces.
+            # Find where the actual header text starts (after # and whitespace).
+            header_text = md[start:end]
+            # Match the # markers and leading whitespace
+            header_match = re.match(r"^#+\s*", header_text)
+            if header_match:
+                # Replace the # markers with spaces
+                hash_length = len(header_match.group())
+                for i in range(hash_length):
+                    offset_map[start + i] = start + i
+                    parts.append(" ")
+                # Keep the actual header text visible
+                for i, ch in enumerate(header_text[header_match.end():]):
+                    offset_map[start + hash_length + i] = start + hash_length + i
+                    parts.append(ch)
+            else:
+                # Fallback: keep entire header visible
+                for i, ch in enumerate(md[start:end]):
+                    offset_map[start + i] = start + i
+                    parts.append(ch)
+        elif btype in ("bold_marker", "italic_marker"):
+            # Keep bold/italic markers visible. The regions list contains
+            # the marker positions so the linter can suppress multi-word
+            # noun checks on formatted text.
             for i, ch in enumerate(md[start:end]):
                 offset_map[start + i] = start + i
                 parts.append(ch)

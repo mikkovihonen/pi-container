@@ -40,6 +40,7 @@ const LintParams = Type.Object({
 	),
 	steOnly: Type.Optional(Type.Boolean()),
 	spacy: Type.Optional(Type.Boolean({ description: "Enable ASD-STE100 checks via spaCy." })),
+	noMetadata: Type.Optional(Type.Boolean({ description: "Suppress warnings with metadata annotations (e.g. [bold_marker], [header], [table_delimiter])." })),
 });
 
 /**
@@ -98,10 +99,11 @@ function countAlertsFromJson(data) {
  * @param {"text"|"json"} outputFormat
  * @param {boolean} steOnly
  * @param {boolean} spacy  Enable ASD-STE100 checks via spaCy.
+ * @param {boolean} noMetadata  Suppress warnings with metadata annotations.
  * @param {object} ctx  ExtensionContext: {cwd, mode, hasUI, signal, ui}
  * @returns {{content, details}}
  */
-async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy, ctx) {
+async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy, noMetadata, ctx) {
 	// 1. Resolve path against ctx.cwd.
 	const resolved = userPath
 		? pathResolve(ctx.cwd, userPath)
@@ -296,8 +298,13 @@ async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy
 	let spacyOutput = "";
 	if (spacy && filePaths.length > 0 && filePaths[0].endsWith('.md')) {
 		const spacyModule = pathResolve("/home/pi/.pi/agent/extensions/prosecco/spacy", "spacy_asd-ste100.py");
+		const spacyArgs = ["run", "python", spacyModule];
+		if (noMetadata) {
+			spacyArgs.push("--no-metadata");
+		}
+		spacyArgs.push(filePaths[0]);
 		try {
-			const spacyResult = await pi.exec("uv", ["run", "python", spacyModule, filePaths[0]], {
+			const spacyResult = await pi.exec("uv", spacyArgs, {
 				cwd: ctx.cwd,
 				signal: ctx.signal,
 				env: { PYTHONIOENCODING: "utf-8" },
@@ -419,7 +426,8 @@ export default function (pi) {
 			const outputFormat = params.outputFormat ?? "text";
 			const steOnly = false;
 			const spacy = true;
-			return runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy, ctx);
+			const noMetadata = params.noMetadata ?? false;
+			return runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy, noMetadata, ctx);
 		},
 	});
 
@@ -432,6 +440,7 @@ export default function (pi) {
 			let minAlertLevel = "suggestion";
 			let steOnly = false;
 			let spacy = true;
+			let noMetadata = false;
 			const tokens = String(args || "").trim().split(/\s+/);
 			for (const tok of tokens) {
 				if (tok.startsWith("--minAlertLevel=")) {
@@ -439,17 +448,19 @@ export default function (pi) {
 					if (val === "suggestion" || val === "warning" || val === "error") {
 						minAlertLevel = val;
 					}
+				} else if (tok === "--no-metadata") {
+					noMetadata = true;
 				} else if (!tok.startsWith("--")) {
 					userPath = tok;
 				}
 			}
 
 			if (!userPath) {
-				ctx.ui.notify("Usage: /prosecco <path> [--minAlertLevel=suggestion|warning|error]");
+				ctx.ui.notify("Usage: /prosecco <path> [--minAlertLevel=suggestion|warning|error] [--no-metadata]");
 				return;
 			}
 
-			const result = await runLint(pi, userPath, minAlertLevel, "text", steOnly, spacy, ctx);
+			const result = await runLint(pi, userPath, minAlertLevel, "text", steOnly, spacy, noMetadata, ctx);
 
 			// Print the result regardless of UI mode — the user may be in
 			// print-only mode and needs to see the output.
