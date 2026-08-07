@@ -30,6 +30,12 @@ class ConstantsLoader:
     
     Supports namespace-based loading and cardinality where later
     configurations override earlier ones.
+    
+    To REMOVE a constant from a mapping in an override, use the
+    __REMOVE__ sentinel value. Example:
+    
+        {"namespace": "words", "name": "NON_APPROVED_WORDS",
+         "type": "mapping", "data": {"unwanted_word": "__REMOVE__"}}
     """
     
     def __init__(self, base_path: Optional[str] = None):
@@ -170,7 +176,14 @@ class ConstantsLoader:
         
         This performs a deep merge where:
         - For mapping types: keys from other override keys from self
+        - For mapping types: values equal to __REMOVE__ delete the key from self
         - For collection types: values from other replace values from self
+        
+        To remove a key from a mapping in an override, set its value to
+        "__REMOVE__". Example:
+        
+            {"namespace": "words", "name": "NON_APPROVED_WORDS",
+             "type": "mapping", "data": {"unwanted_word": "__REMOVE__"}}
         
         Args:
             other: Another ConstantsLoader instance
@@ -179,8 +192,15 @@ class ConstantsLoader:
             self_ns = self.configs.setdefault(namespace, {})
             for name, value in consts.items():
                 if name in self_ns and isinstance(self_ns[name], dict) and isinstance(value, dict):
-                    # Deep merge for mappings
-                    self_ns[name].update(value)
+                    # Deep merge for mappings with removal support
+                    keys_to_delete = []
+                    for k, v in value.items():
+                        if v == '__REMOVE__':
+                            keys_to_delete.append(k)
+                        else:
+                            self_ns[name][k] = v
+                    for k in keys_to_delete:
+                        self_ns[name].pop(k, None)
                 else:
                     # Replace for other types
                     self_ns[name] = value
