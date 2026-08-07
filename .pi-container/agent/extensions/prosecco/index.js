@@ -190,7 +190,7 @@ async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy
 			content: [
 				{
 					type: "text",
-					text: "Vale was cancelled.",
+					text: "Prosecco was cancelled.",
 				},
 			],
 			details: { isError: false, violationCount: 0, filesScanned: 0, bySeverity: {}, raw: undefined },
@@ -267,14 +267,14 @@ async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy
 			const retryResult = await pi.exec("vale", retryArgs, { cwd: ctx.cwd, signal: ctx.signal });
 			if (retryResult.killed) {
 				return {
-					content: [{ type: "text", text: "Vale was cancelled." }],
+					content: [{ type: "text", text: "Prosecco was cancelled." }],
 					details: { isError: false, violationCount: 0, filesScanned: 0, bySeverity: {}, raw: undefined },
 				};
 			}
 			if (retryResult.code >= 2) {
 				const detail = retryResult.stderr.trim() || `vale exited ${retryResult.code} with arguments: ${retryArgs.join(" ")}`;
 				return {
-					content: [{ type: "text", text: `Vale failed: ${detail}` }],
+					content: [{ type: "text", text: `Prosecco failed: ${detail}` }],
 					details: { isError: true, violationCount: 0, filesScanned: 0, bySeverity: {}, raw: undefined, args: retryArgs },
 				};
 			}
@@ -284,7 +284,7 @@ async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy
 			// Real Vale failure (bad flag, missing config, etc.).
 			const detail = stderr || `vale exited ${result.code} with arguments: ${args.join(" ")}`;
 			return {
-				content: [{ type: "text", text: `Vale failed: ${detail}` }],
+				content: [{ type: "text", text: `Prosecco failed: ${detail}` }],
 				details: { isError: true, violationCount: 0, filesScanned: 0, bySeverity: {}, raw: undefined, args },
 			};
 		}
@@ -320,7 +320,7 @@ async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy
 				content: [
 					{
 						type: "text",
-						text: `Vale produced JSON but the output is not valid JSON: ${parseErr.message}\n\nRaw output:\n${stdout}`,
+						text: `Prosecco produced JSON but the output is not valid JSON: ${parseErr.message}\n\nRaw output:\n${stdout}`,
 					},
 				],
 				details: {
@@ -394,7 +394,7 @@ async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy
  * Build a status summary for ctx.ui.setStatus().
  */
 function buildStatus(total, filesScanned, bySeverity) {
-	const parts = [`vale: ${total} alert${total === 1 ? "" : "s"}`];
+	const parts = [`prosecco: ${total} alert${total === 1 ? "" : "s"}`];
 	if (filesScanned > 0) {
 		parts.push(`${filesScanned} file${filesScanned === 1 ? "" : "s"}`);
 	}
@@ -407,7 +407,7 @@ function buildStatus(total, filesScanned, bySeverity) {
 export default function (pi) {
 	// ── Tool: prosecco_lint ──────────────────────────────────────────────────
 	pi.registerTool({
-		name: "prosecco-lint",
+		name: "prosecco",
 		label: "Prose Lint",
 		description:
 			"Run Vale + spaCy prose linting on a file or directory. Reports ASD-STE100 problems.",
@@ -417,21 +417,21 @@ export default function (pi) {
 			const userPath = params.path ?? undefined;
 			const minAlertLevel = params.minAlertLevel ?? "suggestion";
 			const outputFormat = params.outputFormat ?? "text";
-			const steOnly = Boolean(params.steOnly);
-			const spacy = Boolean(params.spacy);
+			const steOnly = false;
+			const spacy = true;
 			return runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy, ctx);
 		},
 	});
 
 	// ── Command: /prosecco ─────────────────────────────────────────────
 	pi.registerCommand("prosecco", {
-		description: "Lint prose with Vale + spaCy. Usage: /prose-lint [path] [--minAlertLevel=suggestion|warning|error] [--ste-only] [--spacy]",
+		description: "Lint prose with Vale + spaCy. Usage: /prosecco [path] [--minAlertLevel=suggestion|warning|error]",
 		handler: async (args, ctx) => {
 			// Parse arguments. The first non-flag token is the path.
 			let userPath = undefined;
 			let minAlertLevel = "suggestion";
 			let steOnly = false;
-			let spacy = false;
+			let spacy = true;
 			const tokens = String(args || "").trim().split(/\s+/);
 			for (const tok of tokens) {
 				if (tok.startsWith("--minAlertLevel=")) {
@@ -439,17 +439,13 @@ export default function (pi) {
 					if (val === "suggestion" || val === "warning" || val === "error") {
 						minAlertLevel = val;
 					}
-				} else if (tok === "--ste-only") {
-					steOnly = true;
-				} else if (tok === "--spacy") {
-					spacy = true;
 				} else if (!tok.startsWith("--")) {
 					userPath = tok;
 				}
 			}
 
 			if (!userPath) {
-				ctx.ui.notify("Usage: /vale <path> [--minAlertLevel=suggestion|warning|error] [--ste-only] [--spacy]");
+				ctx.ui.notify("Usage: /prosecco <path> [--minAlertLevel=suggestion|warning|error]");
 				return;
 			}
 
@@ -467,7 +463,7 @@ export default function (pi) {
 				if (lines.length > MAX_DISPLAY) {
 					const summary = lines.slice(0, MAX_DISPLAY).join("\n");
 					ctx.ui.notify(
-						`Vale found ${result.details.violationCount} alerts. Showing first ${MAX_DISPLAY}:\n\n${summary}\n\n... and ${lines.length - MAX_DISPLAY} more. Run the vale_lint tool for the full output.`,
+						`Prosecco helped you find ${result.details.violationCount} issues. Showing first ${MAX_DISPLAY}:\n\n${summary}\n\n... and ${lines.length - MAX_DISPLAY} more. Ask me to read the same files with prosecco for full output.`,
 						result.details.isError ? "error" : "info",
 					);
 				} else {

@@ -18,6 +18,8 @@ docs = [
     "mkdocs-material>=9.7.7",
 ]
 dev = [
+    "beautifulsoup4>=4.13.0",
+    "markdown-it-py>=3.0.0",
     "pre-commit>=4.6.1",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",

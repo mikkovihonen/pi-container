@@ -1,8 +1,0 @@
-extends: substitution
-message: "Use 'must' instead of 'shall' for obligations."
-level: suggestion
-swap:
-  shall: "must"
-  should: "can"
-  may: "can"
-ignorecase: false

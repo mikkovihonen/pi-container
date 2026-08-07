@@ -155,7 +155,10 @@ def _ensure_project_config() -> Path:
     # Only the subpaths listed below are eligible. A user can turn off an
     # extension by deleting its directory — the seeder will not resurrect it.
     # To add a new seeded subpath, append it here.
-    _AGENT_SEED_SUBPATHS = ("extensions/prosecco/index.js", "extensions/prosecco/.vale.ini",)
+    _AGENT_SEED_SUBPATHS = (
+        "extensions/prosecco/index.js",
+        "extensions/prosecco/.vale.ini",
+    )
     agent_template = template_root / "agent"
     agent_project = project_root / "agent"
     if agent_template.is_dir():

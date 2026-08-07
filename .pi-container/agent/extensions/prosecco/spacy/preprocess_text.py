@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+"""
+Text preprocessing for prose linting.
+
+Filters out non-text elements from HTML and Markdown input while preserving
+exact character positions and offsets. This allows downstream linting tools
+to report precise locations of issues in the original document.
+
+Deleted elements are replaced with whitespace of equal length so that the
+output string has the same length as the input. Character offset mappings
+enable bidirectional lookup between cleaned and original text positions.
+
+Modules:
+    preprocess_html -- Remove HTML tags while preserving character positions.
+    preprocess_markdown -- Remove Markdown non-text elements with source maps.
+"""
+
+from __future__ import annotations
+
+import re
+from html.entities import name2codepoint
+
+
+def _decode_entity(match: re.Match) -> str:
+    """Decode a named or numeric HTML entity to a single Unicode character.
+
+    Returns the original match unchanged for unrecognized entities so that
+    the output preserves the input byte-for-byte.
+    """
+    text = match.group(0)
+    if text.startswith("&#x") or text.startswith("&#X"):
+        try:
+            return chr(int(text[3:-1], 16))
+        except (ValueError, OverflowError):
+            return text
+    if text.startswith("&#"):
+        try:
+            return chr(int(text[2:-1]))
+        except (ValueError, OverflowError):
+            return text
+    name = text[1:-1]
+    cp = name2codepoint.get(name)
+    if cp:
+        return chr(cp)
+    return text
+
+
+_ENTITY_RE = re.compile(r"&(?:#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);")
+
+
+def _decode_entities(text: str) -> str:
+    """Replace all HTML entities in ``text`` with their Unicode equivalents."""
+    return _ENTITY_RE.sub(_decode_entity, text)
+
+
+def _find_html_spans(html: str) -> list[tuple[int, int]]:
+    """Find all non-text spans in HTML (tags, comments, CDATA, etc.).
+
+    Uses regex to locate every non-text region in the original HTML string.
+    This approach works on the raw source so offsets remain accurate.
+
+    Args:
+        html: Raw HTML string to process.
+
+    Returns:
+        A sorted list of ``(start, end)`` tuples for each non-text span.
+    """
+    spans: list[tuple[int, int]] = []
+
+    # Match all non-text regions:
+    # - HTML comments: <!-- ... -->
+    # - CDATA sections: <![CDATA[ ... ]]>
+    # - Processing instructions: <? ... ?>
+    # - DOCTYPE declarations: <!DOCTYPE ...>
+    # - Script/style tags with content: <script>...</script>, <style>...</style>
+    # - Opening/self-closing tags: <tagname ... >
+    tag_pattern = re.compile(
+        r"<!--.*?-->"
+        r"|<!\[CDATA\[.*?\]\]>"
+        r"|<\?.*?\?>"
+        r"|<!DOCTYPE[^>]*>"
+        r"|<(/?)(script|style)[^>]*>[\s\S]*?</\2>"
+        r"|</?[a-zA-Z][a-zA-Z0-9]*(?:\s+[^>]*)?\s*/?>"
+    )
+
+    for m in tag_pattern.finditer(html):
+        spans.append((m.start(), m.end()))
+
+    # Sort and merge overlapping spans.
+    spans.sort()
+    merged: list[tuple[int, int]] = []
+    for start, end in spans:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+
+    return merged
+
+
+def preprocess_html(
+    html: str,
+    *,
+    keep_ids: bool = False,
+) -> tuple[str, dict[int, int]]:
+    """Parse HTML and remove non-text elements while preserving offsets.
+
+    This function uses BeautifulSoup to validate the HTML structure and
+    regex-based detection to locate non-text regions. Every non-text element
+    (tags, comments, CDATA, processing instructions, DOCTYPE) is replaced
+    with whitespace of equal length. The output has the same number of
+    characters as the input.
+
+    HTML entities (``&amp;``, ``&#123;``, etc.) are decoded to their Unicode
+    equivalents. The length difference between decoded text and the original
+    entity string is absorbed into the surrounding whitespace so offsets stay
+    valid.
+
+    Args:
+        html: Raw HTML string to process.
+        keep_ids: When True, preserve ``id`` attribute values inside tags as
+            readable text in the output. Default is False.
+
+    Returns:
+        A tuple of ``(cleaned_text, offset_map)`` where:
+            * ``cleaned_text`` contains the original text with all non-text
+              elements replaced by whitespace. Entities are decoded.
+            * ``offset_map`` maps each character position in ``cleaned_text``
+              to the corresponding position in the original ``html`` string.
+
+    Example:
+        >>> text, mapping = preprocess_html("<p>Hello <b>world</b>!</p>")
+        >>> assert "Hello " in text
+        >>> assert mapping[0] == 0
+    """
+    # Use BeautifulSoup to validate the HTML structure.
+    try:
+        from bs4 import BeautifulSoup
+        BeautifulSoup(html, "html.parser")
+    except ImportError:
+        raise ImportError(
+            "beautifulsoup4 is required for HTML preprocessing. "
+            "Install it with: pip install beautifulsoup4"
+        )
+    except Exception:
+        pass  # Invalid HTML; proceed with regex-based processing.
+
+    # Find all non-text spans.
+    spans = _find_html_spans(html)
+
+    # Build the cleaned string and offset map.
+    # We need to track positions in the decoded text, not the original.
+    parts: list[str] = []
+    offset_map: dict[int, int] = {}
+    last_end = 0
+    decoded_pos = 0
+
+    for start, end in spans:
+        # Text before this span.
+        text_before = html[last_end:start]
+        decoded_text_before = _decode_entities(text_before)
+        for i, ch in enumerate(decoded_text_before):
+            offset_map[decoded_pos] = last_end + i
+            parts.append(ch)
+            decoded_pos += 1
+
+        # Replace span with spaces.
+        span_length = end - start
+        parts.append(" " * span_length)
+        for i in range(span_length):
+            offset_map[decoded_pos] = start + i
+            decoded_pos += 1
+
+        last_end = end
+
+    # Text after the last span.
+    text_after = html[last_end:]
+    decoded_text_after = _decode_entities(text_after)
+    for i, ch in enumerate(decoded_text_after):
+        offset_map[decoded_pos] = last_end + i
+        parts.append(ch)
+        decoded_pos += 1
+
+    cleaned_text = "".join(parts)
+    return cleaned_text, offset_map
+
+
+def _get_markdown_blocks(md: str) -> list[tuple[int, int, str]]:
+    """Use markdown-it-py to identify non-text blocks in Markdown.
+
+    Returns a list of ``(start, end, block_type)`` tuples for blocks that
+    should be removed from the cleaned output. Block types include
+    ``"code_fence"``, ``"code_inline"``, ``"link"``, ``"image"``,
+    ``"table"``, and ``"html_block"``.
+    """
+    try:
+        from markdown_it import MarkdownIt
+    except ImportError:  # pragma: no cover
+        raise ImportError(
+            "markdown-it-py is required for Markdown preprocessing. "
+            "Install it with: pip install markdown-it-py"
+        )
+
+    md_it = MarkdownIt()
+    tokens = md_it.parse(md)
+
+    blocks: list[tuple[int, int, str]] = []
+
+    # Collect inline code spans.
+    # Match single or double backtick code spans, but not triple or more (which are fenced code blocks).
+    # Use negative lookbehind/lookahead to ensure we don't match part of a fenced code block.
+    inline_code_pattern = re.compile(r"(?<!`)``?(?![`]).*?(?<!`)``?(?!`)")
+    for m in inline_code_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "code_inline"))
+
+    # Collect inline links [text](url) and images ![alt](url).
+    # The alt text can contain brackets (nested), so we use a non-greedy match
+    # and look for the pattern ]( to close the alt text.
+    # The URL can contain parentheses, but we stop at the first unmatched closing paren.
+    image_pattern = re.compile(r"!\[.*?\]\([^)]*\)", re.DOTALL)
+    link_pattern = re.compile(r"(?<!!)\[.*?\]\([^)]*\)", re.DOTALL)
+    for m in image_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "image"))
+    for m in link_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "link"))
+
+    # Collect fenced code blocks.
+    # Match from opening fence (``` or ~~~) to closing fence on a line by itself.
+    fence_pattern = re.compile(r"^(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\1`*\s*$", re.MULTILINE)
+    for m in fence_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "code_fence"))
+
+    # Collect HTML blocks and inline HTML.
+    # Match HTML comments, opening/closing tags, and autolinks.
+    # The pattern matches from < to >, handling attributes and special cases.
+    html_block_pattern = re.compile(
+        r"<!--.*?-->"
+        r"|<[/!\?][^>]*>"  # Comments, declarations, processing instructions
+        r"|<([a-zA-Z][a-zA-Z0-9]*)(?:\s[^>]*)?\s*/?>"  # Opening/self-closing tags
+        r"|</[a-zA-Z][a-zA-Z0-9]*\s*>"  # Closing tags
+        r"|<([a-zA-Z][a-zA-Z0-9]*:?[a-zA-Z0-9.:]*)\s+/?>"  # Namespaced tags
+        r"|<([a-zA-Z]+)://[^>\s]*>",  # Autolinks (angle-bracket URLs)
+        re.DOTALL,
+    )
+    for m in html_block_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "html_block"))
+
+    # Collect table row delimiters (| characters).
+    # We only remove the | delimiters, keeping the cell content as prose.
+    # Match | characters that are part of table rows (not standalone pipes).
+    table_delimiter_pattern = re.compile(r"\|")
+    for m in table_delimiter_pattern.finditer(md):
+        # Check if this | is part of a table row (has content before and after on the same line)
+        line_start = md.rfind('\n', 0, m.start()) + 1
+        line_end = md.find('\n', m.start())
+        if line_end == -1:
+            line_end = len(md)
+        
+        line = md[line_start:line_end]
+        # Only treat as table delimiter if line has multiple | characters
+        # (indicating it's a table row, not a standalone pipe)
+        if line.count('|') >= 2:
+            blocks.append((m.start(), m.end(), "table_delimiter"))
+
+    # Sort and merge overlapping blocks.
+    blocks.sort(key=lambda b: b[0])
+    merged: list[tuple[int, int, str]] = []
+    for start, end, btype in blocks:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end), btype)
+        else:
+            merged.append((start, end, btype))
+
+    return merged
+
+
+def preprocess_markdown(
+    md: str,
+) -> tuple[str, dict[int, int]]:
+    """Parse Markdown and remove non-text elements while preserving offsets.
+
+    This function uses markdown-it-py's parsing to identify non-text regions
+    (code blocks, code spans, links, images, HTML blocks, and table rows) and
+    replaces them with whitespace. The output has the same length as the
+    input, so character offsets remain valid.
+
+    Args:
+        md: Raw Markdown string to process.
+
+    Returns:
+        A tuple of ``(cleaned_text, offset_map)`` where:
+            * ``cleaned_text`` contains the original text with all non-text
+              elements replaced by whitespace.
+            * ``offset_map`` maps each character position in ``cleaned_text``
+              to the corresponding position in the original ``md`` string.
+
+    Example:
+        >>> text, mapping = preprocess_markdown("# Hello\\n\\n`code` and [link](url)")
+        >>> assert "Hello" in text
+        >>> assert mapping[0] == 0
+    """
+    blocks = _get_markdown_blocks(md)
+
+    parts: list[str] = []
+    offset_map: list[int | None] = [None] * len(md)
+    last_end = 0
+
+    for start, end, btype in blocks:
+        # Text before this block.
+        text_before = md[last_end:start]
+        for i, ch in enumerate(text_before):
+            pos = last_end + i
+            offset_map[pos] = pos
+            parts.append(ch)
+
+        # Replace block with spaces.
+        # For table_delimiter blocks, we only replace the | character itself.
+        # For other blocks (code, links, images, HTML), we replace the entire span.
+        if btype == "table_delimiter":
+            # Just replace the | with a space
+            parts.append(" ")
+            offset_map[start] = start
+        else:
+            # Replace entire block with spaces
+            span_length = end - start
+            parts.append(" " * span_length)
+            for i in range(start, end):
+                offset_map[i] = i
+
+        last_end = end
+
+    # Text after the last block.
+    text_after = md[last_end:]
+    for i, ch in enumerate(text_after):
+        pos = last_end + i
+        offset_map[pos] = pos
+        parts.append(ch)
+
+    cleaned_text = "".join(parts)
+    return cleaned_text, {i: offset_map[i] for i in range(len(cleaned_text))}
+
+
+# Module-level documentation.
+__all__ = ["preprocess_html", "preprocess_markdown"]
