@@ -4,7 +4,7 @@ This document describes the JSONL format for ASD-STE100 constants, including nam
 
 ## Overview
 
-The `constants.jsonl` file contains all ASD-STE100 grammar checking constants in a portable JSONL (JSON Lines) format. Each line is a JSON object representing one constant with metadata about its rule references and data type.
+The `asd-ste100_base.jsonl` file contains all ASD-STE100 grammar checking constants in a portable JSONL (JSON Lines) format. Each line is a JSON object representing one constant with metadata about its rule references and data type.
 
 ### Benefits
 
@@ -17,7 +17,7 @@ The `constants.jsonl` file contains all ASD-STE100 grammar checking constants in
 
 ## JSONL Schema
 
-Each line in `constants.jsonl` is a JSON object with this structure:
+Each line in `asd-ste100_base.jsonl` is a JSON object with this structure:
 
 ```json
 {
@@ -126,7 +126,7 @@ from constants_loader import ConstantsLoader
 
 # Load base configuration
 loader = ConstantsLoader()
-loader.load('constants.jsonl')
+loader.load('asd-ste100_base.jsonl')
 
 # Load override configuration
 override = ConstantsLoader()
@@ -142,8 +142,21 @@ non_approved = loader.get('words', 'NON_APPROVED_WORDS')
 ### Merge Behavior
 
 - **Mapping types**: Keys from override update keys from base (deep merge)
+- **Mapping removal**: Values equal to `"__REMOVE__"` delete the key from base
 - **Collection types**: Values from override replace values from base
 - **New entries**: Entries in override that don't exist in base are added
+
+### Removing Entries from Base
+
+To remove a key from a mapping in the base configuration, set its value
+to `"__REMOVE__"` in the override:
+
+```json
+{"namespace":"words","name":"NON_APPROVED_WORDS","rules":["Company Policy"],"type":"mapping","data":{"forbidden_word":"__REMOVE__"}}
+```
+
+This is useful when a company vocabulary needs to allow a word that the
+base ASD-STE100 configuration marks as forbidden.
 
 ### Example Override File
 
@@ -169,10 +182,10 @@ from constants_loader import ConstantsLoader
 loader = ConstantsLoader()
 
 # Load all constants
-loader.load('constants.jsonl')
+loader.load('asd-ste100_base.jsonl')
 
 # Load only specific namespaces
-loader.load('constants.jsonl', namespace_filter=['words', 'verbs'])
+loader.load('asd-ste100_base.jsonl', namespace_filter=['words', 'verbs'])
 ```
 
 ### Accessing Constants
@@ -198,7 +211,7 @@ const_type = loader.get_type('words', 'NON_APPROVED_WORDS')
 ```python
 # Create two loaders
 loader1 = ConstantsLoader()
-loader1.load('constants.jsonl')
+loader1.load('asd-ste100_base.jsonl')
 
 loader2 = ConstantsLoader()
 loader2.load('company_glossary.jsonl')
@@ -228,7 +241,7 @@ The `constants.py` file can be kept as a wrapper that loads from JSONL for backw
 from constants_loader import ConstantsLoader
 
 _loader = ConstantsLoader()
-_loader.load('constants.jsonl')
+_loader.load('asd-ste100_base.jsonl')
 
 # Re-export all constants for backward compatibility
 NON_APPROVED_WORDS = _loader.get('words', 'NON_APPROVED_WORDS')
@@ -245,7 +258,7 @@ from constants_loader import ConstantsLoader
 
 # Load base constants
 loader = ConstantsLoader()
-loader.load('constants.jsonl')
+loader.load('asd-ste100_base.jsonl')
 
 # Load company-specific overrides
 loader.merge(ConstantsLoader().load('company_glossary.jsonl'))
@@ -262,7 +275,7 @@ def check_non_approved_words(doc):
 
 ## Files
 
-- `constants.jsonl` - Base constants (39 entries, 10 namespaces)
+- `asd-ste100_base.jsonl` - Base constants (39 entries, 10 namespaces)
 - `constants_loader.py` - Python loader with cardinality support
 - `company_glossary.jsonl` - Example override file
 - `CONSTANTS_JSONL.md` - This documentation

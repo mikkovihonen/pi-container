@@ -2,7 +2,7 @@
 """
 ASD-STE100 constants and configuration for spaCy-based grammar checking.
 
-This module loads constants from constants.jsonl and re-exports them for
+This module loads constants from asd-ste100_base.jsonl and re-exports them for
 backward compatibility with existing imports.
 
 Constants are organized by ASD-STE100 rule category:
@@ -23,7 +23,7 @@ in the data-driven pattern matching approach.
 For advanced usage with namespaces and cardinality, use constants_loader directly:
     from constants_loader import ConstantsLoader
     loader = ConstantsLoader()
-    loader.load('constants.jsonl')
+    loader.load('asd-ste100_base.jsonl')
     loader.load('company_glossary.jsonl')  # Override
 """
 import os
@@ -31,9 +31,9 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
 
-# Path to constants.jsonl
+# Path to asd-ste100_base.jsonl
 _CONSTANTS_DIR = Path(__file__).parent
-_CONSTANTS_FILE = _CONSTANTS_DIR / 'constants.jsonl'
+_CONSTANTS_FILE = _CONSTANTS_DIR / 'asd-ste100_base.jsonl'
 
 # Namespace mapping for constants
 _NAMESPACE_MAP = {
@@ -80,11 +80,11 @@ _NAMESPACE_MAP = {
 
 
 def _load_constants() -> Dict[str, Any]:
-    """Load all constants from constants.jsonl."""
+    """Load all constants from asd-ste100_base.jsonl."""
     constants = {}
     
     if not _CONSTANTS_FILE.exists():
-        raise FileNotFoundError(f"constants.jsonl not found at {_CONSTANTS_FILE}")
+        raise FileNotFoundError(f"asd-ste100_base.jsonl not found at {_CONSTANTS_FILE}")
     
     with open(_CONSTANTS_FILE, 'r', encoding='utf-8') as f:
         for line in f:
@@ -181,7 +181,7 @@ def get_all_constants() -> Dict[str, Any]:
 
 def reload_constants():
     """
-    Reload constants from constants.jsonl.
+    Reload constants from asd-ste100_base.jsonl.
     
     This is useful after modifying the JSONL file or loading overrides.
     """

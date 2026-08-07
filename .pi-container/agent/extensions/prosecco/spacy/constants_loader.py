@@ -9,7 +9,7 @@ Loads constants from JSONL files with support for:
 - Multiple configuration files
 
 Example usage:
-    loader = ConstantsLoader('constants.jsonl')
+    loader = ConstantsLoader('asd-ste100_base.jsonl')
     loader.load('company_glossary.jsonl')  # Override with company config
     
     # Get a specific constant
@@ -275,12 +275,14 @@ def load_constants(path: str, namespace_filter: Optional[List[str]] = None) -> C
     Convenience function to load constants from a file.
     
     Args:
-        path: Path to the JSONL file
+        path: Path to the JSONL file (default: 'asd-ste100_base.jsonl')
         namespace_filter: Optional list of namespaces to load
         
     Returns:
         Loaded ConstantsLoader instance
     """
+    if not path:
+        path = 'asd-ste100_base.jsonl'
     loader = ConstantsLoader()
     loader.load(path, namespace_filter)
     return loader
