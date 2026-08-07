@@ -79,35 +79,24 @@ def check_ambiguous_with(doc):
     word that shows 'association or relationship,' 'help or sharing,' or 'a means 
     or instrument.' In some sentences, this word can cause ambiguity.
     
-    This function detects common patterns where 'with' causes ambiguity.
+    Uses spaCy dependency parsing to find 'with' as a preposition and checks
+    if it follows verbs that could create ambiguity.
     """
     issues = []
     seen = set()
     
-    # Common patterns where 'with' causes ambiguity
-    patterns = [
-        # "with" followed by noun that could be instrument or association
-        (r'(install|attach|connect|put|set)\s+.*\s+with\s+(\w+\s+\w+)', 
-         "Check for ambiguity. 'with' can mean 'association', 'help', or 'instrument'."),
-        # "with" followed by noun that could be instrument or condition
-        (r'(operate|use|run|test)\s+.*\s+with\s+(\w+\s+\w+)', 
-         "Check for ambiguity. 'with' can mean 'association', 'help', or 'instrument'."),
-        # "with" followed by noun that could be instrument or condition
-        (r'(make sure|verify|check|test)\s+.*\s+with\s+(\w+\s+\w+)', 
-         "Check for ambiguity. 'with' can mean 'association', 'help', or 'instrument'."),
-    ]
-    
-    text = doc.text
-    for pattern, message in patterns:
-        matches = list(re.finditer(pattern, text, re.IGNORECASE))
-        for match in matches:
-            if match.start() not in seen:
-                seen.add(match.start())
+    for token in doc:
+        # Find 'with' as a preposition
+        if token.text.lower() == "with" and token.pos_ == "ADP":
+            # Check if it follows a verb (potential ambiguity)
+            head = token.head
+            if head.pos_ == "VERB" and head.idx not in seen:
+                seen.add(head.idx)
                 issues.append({
                     "type": "AmbiguousWith",
-                    "message": message,
-                    "offset": match.start(),
-                    "length": len(match.group(0)),
+                    "message": f"Check for ambiguity. '{head.text} with' can mean 'association', 'help', or 'instrument'.",
+                    "offset": token.idx,
+                    "length": len(token.text),
                 })
     
     return issues
@@ -126,36 +115,35 @@ def check_ambiguous_pronouns(doc):
     in a sentence. If there is ambiguity, replace the pronoun with the word that 
     it refers to.
     
-    This function detects common patterns where pronouns cause ambiguity.
+    Uses spaCy noun_chunks to detect pronouns that may refer to multiple nouns.
     """
     issues = []
     seen = set()
     
-    # Common patterns where pronouns cause ambiguity
-    patterns = [
-        # "they" could refer to multiple nouns
-        (r'(pins|bolts|nuts|washers|seals|valves|switches|buttons|indicators|gauges|tools|equipment)\s+.*\s+they\s+can\s+', 
-         "Replace 'they' with the specific noun it refers to."),
-        # "it" could refer to multiple nouns
-        (r'(cover|panel|unit|system|component|part|assembly|device|instrument|tool|equipment)\s+.*\s+it\s+can\s+', 
-         "Replace 'it' with the specific noun it refers to."),
-        # "this" could refer to multiple nouns
-        (r'(cover|panel|unit|system|component|part|assembly|device|instrument|tool|equipment)\s+.*\s+this\s+can\s+', 
-         "Replace 'this' with the specific noun it refers to."),
-    ]
+    # Common ambiguous pronouns
+    ambiguous_pronouns = {"it", "they", "this", "that", "these", "those", "them", "its"}
     
-    text = doc.text
-    for pattern, message in patterns:
-        matches = list(re.finditer(pattern, text, re.IGNORECASE))
-        for match in matches:
-            if match.start() not in seen:
-                seen.add(match.start())
-                issues.append({
-                    "type": "AmbiguousPronouns",
-                    "message": message,
-                    "offset": match.start(),
-                    "length": len(match.group(0)),
-                })
+    # Get all noun chunks in the document
+    noun_chunks = list(doc.noun_chunks)
+    
+    for token in doc:
+        # Find pronouns
+        if token.pos_ == "PRON" and token.text.lower() in ambiguous_pronouns:
+            if token.idx not in seen:
+                seen.add(token.idx)
+                
+                # Check if multiple noun chunks could be the antecedent
+                # (simplified check: if there are multiple chunks in the same sentence)
+                token_sent = token.sent
+                chunks_in_sent = [c for c in noun_chunks if c.start_char >= token_sent.start_char and c.end_char < token_sent.end_char]
+                
+                if len(chunks_in_sent) > 1:
+                    issues.append({
+                        "type": "AmbiguousPronouns",
+                        "message": f"Replace '{token.text}' with the specific noun it refers to.",
+                        "offset": token.idx,
+                        "length": len(token.text),
+                    })
     
     return issues
 
@@ -169,39 +157,25 @@ def check_ambiguous_this(doc):
     knows the item the pronoun refers to. If 'this' can refer to more than one 
     item, give the applicable context again.
     
-    This function detects common patterns where 'this' causes ambiguity.
+    Uses spaCy to detect 'this' as a determiner or pronoun that may be ambiguous.
     """
     issues = []
     seen = set()
     
-    # Common patterns where 'this' causes ambiguity
-    patterns = [
-        # "this" followed by "can cause" or "may cause"
-        (r'this\s+can\s+cause', 
-         "Replace 'this' with the specific noun it refers to."),
-        (r'this\s+may\s+cause', 
-         "Replace 'this' with the specific noun it refers to."),
-        (r'this\s+will\s+cause', 
-         "Replace 'this' with the specific noun it refers to."),
-        # "this" followed by "is" or "are"
-        (r'this\s+is', 
-         "Replace 'this' with the specific noun it refers to."),
-        (r'this\s+are', 
-         "Replace 'this' with the specific noun it refers to."),
-    ]
-    
-    text = doc.text
-    for pattern, message in patterns:
-        matches = list(re.finditer(pattern, text, re.IGNORECASE))
-        for match in matches:
-            if match.start() not in seen:
-                seen.add(match.start())
-                issues.append({
-                    "type": "AmbiguousThis",
-                    "message": message,
-                    "offset": match.start(),
-                    "length": len(match.group(0)),
-                })
+    for token in doc:
+        # Find 'this' as a determiner or pronoun
+        if token.text.lower() == "this" and token.pos_ in ("DET", "PRON"):
+            if token.idx not in seen:
+                seen.add(token.idx)
+                
+                # Check if followed by a verb (potential ambiguity)
+                if token.head.pos_ == "VERB" or token.dep_ in ("nsubj", "dobj"):
+                    issues.append({
+                        "type": "AmbiguousThis",
+                        "message": f"Replace 'this' with the specific noun it refers to.",
+                        "offset": token.idx,
+                        "length": len(token.text),
+                    })
     
     return issues
 
@@ -275,17 +249,33 @@ def check_gender_pronouns(doc):
     with gender-neutral language requirements. When you write in STE, make sure that
     you always use gender-neutral language. Gender-specific pronouns, for example
     'he' or 'she' are not permitted in STE."
+    
+    Uses spaCy pronoun detection with gender features.
     """
     issues = []
     seen = set()
     
     for token in doc:
-        if token.text.lower() in GENDER_PRONOUNS:
-            # Check if it's being used as a pronoun (not as part of a compound noun)
-            if token.pos_ in ("PRON", "NOUN"):
+        # Check if token is a personal pronoun with gender features
+        if token.pos_ == "PRON" and token.tag_ in ("PRP", "PRP$"):
+            # Check morphological features for gender
+            morph = token.morph
+            if "Gender=Masc" in morph or "Gender=Fem" in morph:
                 if token.idx not in seen:
                     seen.add(token.idx)
-                    replacement = GENDER_PRONOUNS[token.text.lower()]
+                    # Get recommended replacement from glossary
+                    word_lower = token.text.lower()
+                    if word_lower in GENDER_PRONOUNS:
+                        replacement = GENDER_PRONOUNS[word_lower]
+                    else:
+                        # Default gender-neutral replacements
+                        if "Masc" in morph:
+                            replacement = "they"
+                        elif "Fem" in morph:
+                            replacement = "they"
+                        else:
+                            replacement = "they"
+                    
                     issues.append({
                         "type": "GenderPronouns",
                         "message": f"Do not use gender-specific pronoun '{token.text}'. Use '{replacement}' instead.",
