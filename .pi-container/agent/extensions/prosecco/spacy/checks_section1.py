@@ -34,7 +34,7 @@ Rule 1.14: Use American English spelling unless other official directives tell y
 """
 import re
 import spacy
-from constants import (
+from glossary import (
     TECHNICAL_NOUNS_NOT_AS_VERBS,
     TECHNICAL_VERBS_NOT_AS_NOUNS,
     REGIONAL_SLANG_JARGON,

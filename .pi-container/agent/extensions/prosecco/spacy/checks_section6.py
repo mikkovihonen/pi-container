@@ -18,7 +18,7 @@ Rule 6.6: Make sure that no paragraph has more than six sentences.
 """
 import re
 import spacy
-from constants import COMMON_DETERMINERS
+from glossary import COMMON_DETERMINERS
 
 
 def check_information_structure(doc):

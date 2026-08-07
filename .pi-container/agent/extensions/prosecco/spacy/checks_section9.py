@@ -15,7 +15,7 @@ Consistent style
 Rule 9.4: When you select terminology or wording, always use a consistent style.
 """
 import spacy
-from constants import (
+from glossary import (
     PHRASAL_VERBS, 
     CONSISTENT_STYLE_PATTERNS,
     RESTRICTED_VERB_PHRASES,
@@ -133,9 +133,9 @@ def check_word_usage(doc):
     - token.morph for morphological features
     - Dependency parsing to verify word relationships
     
-    Data-driven approach using RESTRICTED_WORD_USAGE from constants.py
+    Data-driven approach using RESTRICTED_WORD_USAGE from glossary.py
     """
-    from constants import RESTRICTED_WORD_USAGE
+    from glossary import RESTRICTED_WORD_USAGE
     
     issues = []
     seen = set()
@@ -425,7 +425,7 @@ def check_non_approved_words(doc):
     - token.pos_ for part-of-speech tagging
     - token.idx for accurate offset calculation
     """
-    from constants import NON_APPROVED_WORDS
+    from glossary import NON_APPROVED_WORDS
     
     issues = []
     seen = set()

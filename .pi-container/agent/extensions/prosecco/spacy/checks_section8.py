@@ -23,7 +23,7 @@ Rule 8.7: Hyphenated words count as one word.
 """
 import re
 import spacy
-from constants import (
+from glossary import (
     FORBIDDEN_PUNCTUATION, 
     COMMON_UNITS, 
     COMMON_ABBREVIATIONS, 

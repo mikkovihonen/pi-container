@@ -17,7 +17,7 @@ Rule 7.3: Give an explanation to show the risk or possible result.
 """
 import re
 import spacy
-from constants import SAFETY_KEYWORDS, HIGH_RISK_SAFETY_KEYWORDS, RISK_INDICATORS
+from glossary import SAFETY_KEYWORDS, HIGH_RISK_SAFETY_KEYWORDS, RISK_INDICATORS
 from shared import _get_paragraph_index
 
 

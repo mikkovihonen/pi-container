@@ -19,7 +19,7 @@ Rule 5.5: Write notes only to give information, not instructions.
 """
 import re
 import spacy
-from constants import CONDITIONAL_WORDS, IMPERATIVE_VERB_LEMMAS
+from glossary import CONDITIONAL_WORDS, IMPERATIVE_VERB_LEMMAS
 
 
 def check_sentence_length_procedural(doc):

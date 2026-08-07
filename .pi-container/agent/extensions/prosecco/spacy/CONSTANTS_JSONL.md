@@ -232,12 +232,12 @@ constants = loader.get_constants_in_namespace('words')
 # Returns: ['COMMON_COMPOUND_NOUNS', 'NON_APPROVED_WORDS', ...]
 ```
 
-## Migration from constants.py
+## Migration from glossary.py
 
-The `constants.py` file can be kept as a wrapper that loads from JSONL for backward compatibility:
+The `glossary.py` file can be kept as a wrapper that loads from JSONL for backward compatibility:
 
 ```python
-# constants.py (wrapper)
+# glossary.py (wrapper)
 from constants_loader import ConstantsLoader
 
 _loader = ConstantsLoader()
@@ -276,6 +276,6 @@ def check_non_approved_words(doc):
 ## Files
 
 - `asd-ste100_base.jsonl` - Base constants (39 entries, 10 namespaces)
-- `constants_loader.py` - Python loader with cardinality support
+- `glossary_loader.py` - Python loader with cardinality support
 - `company_glossary.jsonl` - Example override file
 - `CONSTANTS_JSONL.md` - This documentation

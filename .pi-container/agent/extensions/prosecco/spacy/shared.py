@@ -435,7 +435,7 @@ def _is_allowed_parentheses_context(content, doc, offset):
     Returns:
         bool: True if parentheses usage is allowed
     """
-    from constants import COMMON_UNITS, COMMON_ABBREVIATIONS, EXPLANATION_WORDS
+    from glossary import COMMON_UNITS, COMMON_ABBREVIATIONS, EXPLANATION_WORDS
     
     # Parse the content with spaCy for semantic analysis
     content_doc = nlp(content)
@@ -523,7 +523,7 @@ def _count_sentence_words(text):
     Returns:
         int: Word count
     """
-    from constants import COMMON_UNITS
+    from glossary import COMMON_UNITS
     
     # Parse the text with spaCy
     sent_doc = nlp(text)
@@ -623,7 +623,7 @@ def _get_restricted_verb_replacement(phrase):
     Returns:
         str: Approved replacement, or None if no replacement found
     """
-    from constants import RESTRICTED_VERB_PHRASES
+    from glossary import RESTRICTED_VERB_PHRASES
     
     return RESTRICTED_VERB_PHRASES.get(phrase)
 

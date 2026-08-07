@@ -20,8 +20,8 @@ Constants are organized by ASD-STE100 rule category:
 All constants are imported by the check modules (checks_section*.py) and used
 in the data-driven pattern matching approach.
 
-For advanced usage with namespaces and cardinality, use constants_loader directly:
-    from constants_loader import ConstantsLoader
+For advanced usage with namespaces and cardinality, use glossary_loader directly:
+    from glossary_loader import ConstantsLoader
     loader = ConstantsLoader()
     loader.load('asd-ste100_base.jsonl')
     loader.load('company_glossary.jsonl')  # Override

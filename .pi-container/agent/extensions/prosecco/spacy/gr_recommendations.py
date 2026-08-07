@@ -29,7 +29,7 @@ GR-8: Possessive form
 The possessive form (also known as the Saxon genitive) adds an apostrophe and "s" to form the possessive. While permitted in STE, use it correctly. If not sure, do not use it.
 """
 import re
-from constants import FALSE_FRIENDS, LATIN_ABBREVIATIONS, GENDER_PRONOUNS
+from glossary import FALSE_FRIENDS, LATIN_ABBREVIATIONS, GENDER_PRONOUNS
 
 
 def check_conjunction_that(doc):

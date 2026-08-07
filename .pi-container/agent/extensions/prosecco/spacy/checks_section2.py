@@ -16,7 +16,7 @@ This module implements Rule 2.1 (multi-word noun length) and Rule 2.2
 """
 import re
 import spacy
-from constants import LONG_TECHNICAL_NOUN_PATTERNS
+from glossary import LONG_TECHNICAL_NOUN_PATTERNS
 
 
 def check_multi_word_nouns(doc):
@@ -108,7 +108,7 @@ def check_too_long_technical_nouns(doc):
         # Check if the chunk matches any known long technical noun patterns
         chunk_text = ' '.join(words)
         
-        # Use regex patterns from constants to match long technical nouns
+        # Use regex patterns from glossary to match long technical nouns
         for pattern, replacement in LONG_TECHNICAL_NOUN_PATTERNS:
             # Create a regex pattern that matches the chunk with word boundaries
             chunk_regex = r'(?i)\b' + r'\s+'.join(re.escape(w) for w in words) + r'\b'

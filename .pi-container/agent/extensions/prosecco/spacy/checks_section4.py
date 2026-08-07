@@ -19,7 +19,7 @@ Rule 4.5: When applicable, use an article (the, a, an) or a demonstrative adject
 """
 import re
 import spacy
-from constants import (
+from glossary import (
     CONTRACTIONS,
     FORBIDDEN_MODALS,
     CONNECTING_WORDS,

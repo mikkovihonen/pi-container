@@ -28,7 +28,7 @@ Rule 3.7: Use an approved verb to describe an action, not a noun or other
 """
 import re
 import spacy
-from constants import (
+from glossary import (
     BE_VERBS,
     APPROVED_ING_WORDS,
     PASSIVE_EXCEPTIONS,
