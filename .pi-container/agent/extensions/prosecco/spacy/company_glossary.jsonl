@@ -1,2 +1,3 @@
 {"namespace":"words","name":"NON_APPROVED_WORDS","rules":["Company Policy"],"type":"mapping","data":{"bollocks":"nonsense","bugger":"dammit"}}
 {"namespace":"general","name":"FALSE_FRIENDS","rules":["Company Policy"],"type":"mapping","data":{"actually":"currently","current":"present"}}
+{"namespace":"general","name":"GR_CONFIGURATION","rules":["Company Policy"],"type":"mapping","data":{"conjunction_that_patterns":[{"pattern":"make sure","replacement":"make sure that"},{"pattern":"show","replacement":"show that"},{"pattern":"confirm","replacement":"confirm that"}],"ambiguous_pronouns":["it","they"]}}

@@ -29,7 +29,7 @@ GR-8: Possessive form
 The possessive form (also known as the Saxon genitive) adds an apostrophe and "s" to form the possessive. While permitted in STE, use it correctly. If not sure, do not use it.
 """
 import re
-from glossary import FALSE_FRIENDS, LATIN_ABBREVIATIONS, GENDER_PRONOUNS
+from glossary import FALSE_FRIENDS, LATIN_ABBREVIATIONS, GENDER_PRONOUNS, GR_CONFIGURATION
 
 
 def check_conjunction_that(doc):
@@ -39,26 +39,21 @@ def check_conjunction_that(doc):
     
     Use the conjunction "that" after verbs like "make sure," "show," and "recommend"
     to prevent ambiguity.
+    
+    Configurable via GR_CONFIGURATION[conjunction_that_patterns].
     """
     issues = []
     text = doc.text
     
-    # Check for common patterns where "that" is missing
-    patterns = [
-        (r"make sure\s+(?!that\b)", "make sure that"),
-        (r"show\s+(?!that\b)", "show that"),
-        (r"recommend\s+(?!that\b)", "recommend that"),
-        (r"tell\s+(?!that\b)", "tell that"),
-        (r"state\s+(?!that\b)", "state that"),
-        (r"indicate\s+(?!that\b)", "indicate that"),
-        (r"confirm\s+(?!that\b)", "confirm that"),
-        (r"verify\s+(?!that\b)", "verify that"),
-        (r"explain\s+(?!that\b)", "explain that"),
-        (r"note\s+(?!that\b)", "note that"),
-    ]
+    # Load patterns from configuration
+    patterns = GR_CONFIGURATION.get('conjunction_that_patterns', [])
     
-    for pattern, replacement in patterns:
-        matches = list(re.finditer(pattern, text, re.IGNORECASE))
+    for pattern_config in patterns:
+        pattern = pattern_config['pattern']
+        replacement = pattern_config['replacement']
+        regex_pattern = rf"{re.escape(pattern)}\s+(?!that\b)"
+        
+        matches = list(re.finditer(regex_pattern, text, re.IGNORECASE))
         for match in matches:
             issues.append({
                 "type": "ConjunctionThat",
@@ -116,12 +111,13 @@ def check_ambiguous_pronouns(doc):
     it refers to.
     
     Uses spaCy noun_chunks to detect pronouns that may refer to multiple nouns.
+    Configurable via GR_CONFIGURATION[ambiguous_pronouns].
     """
     issues = []
     seen = set()
     
-    # Common ambiguous pronouns
-    ambiguous_pronouns = {"it", "they", "this", "that", "these", "those", "them", "its"}
+    # Load ambiguous pronouns from configuration
+    ambiguous_pronouns = set(GR_CONFIGURATION.get('ambiguous_pronouns', []))
     
     # Get all noun chunks in the document
     noun_chunks = list(doc.noun_chunks)
