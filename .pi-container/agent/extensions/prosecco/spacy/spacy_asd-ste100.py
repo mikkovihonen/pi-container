@@ -106,7 +106,7 @@ from checks_section9 import (
 )
 
 # Import check functions from General Recommendations
-from gr_recommendations import (
+from checks_gr_recommendations import (
     check_conjunction_that,
     check_ambiguous_with,
     check_ambiguous_pronouns,

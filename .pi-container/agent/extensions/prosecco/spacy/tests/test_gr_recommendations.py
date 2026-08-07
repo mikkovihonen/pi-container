@@ -2,7 +2,7 @@
 """Tests for General Recommendations (GR-1 to GR-8) checks."""
 import pytest
 import spacy
-from gr_recommendations import (
+from checks_gr_recommendations import (
     check_conjunction_that,
     check_ambiguous_with,
     check_ambiguous_pronouns,
