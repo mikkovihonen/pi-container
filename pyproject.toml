@@ -41,6 +41,7 @@ testpaths = [
     "src/tests",
     "pi-coding-agent-proxy/addons/allowlist/tests",
     "pi-coding-agent-proxy/addons/token_replacer/tests",
+    ".pi-container/agent/extensions/prosecco/spacy/tests",
 ]
 
 [tool.coverage.run]

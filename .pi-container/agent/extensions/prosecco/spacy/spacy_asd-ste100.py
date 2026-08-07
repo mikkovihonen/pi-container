@@ -59,7 +59,7 @@ from checks_section4 import (
 
 # Import check functions from Section 5 (Procedural writing)
 from checks_section5 import (
-    check_sentence_length_procedural as check_sentence_length_5,
+    check_sentence_length_procedural,
     check_multiple_instructions,
     check_non_imperative_in_procedures,
     check_descriptive_statement_first,
@@ -70,7 +70,7 @@ from checks_section5 import (
 from checks_section6 import (
     check_information_structure,
     check_key_words,
-    check_sentence_length_descriptive as check_sentence_length_6,
+    check_sentence_length_descriptive,
     check_paragraph_structure,
     check_paragraph_topic,
     check_paragraph_length,
@@ -155,11 +155,11 @@ def main():
     all_issues.extend(check_technical_verb_category(doc))
     all_issues.extend(check_technical_verb_as_noun(doc))
     all_issues.extend(check_british_english(doc))
-    
+
     # Section 2: Multi-word nouns
     all_issues.extend(check_multi_word_nouns(doc))
     all_issues.extend(check_technical_noun_clarity(doc))
-    
+
     # Section 3: Verbs
     all_issues.extend(check_verb_forms(doc))
     all_issues.extend(check_verb_tenses(doc))
@@ -168,7 +168,7 @@ def main():
     all_issues.extend(check_passive_voice_with_agent(doc))
     all_issues.extend(check_ing_forms(doc))
     all_issues.extend(check_noun_as_verb(doc))
-    
+
     # Section 4: Sentences
     all_issues.extend(check_short_sentences(doc))
     all_issues.extend(check_contractions(doc))
@@ -177,26 +177,26 @@ def main():
     all_issues.extend(check_connecting_words(doc))
     all_issues.extend(check_missing_articles(doc))
     all_issues.extend(check_article_usage(doc))
-    
+
     # Section 5: Procedural writing
-    all_issues.extend(check_sentence_length_5(doc))
+    all_issues.extend(check_sentence_length_procedural(doc))
     all_issues.extend(check_multiple_instructions(doc))
     all_issues.extend(check_non_imperative_in_procedures(doc))
     all_issues.extend(check_descriptive_statement_first(doc))
     all_issues.extend(check_notes(doc))
-    
+
     # Section 6: Descriptive writing
     all_issues.extend(check_information_structure(doc))
     all_issues.extend(check_key_words(doc))
-    all_issues.extend(check_sentence_length_6(doc))
+    all_issues.extend(check_sentence_length_descriptive(doc))
     all_issues.extend(check_paragraph_structure(doc))
     all_issues.extend(check_paragraph_topic(doc))
     all_issues.extend(check_paragraph_length(doc))
-    
+
     # Section 7: Safety instructions
     all_issues.extend(check_safety_instruction_format(doc))
     all_issues.extend(check_safety_instruction_explanation(doc))
-    
+
     # Section 8: Punctuation and word count
     all_issues.extend(check_semicolons(doc))
     all_issues.extend(check_hyphens(doc))
@@ -206,7 +206,7 @@ def main():
     all_issues.extend(check_hyphenation_patterns(doc))
     all_issues.extend(check_vertical_list_colons(doc))
     all_issues.extend(check_word_count_all(doc))
-    
+
     # Section 9: Writing practices
     all_issues.extend(check_word_usage(doc))
     all_issues.extend(check_consistent_style(doc))
@@ -215,7 +215,7 @@ def main():
     all_issues.extend(check_different_sentence_constructions(doc))
     all_issues.extend(check_word_for_word_replacement(doc))
     all_issues.extend(check_non_approved_words(doc))
-    
+
     # General Recommendations (GR-1 to GR-8)
     all_issues.extend(check_conjunction_that(doc))
     all_issues.extend(check_ambiguous_with(doc))

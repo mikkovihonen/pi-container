@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """Tests for General Recommendations (GR-1 to GR-8) checks."""
-import sys
-import os
-
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+import pytest
 import spacy
 from gr_recommendations import (
     check_conjunction_that,
@@ -18,89 +13,115 @@ from gr_recommendations import (
     check_possessive_form,
 )
 
-# Load spaCy model
-nlp = spacy.load("en_core_web_sm")
+@pytest.fixture
+def nlp_model():
+    """Load spaCy model once for all tests."""
+    return spacy.load("en_core_web_sm")
 
+class TestCheckConjunctionThat:
+    """Tests for check_conjunction_that function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("Make sure the filter is clean.")
+        issues = check_conjunction_that(doc)
+        assert isinstance(issues, list)
+    
+    def test_with_that(self, nlp_model):
+        """Test with 'that'."""
+        doc = nlp_model("Make sure that the filter is clean.")
+        issues = check_conjunction_that(doc)
+        assert isinstance(issues, list)
 
-def test_check_conjunction_that():
-    """Test check_conjunction_that validates conjunction 'that' usage."""
-    doc = nlp("Make sure the filter is clean.")
-    issues = check_conjunction_that(doc)
-    # Should detect missing "that" after "make sure"
-    assert isinstance(issues, list)
+class TestCheckAmbiguousWith:
+    """Tests for check_ambiguous_with function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("Check the filter with the wrench.")
+        issues = check_ambiguous_with(doc)
+        assert isinstance(issues, list)
 
+class TestCheckAmbiguousPronouns:
+    """Tests for check_ambiguous_pronouns function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("The filter is clean. It is dry.")
+        issues = check_ambiguous_pronouns(doc)
+        assert isinstance(issues, list)
+    
+    def test_clear_pronoun(self, nlp_model):
+        """Test with clear pronoun reference."""
+        doc = nlp_model("Check the filter. It is clean.")
+        issues = check_ambiguous_pronouns(doc)
+        assert isinstance(issues, list)
 
-def test_check_ambiguous_with():
-    """Test check_ambiguous_with detects ambiguous 'with' usage."""
-    doc = nlp("Check the filter with the wrench.")
-    issues = check_ambiguous_with(doc)
-    assert isinstance(issues, list)
+class TestCheckAmbiguousThis:
+    """Tests for check_ambiguous_this function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("The filter is clean. This is dry.")
+        issues = check_ambiguous_this(doc)
+        assert isinstance(issues, list)
 
+class TestCheckFalseFriends:
+    """Tests for check_false_friends function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("The actual temperature is high.")
+        issues = check_false_friends(doc)
+        assert isinstance(issues, list)
+    
+    def test_normal_text(self, nlp_model):
+        """Test with normal text."""
+        doc = nlp_model("The current temperature is high.")
+        issues = check_false_friends(doc)
+        assert isinstance(issues, list)
 
-def test_check_ambiguous_pronouns():
-    """Test check_ambiguous_pronouns detects ambiguous pronouns."""
-    doc = nlp("The filter is clean. It is dry.")
-    issues = check_ambiguous_pronouns(doc)
-    # Should detect ambiguous "It"
-    assert isinstance(issues, list)
+class TestCheckLatinAbbreviations:
+    """Tests for check_latin_abbreviations function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("See i.e. the filter for details.")
+        issues = check_latin_abbreviations(doc)
+        assert isinstance(issues, list)
+    
+    def test_normal_text(self, nlp_model):
+        """Test with normal text."""
+        doc = nlp_model("Check the filter for details.")
+        issues = check_latin_abbreviations(doc)
+        assert isinstance(issues, list)
 
+class TestCheckGenderPronouns:
+    """Tests for check_gender_pronouns function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("The operator he checks the filter.")
+        issues = check_gender_pronouns(doc)
+        assert isinstance(issues, list)
+    
+    def test_neutral_pronoun(self, nlp_model):
+        """Test with neutral pronoun."""
+        doc = nlp_model("The operator they check the filter.")
+        issues = check_gender_pronouns(doc)
+        assert isinstance(issues, list)
 
-def test_check_ambiguous_this():
-    """Test check_ambiguous_this detects ambiguous 'this' usage."""
-    doc = nlp("The filter is clean. This is dry.")
-    issues = check_ambiguous_this(doc)
-    # Should detect ambiguous "This"
-    assert isinstance(issues, list)
-
-
-def test_check_false_friends():
-    """Test check_false_friends detects false friends."""
-    doc = nlp("The actual temperature is high.")
-    issues = check_false_friends(doc)
-    # Should detect "actual" as false friend (meaning "current" not "real")
-    assert isinstance(issues, list)
-
-
-def test_check_latin_abbreviations():
-    """Test check_latin_abbreviations detects Latin abbreviations."""
-    doc = nlp("See i.e. the filter for details.")
-    issues = check_latin_abbreviations(doc)
-    # Should detect "i.e." as Latin abbreviation
-    assert isinstance(issues, list)
-
-
-def test_check_gender_pronouns():
-    """Test check_gender_pronouns detects gender-specific pronouns."""
-    doc = nlp("The operator he checks the filter.")
-    issues = check_gender_pronouns(doc)
-    # Should detect "he" as gender-specific pronoun
-    assert isinstance(issues, list)
-
-
-def test_check_possessive_form():
-    """Test check_possessive_form validates possessive form usage."""
-    doc = nlp("The filter's condition is good.")
-    issues = check_possessive_form(doc)
-    # Should detect possessive form "filter's"
-    assert isinstance(issues, list)
-
-
-if __name__ == "__main__":
-    print("Running GR Recommendations tests...")
-    test_check_conjunction_that()
-    print("✓ test_check_conjunction_that")
-    test_check_ambiguous_with()
-    print("✓ test_check_ambiguous_with")
-    test_check_ambiguous_pronouns()
-    print("✓ test_check_ambiguous_pronouns")
-    test_check_ambiguous_this()
-    print("✓ test_check_ambiguous_this")
-    test_check_false_friends()
-    print("✓ test_check_false_friends")
-    test_check_latin_abbreviations()
-    print("✓ test_check_latin_abbreviations")
-    test_check_gender_pronouns()
-    print("✓ test_check_gender_pronouns")
-    test_check_possessive_form()
-    print("✓ test_check_possessive_form")
-    print("\nAll GR Recommendations tests passed!")
+class TestCheckPossessiveForm:
+    """Tests for check_possessive_form function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("The filter's condition is good.")
+        issues = check_possessive_form(doc)
+        assert isinstance(issues, list)
+    
+    def test_normal_text(self, nlp_model):
+        """Test with normal text."""
+        doc = nlp_model("The condition of the filter is good.")
+        issues = check_possessive_form(doc)
+        assert isinstance(issues, list)

@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """Tests for Section 5 (Procedural writing) checks."""
-import sys
-import os
-
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+import pytest
 import spacy
 from checks_section5 import (
     check_sentence_length_procedural,
@@ -15,60 +10,82 @@ from checks_section5 import (
     check_notes,
 )
 
-# Load spaCy model
-nlp = spacy.load("en_core_web_sm")
+@pytest.fixture
+def nlp_model():
+    """Load spaCy model once for all tests."""
+    return spacy.load("en_core_web_sm")
 
+class TestCheckSentenceLengthProcedural:
+    """Tests for check_sentence_length_procedural function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("This is a very long sentence that exceeds the maximum allowed length for procedural writing.")
+        issues = check_sentence_length_procedural(doc)
+        assert isinstance(issues, list)
+    
+    def test_short_sentence(self, nlp_model):
+        """Test with short sentence."""
+        doc = nlp_model("Check the filter.")
+        issues = check_sentence_length_procedural(doc)
+        assert isinstance(issues, list)
 
-def test_check_sentence_length_procedural():
-    """Test check_sentence_length_procedural validates sentence length."""
-    doc = nlp("This is a very long sentence that exceeds the maximum allowed length for procedural writing.")
-    issues = check_sentence_length_procedural(doc)
-    # Should detect long sentence
-    assert isinstance(issues, list)
+class TestCheckMultipleInstructions:
+    """Tests for check_multiple_instructions function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("Check the filter and clean the pump.")
+        issues = check_multiple_instructions(doc)
+        assert isinstance(issues, list)
+    
+    def test_single_instruction(self, nlp_model):
+        """Test with single instruction."""
+        doc = nlp_model("Check the filter.")
+        issues = check_multiple_instructions(doc)
+        assert isinstance(issues, list)
 
+class TestCheckNonImperativeInProcedures:
+    """Tests for check_non_imperative_in_procedures function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("You must check the filter.")
+        issues = check_non_imperative_in_procedures(doc)
+        assert isinstance(issues, list)
+    
+    def test_imperative(self, nlp_model):
+        """Test with imperative form."""
+        doc = nlp_model("Check the filter.")
+        issues = check_non_imperative_in_procedures(doc)
+        assert isinstance(issues, list)
 
-def test_check_multiple_instructions():
-    """Test check_multiple_instructions detects multiple instructions."""
-    doc = nlp("Check the filter and clean the pump.")
-    issues = check_multiple_instructions(doc)
-    # Should detect multiple imperative instructions
-    assert isinstance(issues, list)
+class TestCheckDescriptiveStatementFirst:
+    """Tests for check_descriptive_statement_first function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("Check the filter if it is dirty.")
+        issues = check_descriptive_statement_first(doc)
+        assert isinstance(issues, list)
+    
+    def test_correct_order(self, nlp_model):
+        """Test with correct order."""
+        doc = nlp_model("If the filter is dirty, check it.")
+        issues = check_descriptive_statement_first(doc)
+        assert isinstance(issues, list)
 
-
-def test_check_non_imperative_in_procedures():
-    """Test check_non_imperative_in_procedures detects non-imperative form."""
-    doc = nlp("You must check the filter.")
-    issues = check_non_imperative_in_procedures(doc)
-    # Should detect non-imperative form
-    assert isinstance(issues, list)
-
-
-def test_check_descriptive_statement_first():
-    """Test check_descriptive_statement_first validates statement order."""
-    doc = nlp("Check the filter if it is dirty.")
-    issues = check_descriptive_statement_first(doc)
-    # Should detect condition after command
-    assert isinstance(issues, list)
-
-
-def test_check_notes():
-    """Test check_notes detects imperatives in notes."""
-    doc = nlp("Note: Clean the filter monthly.")
-    issues = check_notes(doc)
-    # Should detect imperative in note
-    assert isinstance(issues, list)
-
-
-if __name__ == "__main__":
-    print("Running Section 5 tests...")
-    test_check_sentence_length_procedural()
-    print("✓ test_check_sentence_length_procedural")
-    test_check_multiple_instructions()
-    print("✓ test_check_multiple_instructions")
-    test_check_non_imperative_in_procedures()
-    print("✓ test_check_non_imperative_in_procedures")
-    test_check_descriptive_statement_first()
-    print("✓ test_check_descriptive_statement_first")
-    test_check_notes()
-    print("✓ test_check_notes")
-    print("\nAll Section 5 tests passed!")
+class TestCheckNotes:
+    """Tests for check_notes function."""
+    
+    def test_returns_list(self, nlp_model):
+        """Test that function returns a list."""
+        doc = nlp_model("Note: Clean the filter monthly.")
+        issues = check_notes(doc)
+        assert isinstance(issues, list)
+    
+    def test_normal_note(self, nlp_model):
+        """Test with normal note."""
+        doc = nlp_model("Note: The filter is clean.")
+        issues = check_notes(doc)
+        assert isinstance(issues, list)
