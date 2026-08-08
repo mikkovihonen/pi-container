@@ -332,6 +332,35 @@ def _get_markdown_blocks(md: str) -> list[tuple[int, int, str]]:
     for m in horizontal_rule_pattern.finditer(md):
         blocks.append((m.start(), m.end(), "horizontal_rule"))
 
+    # Collect blockquote markers: > at start of line (including nested >>)
+    # Replace > with spaces, preserve text content.
+    blockquote_pattern = re.compile(r"^>{1,}[\t ]*", re.MULTILINE)
+    for m in blockquote_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "blockquote"))
+
+    # Collect list markers: -, *, or numbered (1.) at start of line
+    # Replace marker with spaces, preserve text content.
+    # List markers must be at start of line (with optional indentation),
+    # followed by the marker, followed by a space or end of line.
+    list_marker_pattern = re.compile(
+        r"^[\t ]*(?:[-*+]|[0-9]+\.)[\t ]",
+        re.MULTILINE,
+    )
+    for m in list_marker_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "list_marker"))
+
+    # Collect footnote references: [^1], [^123], etc.
+    # Replace with spaces, preserve surrounding text.
+    footnote_ref_pattern = re.compile(r"\[\^\d+\]")
+    for m in footnote_ref_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "footnote_ref"))
+
+    # Collect footnote definitions: [^1]: footnote text
+    # Replace [^1]: with spaces, preserve footnote text.
+    footnote_def_pattern = re.compile(r"^\[\^\d+\]:", re.MULTILINE)
+    for m in footnote_def_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "footnote_def"))
+
     # Collect Markdown headers: # heading text
     # Match from the first # to the end of the line.
     # Headers are kept visible but marked so the linter can add metadata.
@@ -498,6 +527,30 @@ def preprocess_markdown(
         elif btype == "horizontal_rule":
             # Replace horizontal rule with spaces to prevent markdown
             # characters from leaking into the cleaned output.
+            span_length = end - start
+            parts.append(" " * span_length)
+            for i in range(start, end):
+                offset_map[i] = i
+        elif btype == "blockquote":
+            # Replace blockquote marker with spaces, preserve text content.
+            span_length = end - start
+            parts.append(" " * span_length)
+            for i in range(start, end):
+                offset_map[i] = i
+        elif btype == "list_marker":
+            # Replace list marker with spaces, preserve text content.
+            span_length = end - start
+            parts.append(" " * span_length)
+            for i in range(start, end):
+                offset_map[i] = i
+        elif btype == "footnote_ref":
+            # Replace footnote reference with spaces, preserve surrounding text.
+            span_length = end - start
+            parts.append(" " * span_length)
+            for i in range(start, end):
+                offset_map[i] = i
+        elif btype == "footnote_def":
+            # Replace footnote definition marker with spaces, preserve text.
             span_length = end - start
             parts.append(" " * span_length)
             for i in range(start, end):

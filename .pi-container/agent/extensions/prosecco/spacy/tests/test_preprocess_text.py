@@ -984,7 +984,187 @@ class TestPreprocessHtmlTrivialCases:
         assert "after" in text
 
 
-class TestPreprocessMarkdownHorizontalRule:
+class TestPreprocessMarkdownFootnote:
+    """Test cases for footnote handling."""
+
+    def test_footnote_reference_replaced(self):
+        """Footnote reference should be replaced with spaces."""
+        md = "Text with[^1] reference"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # [^1] should be replaced with spaces
+        assert "[^1]" not in text
+        # Text content preserved
+        assert "Text with" in text
+        assert "reference" in text
+
+    def test_footnote_definition_marker_replaced(self):
+        """Footnote definition marker should be replaced with spaces."""
+        md = "[^1]: This is the footnote text"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # [^1]: should be replaced with spaces
+        assert "[^1]:" not in text
+        # Footnote text preserved
+        assert "This is the footnote text" in text
+
+    def test_multiple_footnote_references(self):
+        """Multiple footnote references in text."""
+        md = "Text[^1] and text[^2]"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # All footnote references replaced
+        assert "[^1]" not in text
+        assert "[^2]" not in text
+        # Text content preserved
+        assert "Text" in text
+        assert "and" in text
+
+    def test_footnote_with_inline_formatting(self):
+        """Footnote reference with inline formatting."""
+        md = "Text with[^1] **bold** reference"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Footnote reference replaced
+        assert "[^1]" not in text
+        # Bold markers replaced
+        assert "**" not in text
+        # Text content preserved
+        assert "Text with" in text
+        assert "bold" in text
+        assert "reference" in text
+
+    def test_footnote_with_numbers(self):
+        """Footnote with multi-digit numbers."""
+        md = "Text with[^123] reference"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Footnote reference replaced
+        assert "[^123]" not in text
+        # Text content preserved
+        assert "Text with" in text
+        assert "reference" in text
+    """Test cases for list handling."""
+
+    def test_dash_list_marker_replaced(self):
+        """Dash list marker should be replaced with spaces."""
+        md = "- Item one"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # - should be replaced with space
+        assert text[0] == " "
+        # Text content preserved
+        assert "Item one" in text
+
+    def test_star_list_marker_replaced(self):
+        """Star list marker should be replaced with spaces."""
+        md = "* Item one"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # * should be replaced with space
+        assert text[0] == " "
+        # Text content preserved
+        assert "Item one" in text
+
+    def test_numbered_list_marker_replaced(self):
+        """Numbered list marker should be replaced with spaces."""
+        md = "1. Item one"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # 1. should be replaced with spaces
+        assert text[0:2] == "  "
+        # Text content preserved
+        assert "Item one" in text
+
+    def test_nested_list(self):
+        """Nested list with indentation."""
+        md = "- Outer\n  - Inner"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Both markers replaced
+        assert text[0] == " "
+        assert text[8] == " "
+        # Text content preserved
+        assert "Outer" in text
+        assert "Inner" in text
+
+    def test_list_with_inline_formatting(self):
+        """List containing inline formatting."""
+        md = "- Use `code` here"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # List marker replaced
+        assert text[0] == " "
+        # Inline code normalized
+        assert "`" not in text
+        # Text content preserved
+        assert "Use" in text
+        assert "code" in text
+        assert "here" in text
+
+    def test_list_preserves_italic_star(self):
+        """Star used for italic should not be treated as list marker."""
+        md = "This is *italic* text"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Text content preserved
+        assert "italic" in text
+        # Star markers replaced (as italic, not list)
+        assert "*" not in text
+    """Test cases for blockquote handling."""
+
+    def test_blockquote_marker_replaced(self):
+        """Blockquote marker should be replaced with spaces."""
+        md = "> This is a quote"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # > should be replaced with space
+        assert text[0] == " "
+        # Text content preserved
+        assert "This is a quote" in text
+
+    def test_blockquote_with_space(self):
+        """Blockquote with space after marker."""
+        md = "> This is a quote"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # > and space replaced with spaces
+        assert text[0:2] == "  "
+        # Text content preserved
+        assert "This is a quote" in text
+
+    def test_nested_blockquote(self):
+        """Nested blockquote (>>)."""
+        md = ">> Nested quote"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Both > replaced with spaces
+        assert text[0:2] == "  "
+        # Text content preserved
+        assert "Nested quote" in text
+
+    def test_multiple_blockquotes(self):
+        """Multiple blockquotes in document."""
+        md = "> First quote\n\n> Second quote"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Text content preserved
+        assert "First quote" in text
+        assert "Second quote" in text
+
+    def test_blockquote_with_inline_formatting(self):
+        """Blockquote containing inline formatting."""
+        md = "> This is **bold** text"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Blockquote marker replaced
+        assert text[0] == " "
+        # Bold markers replaced
+        assert "**" not in text
+        # Text content preserved
+        assert "This is" in text
+        assert "bold" in text
+        assert "text" in text
     """Test cases for horizontal rule handling."""
 
     def test_horizontal_rule_dashes_replaced(self):
