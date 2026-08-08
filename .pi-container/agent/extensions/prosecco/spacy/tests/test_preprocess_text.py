@@ -984,7 +984,96 @@ class TestPreprocessHtmlTrivialCases:
         assert "after" in text
 
 
-class TestPreprocessMarkdownMath:
+class TestPreprocessMarkdownEmbedded:
+    """Test cases for embedded content handling."""
+
+    def test_iframe_replaced(self):
+        """Iframe tag should be replaced with spaces."""
+        md = "<iframe src='https://example.com'></iframe>"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Iframe tags replaced
+        assert "<iframe" not in text
+        assert "</iframe>" not in text
+
+    def test_video_tag_replaced(self):
+        """Video tag should be replaced with spaces."""
+        md = "<video src='movie.mp4'></video>"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Video tags replaced
+        assert "<video" not in text
+        assert "</video>" not in text
+
+    def test_audio_tag_replaced(self):
+        """Audio tag should be replaced with spaces."""
+        md = "<audio src='song.mp3'></audio>"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Audio tags replaced
+        assert "<audio" not in text
+        assert "</audio>" not in text
+
+    def test_embedded_with_text(self):
+        """Embedded content with surrounding text."""
+        md = "See <iframe src='https://example.com'></iframe> here"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Iframe replaced
+        assert "<iframe" not in text
+        # Text preserved
+        assert "See" in text
+        assert "here" in text
+
+    def test_multiple_embedded_elements(self):
+        """Multiple embedded elements."""
+        md = "<video src='a.mp4'></video> and <audio src='b.mp3'></audio>"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # All tags replaced
+        assert "<video" not in text
+        assert "<audio" not in text
+    """Test cases for Mermaid diagram handling."""
+
+    def test_mermaid_block_replaced(self):
+        """Mermaid diagram block should be replaced with spaces."""
+        md = "```mermaid\ngraph TD\n    A-->B\n```"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Mermaid content replaced with spaces
+        assert "graph" not in text
+        assert "TD" not in text
+        # Fences replaced
+        assert "```" not in text
+
+    def test_mermaid_with_other_content(self):
+        """Mermaid block with other content."""
+        md = "Text before\n\n```mermaid\ngraph TD\n```\n\nText after"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Text before and after preserved
+        assert "Text before" in text
+        assert "Text after" in text
+        # Mermaid content replaced
+        assert "graph" not in text
+
+    def test_mermaid_complex_diagram(self):
+        """Mermaid with complex diagram syntax."""
+        md = "```mermaid\nsequenceDiagram\n    participant A\n    participant B\n```"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # All mermaid content replaced
+        assert "sequenceDiagram" not in text
+        assert "participant" not in text
+
+    def test_multiple_mermaid_blocks(self):
+        """Multiple Mermaid blocks."""
+        md = "```mermaid\ngraph TD\n```\n\n```mermaid\nsequenceDiagram\n```"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # All mermaid content replaced
+        assert "graph" not in text
+        assert "sequenceDiagram" not in text
     """Test cases for Math/LaTeX handling."""
 
     def test_inline_math_replaced(self):
