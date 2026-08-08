@@ -92,13 +92,16 @@ class TestPreprocessMarkdown:
         assert "Hello World" in text
         assert "Some text." in text
 
-    def test_inline_code_removed(self):
-        """Inline code spans are replaced with whitespace."""
+    def test_inline_code_replaced_with_noun(self):
+        """Inline code spans are replaced with a noun token."""
         md = "Use `code` here."
         text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "code" not in text
-        assert "`code`" not in text
+        # Backticks are replaced with spaces
+        assert "`" not in text
+        # Code content is replaced with a noun token (letters only)
+        # The token should be present in the text
+        assert "code" in text
         assert "Use " in text
         assert " here." in text
 
@@ -357,7 +360,8 @@ class TestPreprocessMarkdownCornerCases:
         md = "Use `code` and [link](url) and ![img](pic.png) together."
         text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "code" not in text
+        # Code is replaced with a noun token
+        assert "code" in text
         # Link text is preserved, URL is replaced.
         assert "link" in text
         assert "url" not in text
@@ -733,8 +737,11 @@ class TestPreprocessMarkdownAdvancedCornerCases:
         md = "Use `alert('XSS')` carefully."
         text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "alert" not in text
-        assert "XSS" not in text
+        # Special characters are removed, only letters remain
+        assert "alert" in text
+        assert "XSS" in text
+        # Backticks are replaced with spaces
+        assert "`" not in text
 
     def test_link_with_fragment(self):
         """Handle links with fragment identifiers."""
@@ -775,8 +782,11 @@ class TestPreprocessMarkdownAdvancedCornerCases:
         md = "`single` and ``double`` code"
         text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "single" not in text
-        assert "double" not in text
+        # Code content is replaced with noun tokens
+        assert "single" in text
+        assert "double" in text
+        # Backticks are replaced with spaces
+        assert "`" not in text
 
 
 class TestPreprocessHtmlTrivialCases:
@@ -1197,7 +1207,10 @@ Read **[Getting Started](docs/getting-started.md)** for details.
         md = "`code`"
         text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "code" not in text
+        # Code content is replaced with a noun token
+        assert "code" in text
+        # Backticks are replaced with spaces
+        assert "`" not in text
 
     def test_just_link(self):
         """Handle just a link."""
@@ -1319,9 +1332,12 @@ Read **[Getting Started](docs/getting-started.md)** for details.
         md = "`a` `b` `c`"
         text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "a" not in text
-        assert "b" not in text
-        assert "c" not in text
+        # Code content is replaced with noun tokens
+        assert "a" in text
+        assert "b" in text
+        assert "c" in text
+        # Backticks are replaced with spaces
+        assert "`" not in text
 
     def test_empty_string_already_tested(self):
         """Verify empty string behavior (already tested elsewhere)."""
@@ -1350,7 +1366,10 @@ Read **[Getting Started](docs/getting-started.md)** for details.
         md = "`a`"
         text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        assert "a" not in text
+        # Code content is replaced with a noun token
+        assert "a" in text
+        # Backticks are replaced with spaces
+        assert "`" not in text
 
     def test_link_with_single_char_text(self):
         """Handle link with single character text."""

@@ -360,6 +360,8 @@ def preprocess_markdown(
     last_end = 0
     # Track link text regions separately so the linter can suppress errors.
     link_text_regions: list[tuple[int, int]] = []
+    # Track code-as-noun regions to add after the loop (avoid modifying merged during iteration).
+    code_as_noun_regions: list[tuple[int, int]] = []
 
     for start, end, btype in merged:
         # Text before this block.
@@ -389,6 +391,37 @@ def preprocess_markdown(
             parts.append(" " * span_length)
             for i in range(start, end):
                 offset_map[i] = i
+        elif btype == "code_inline":
+            # Extract content from inline code span and normalize to a noun token.
+            # Replace backticks with spaces and code content with a letter-only
+            # word so the grammar linter sees a noun. Mark region as "code-as-noun"
+            # for metadata suppression.
+            code_content = md[start:end]
+            # Strip backticks to get the actual code content
+            code_content_stripped = code_content.strip("`")
+            # Normalize to letters only (remove digits, hyphens, etc.)
+            normalized = re.sub(r"[^a-zA-Z]", "", code_content_stripped)
+            # If no letters remain, use a placeholder
+            if not normalized:
+                normalized = "code"
+            # Calculate the number of non-backtick characters
+            non_backtick_count = len(code_content) - code_content.count("`")
+            # Use the normalized word, repeated to fill the space if needed
+            token = (normalized * ((non_backtick_count // len(normalized)) + 1))[:non_backtick_count]
+            # Replace entire code_inline region (backticks become spaces,
+            # code content becomes the token)
+            token_idx = 0
+            for i, ch in enumerate(code_content):
+                offset_map[start + i] = start + i
+                if ch == "`":
+                    # Replace backticks with spaces
+                    parts.append(" ")
+                else:
+                    # Replace code content with token characters
+                    parts.append(token[token_idx])
+                    token_idx += 1
+            # Track region with type "code-as-noun" (added after loop)
+            code_as_noun_regions.append((start, end))
         elif btype == "table_delimiter":
             # Replace only the | delimiter with a space.
             parts.append(" ")
@@ -445,6 +478,10 @@ def preprocess_markdown(
     # linter can suppress errors on visible link text.
     for start, end in link_text_regions:
         merged.append((start, end, "link"))
+    
+    # Add code-as-noun regions to the regions list.
+    for start, end in code_as_noun_regions:
+        merged.append((start, end, "code-as-noun"))
 
     return cleaned_text, offset_map, merged
 
