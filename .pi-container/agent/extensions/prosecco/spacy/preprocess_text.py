@@ -185,6 +185,35 @@ def preprocess_html(
     return cleaned_text, offset_map
 
 
+def _collect_emphasis_markers(md: str, blocks: list[tuple[int, int, str]]) -> None:
+    """Collect bold, italic, and strikethrough markers in the markdown text.
+
+    This function identifies emphasis markers and adds them to the blocks list
+    with appropriate types. The markers are:
+    - Bold: ** (double asterisk)
+    - Italic: * (single asterisk, not part of bold)
+    - Strikethrough: ~~ (double tilde)
+
+    Args:
+        md: The markdown text to process.
+        blocks: List to append detected markers to.
+    """
+    # Bold: ** (double asterisk)
+    bold_pattern = re.compile(r"\*\*")
+    for m in bold_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "bold_marker"))
+
+    # Italic: * (single asterisk, not part of bold)
+    italic_pattern = re.compile(r"(?<!\*)\*(?!\*)")
+    for m in italic_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "italic_marker"))
+
+    # Strikethrough: ~~ (double tilde)
+    strikethrough_pattern = re.compile(r"~~")
+    for m in strikethrough_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "strikethrough"))
+
+
 def _get_markdown_blocks(md: str) -> list[tuple[int, int, str]]:
     """Use markdown-it-py to identify non-text blocks in Markdown.
 
@@ -206,17 +235,12 @@ def _get_markdown_blocks(md: str) -> list[tuple[int, int, str]]:
 
     blocks: list[tuple[int, int, str]] = []
 
-    # Collect bold and italic markers.
-    # Replace ** and * characters with spaces to remove markdown formatting
-    # while keeping the inner text visible. This prevents prosecco from
-    # counting asterisks as words in multi-word noun checks.
-    bold_pattern = re.compile(r"\*\*")
-    for m in bold_pattern.finditer(md):
-        blocks.append((m.start(), m.end(), "bold_marker"))
-
-    italic_pattern = re.compile(r"(?<!\*)\*(?!\*)")
-    for m in italic_pattern.finditer(md):
-        blocks.append((m.start(), m.end(), "italic_marker"))
+    # Collect emphasis markers (bold, italic, strikethrough).
+    # Replace markers with spaces to remove markdown formatting while keeping
+    # the inner text visible. This prevents prosecco from counting special
+    # characters as words in multi-word noun checks.
+    # Uses a generic function to collect markers with their types.
+    _collect_emphasis_markers(md, blocks)
 
     # Collect inline code spans.
     # Match single or double backtick code spans, but not triple or more (which are fenced code blocks).
@@ -447,8 +471,8 @@ def preprocess_markdown(
                 for i, ch in enumerate(md[start:end]):
                     offset_map[start + i] = start + i
                     parts.append(ch)
-        elif btype in ("bold_marker", "italic_marker"):
-            # Replace bold/italic markers with spaces to prevent markdown
+        elif btype in ("bold_marker", "italic_marker", "strikethrough"):
+            # Replace emphasis markers with spaces to prevent markdown
             # characters from leaking into the cleaned output. The regions
             # list still contains the marker positions for metadata suppression.
             span_length = end - start

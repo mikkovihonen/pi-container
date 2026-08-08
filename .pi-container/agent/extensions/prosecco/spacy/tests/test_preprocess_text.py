@@ -981,7 +981,76 @@ class TestPreprocessHtmlTrivialCases:
         assert "after" in text
 
 
-class TestPreprocessMarkdownBugFixes:
+class TestPreprocessMarkdownStrikethrough:
+    """Test cases for strikethrough handling."""
+
+    def test_strikethrough_replaced_with_spaces(self):
+        """Strikethrough markers should be replaced with spaces."""
+        md = "This is ~~deleted~~ text."
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Tildes should be replaced with spaces
+        assert text[7:9] == "  "
+        assert text[17:19] == "  "
+        # Text content should be preserved
+        assert "deleted" in text
+        # No tildes in output
+        assert "~" not in text
+
+    def test_strikethrough_region_marked(self):
+        """Strikethrough markers should be marked as 'strikethrough' regions."""
+        md = "This is ~~deleted~~ text."
+        text, mapping, regions = preprocess_markdown(md)
+        strikethrough_regions = [r for r in regions if r[2] == "strikethrough"]
+        # Each ~~ pair is a separate region (consistent with bold/italic)
+        assert len(strikethrough_regions) == 2
+        assert strikethrough_regions[0] == (8, 10, "strikethrough")
+        assert strikethrough_regions[1] == (17, 19, "strikethrough")
+
+    def test_multiple_strikethrough(self):
+        """Multiple strikethrough spans should all be handled."""
+        md = "~~first~~ and ~~second~~"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # No tildes in output
+        assert "~" not in text
+        # Both words should be preserved
+        assert "first" in text
+        assert "second" in text
+        # Should have 4 strikethrough regions (2 for each ~~ pair)
+        strikethrough_regions = [r for r in regions if r[2] == "strikethrough"]
+        assert len(strikethrough_regions) == 4
+
+    def test_strikethrough_with_other_formatting(self):
+        """Strikethrough combined with other formatting."""
+        md = "**bold ~~and strike~~**"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # No special chars
+        assert "*" not in text
+        assert "~" not in text
+        # Content preserved
+        assert "bold" in text
+        assert "and" in text
+        assert "strike" in text
+
+    def test_strikethrough_empty(self):
+        """Empty strikethrough should be handled."""
+        md = "~~"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        assert "~" not in text
+
+    def test_strikethrough_with_code(self):
+        """Strikethrough containing inline code."""
+        md = "~~`code`~~"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Both strikethrough and code should be handled
+        assert "~" not in text
+        assert "`" not in text
+        # Code content should be normalized to noun
+        assert "code" in text
     """Test cases for bugs discovered during debugging."""
 
     def test_bold_markers_replaced_with_spaces(self):
