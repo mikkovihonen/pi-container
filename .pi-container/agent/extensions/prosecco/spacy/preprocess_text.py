@@ -316,6 +316,22 @@ def _get_markdown_blocks(md: str) -> list[tuple[int, int, str]]:
         if line.count('|') >= 2:
             blocks.append((m.start(), m.end(), "table_delimiter"))
 
+    # Collect horizontal rules: ---, ***, ___, or with spaces between chars
+    # Must be on their own line (preceded by newline or start of string).
+    horizontal_rule_pattern = re.compile(
+        r"""
+        ^[\t ]*(?:
+            [-]{3,}[\t ]*  # Three or more dashes
+            |[*]{3,}[\t ]*  # Three or more asterisks
+            |[_]{3,}[\t ]*  # Three or more underscores
+            |(?:[-*+][\t ]){2,}[-*+][\t ]*  # Dashes, asterisks, or pluses with spaces
+        )$  # End of line
+        """,
+        re.MULTILINE | re.VERBOSE,
+    )
+    for m in horizontal_rule_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "horizontal_rule"))
+
     # Collect Markdown headers: # heading text
     # Match from the first # to the end of the line.
     # Headers are kept visible but marked so the linter can add metadata.
@@ -475,6 +491,13 @@ def preprocess_markdown(
             # Replace emphasis markers with spaces to prevent markdown
             # characters from leaking into the cleaned output. The regions
             # list still contains the marker positions for metadata suppression.
+            span_length = end - start
+            parts.append(" " * span_length)
+            for i in range(start, end):
+                offset_map[i] = i
+        elif btype == "horizontal_rule":
+            # Replace horizontal rule with spaces to prevent markdown
+            # characters from leaking into the cleaned output.
             span_length = end - start
             parts.append(" " * span_length)
             for i in range(start, end):

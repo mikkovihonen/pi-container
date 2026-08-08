@@ -676,15 +676,18 @@ class TestPreprocessMarkdownAdvancedCornerCases:
         """Handle horizontal rules made of dashes."""
         md = "---\n\nText"
         text, mapping, _ = preprocess_markdown(md)
-        # Horizontal rules are not removed.
+        # Horizontal rules are replaced with spaces.
         assert len(text) == len(md)
+        assert "---" not in text
         assert "Text" in text
 
     def test_horizontal_rule_stars(self):
         """Handle horizontal rules made of asterisks."""
         md = "***\n\nText"
         text, mapping, _ = preprocess_markdown(md)
+        # Horizontal rules are replaced with spaces.
         assert len(text) == len(md)
+        assert "***" not in text
         assert "Text" in text
 
     def test_atx_heading_with_closing_hash(self):
@@ -981,7 +984,75 @@ class TestPreprocessHtmlTrivialCases:
         assert "after" in text
 
 
-class TestPreprocessMarkdownStrikethrough:
+class TestPreprocessMarkdownHorizontalRule:
+    """Test cases for horizontal rule handling."""
+
+    def test_horizontal_rule_dashes_replaced(self):
+        """Horizontal rule with dashes should be replaced with spaces."""
+        md = "Text before\n\n---\n\nText after"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Dashes should be replaced with spaces
+        assert "---" not in text
+        # Text before and after should be preserved
+        assert "Text before" in text
+        assert "Text after" in text
+
+    def test_horizontal_rule_stars_replaced(self):
+        """Horizontal rule with asterisks should be replaced with spaces."""
+        md = "Text before\n\n***\n\nText after"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Asterisks should be replaced with spaces
+        assert "***" not in text
+        # Text before and after should be preserved
+        assert "Text before" in text
+        assert "Text after" in text
+
+    def test_horizontal_rule_underscores_replaced(self):
+        """Horizontal rule with underscores should be replaced with spaces."""
+        md = "Text before\n\n___\n\nText after"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Underscores should be replaced with spaces
+        assert "___" not in text
+        # Text before and after should be preserved
+        assert "Text before" in text
+        assert "Text after" in text
+
+    def test_horizontal_rule_with_spaces(self):
+        """Horizontal rule with spaces between characters."""
+        md = "Text before\n\n- - -\n\nText after"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # The horizontal rule markers should be preserved (spaces between dashes)
+        # This is a valid horizontal rule in markdown
+        assert "Text before" in text
+        assert "Text after" in text
+
+    def test_horizontal_rule_with_trailing_spaces(self):
+        """Horizontal rule with trailing spaces."""
+        md = "Text before\n\n---   \n\nText after"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Dashes should be replaced with spaces
+        assert "---" not in text
+        # Text before and after should be preserved
+        assert "Text before" in text
+        assert "Text after" in text
+
+    def test_multiple_horizontal_rules(self):
+        """Multiple horizontal rules in document."""
+        md = "Section 1\n\n---\n\nSection 2\n\n***\n\nSection 3"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # No horizontal rule markers
+        assert "---" not in text
+        assert "***" not in text
+        # All section text preserved
+        assert "Section 1" in text
+        assert "Section 2" in text
+        assert "Section 3" in text
     """Test cases for strikethrough handling."""
 
     def test_strikethrough_replaced_with_spaces(self):
@@ -1356,8 +1427,8 @@ Read **[Getting Started](docs/getting-started.md)** for details.
         md = "---"
         text, mapping, _ = preprocess_markdown(md)
         assert len(text) == len(md)
-        # Horizontal rules are not removed.
-        assert "---" in text
+        # Horizontal rules are replaced with spaces.
+        assert "---" not in text
 
     def test_just_link_with_no_text(self):
         """Handle just a link with empty text."""
