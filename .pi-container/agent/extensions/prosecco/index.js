@@ -40,7 +40,7 @@ const LintParams = Type.Object({
 	),
 	steOnly: Type.Optional(Type.Boolean()),
 	spacy: Type.Optional(Type.Boolean({ description: "Enable ASD-STE100 checks via spaCy." })),
-	noMetadata: Type.Optional(Type.Boolean({ description: "Suppress warnings with metadata annotations (e.g. [bold_marker], [header], [table_delimiter])." })),
+	includeAll: Type.Optional(Type.Boolean({ description: "Show warnings with metadata annotations (e.g. [bold_marker], [header], [table_delimiter])." })),
 });
 
 /**
@@ -99,11 +99,11 @@ function countAlertsFromJson(data) {
  * @param {"text"|"json"} outputFormat
  * @param {boolean} steOnly
  * @param {boolean} spacy  Enable ASD-STE100 checks via spaCy.
- * @param {boolean} noMetadata  Suppress warnings with metadata annotations.
+ * @param {boolean} includeAll  Show warnings with metadata annotations.
  * @param {object} ctx  ExtensionContext: {cwd, mode, hasUI, signal, ui}
  * @returns {{content, details}}
  */
-async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy, noMetadata, ctx) {
+async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy, includeAll, ctx) {
 	// 1. Resolve path against ctx.cwd.
 	const resolved = userPath
 		? pathResolve(ctx.cwd, userPath)
@@ -299,8 +299,8 @@ async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy
 	if (spacy && filePaths.length > 0 && filePaths[0].endsWith('.md')) {
 		const spacyModule = pathResolve("/home/pi/.pi/agent/extensions/prosecco/spacy", "spacy_asd-ste100.py");
 		const spacyArgs = ["run", "python", spacyModule];
-		if (noMetadata) {
-			spacyArgs.push("--no-metadata");
+		if (includeAll) {
+			spacyArgs.push("--include-all");
 		}
 		spacyArgs.push(filePaths[0]);
 		try {
@@ -426,21 +426,21 @@ export default function (pi) {
 			const outputFormat = params.outputFormat ?? "text";
 			const steOnly = false;
 			const spacy = true;
-			const noMetadata = params.noMetadata ?? false;
-			return runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy, noMetadata, ctx);
+			const includeAll = params.includeAll ?? false;
+			return runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy, includeAll, ctx);
 		},
 	});
 
 	// ── Command: /prosecco ─────────────────────────────────────────────
 	pi.registerCommand("prosecco", {
-		description: "Lint prose with Vale + spaCy. Usage: /prosecco [path] [--minAlertLevel=suggestion|warning|error]",
+		description: "Lint prose with Vale + spaCy. Usage: /prosecco [path] [--minAlertLevel=suggestion|warning|error] [--include-all]",
 		handler: async (args, ctx) => {
 			// Parse arguments. The first non-flag token is the path.
 			let userPath = undefined;
 			let minAlertLevel = "suggestion";
 			let steOnly = false;
 			let spacy = true;
-			let noMetadata = false;
+			let includeAll = false;
 			const tokens = String(args || "").trim().split(/\s+/);
 			for (const tok of tokens) {
 				if (tok.startsWith("--minAlertLevel=")) {
@@ -448,19 +448,19 @@ export default function (pi) {
 					if (val === "suggestion" || val === "warning" || val === "error") {
 						minAlertLevel = val;
 					}
-				} else if (tok === "--no-metadata") {
-					noMetadata = true;
+				} else if (tok === "--include-all") {
+					includeAll = true;
 				} else if (!tok.startsWith("--")) {
 					userPath = tok;
 				}
 			}
 
 			if (!userPath) {
-				ctx.ui.notify("Usage: /prosecco <path> [--minAlertLevel=suggestion|warning|error] [--no-metadata]");
+				ctx.ui.notify("Usage: /prosecco <path> [--minAlertLevel=suggestion|warning|error] [--include-all]");
 				return;
 			}
 
-			const result = await runLint(pi, userPath, minAlertLevel, "text", steOnly, spacy, noMetadata, ctx);
+			const result = await runLint(pi, userPath, minAlertLevel, "text", steOnly, spacy, includeAll, ctx);
 
 			// Print the result regardless of UI mode — the user may be in
 			// print-only mode and needs to see the output.

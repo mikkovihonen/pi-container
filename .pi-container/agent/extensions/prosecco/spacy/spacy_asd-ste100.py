@@ -120,10 +120,10 @@ from checks_gr_recommendations import (
 def main():
     """Main entry point."""
     # Parse command-line arguments.
-    # --no-metadata: Suppress warnings that have metadata annotations (e.g. [bold_marker], [header]).
-    no_metadata = "--no-metadata" in sys.argv
+    # --include-all: Show all warnings, including those with metadata annotations (e.g. [bold_marker], [header]).
+    include_all = "--include-all" in sys.argv
     # Filter argv to remove our custom flag before passing to the rest of the script.
-    sys.argv = [arg for arg in sys.argv if arg != "--no-metadata"]
+    sys.argv = [arg for arg in sys.argv if arg != "--include-all"]
     
     # Read input from file or stdin
     filepath = None
@@ -421,15 +421,18 @@ def main():
                 break
             current_offset = line_end
 
-        # Skip errors with metadata annotations if --no-metadata is set.
-        if no_metadata and region_type:
+        # Skip errors with metadata annotations unless --include-all is set.
+        if not include_all and region_type:
             continue
         
+        # Collapse consecutive whitespace in the message to a single space.
+        message = ' '.join(issue['message'].split())
+
         # Add region context to the message if the error is in a non-prose region.
         if region_type:
-            print(f"{filepath}:{line}:{col} STE100.{issue['type']}: [{region_type}] {issue['message']}")
+            print(f"{filepath}:{line}:{col} STE100.{issue['type']}: [{region_type}] {message}")
         else:
-            print(f"{filepath}:{line}:{col} STE100.{issue['type']}: {issue['message']}")
+            print(f"{filepath}:{line}:{col} STE100.{issue['type']}: {message}")
 
     if not all_issues:
         print("No ASD-STE100 issues found.")

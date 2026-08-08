@@ -42,10 +42,16 @@ def check_multi_word_nouns(doc):
     
     # Use spaCy's noun chunk detection to find multi-word nouns
     for chunk in doc.noun_chunks:
-        # Count words in the noun chunk
-        words = [t.text for t in chunk]
+        # Filter out punctuation tokens (e.g. stray hyphens) and skip
+        # chunks whose first token is a determiner (a, an, the).
+        words = [t.text for t in chunk if not t.is_punct]
+        if not words:
+            continue
+        first_token = next((t for t in chunk if not t.is_punct), None)
+        if first_token and first_token.pos_ == "DET":
+            continue
         
-        # Skip single-word chunks (these are not multi-word nouns)
+        # Skip single-word or short chunks (these are not multi-word nouns)
         if len(words) <= 3:
             continue
         
