@@ -371,11 +371,18 @@ def preprocess_markdown(
 
         # Handle different block types.
         if btype == "link_text":
-            # Keep link text visible.
+            # Keep link text visible but strip markdown characters (backticks,
+            # brackets, exclamation marks) that may be part of the link syntax.
             link_text_regions.append((start, end))
+            # Process each character in the link text
             for i, ch in enumerate(md[start:end]):
-                offset_map[start + i] = start + i
-                parts.append(ch)
+                # Replace markdown characters with spaces
+                if ch in "`[]!()":
+                    offset_map[start + i] = start + i
+                    parts.append(" ")
+                else:
+                    offset_map[start + i] = start + i
+                    parts.append(ch)
         elif btype == "link_url":
             # Replace URL with spaces.
             span_length = end - start
@@ -408,12 +415,13 @@ def preprocess_markdown(
                     offset_map[start + i] = start + i
                     parts.append(ch)
         elif btype in ("bold_marker", "italic_marker"):
-            # Keep bold/italic markers visible. The regions list contains
-            # the marker positions so the linter can suppress multi-word
-            # noun checks on formatted text.
-            for i, ch in enumerate(md[start:end]):
-                offset_map[start + i] = start + i
-                parts.append(ch)
+            # Replace bold/italic markers with spaces to prevent markdown
+            # characters from leaking into the cleaned output. The regions
+            # list still contains the marker positions for metadata suppression.
+            span_length = end - start
+            parts.append(" " * span_length)
+            for i in range(start, end):
+                offset_map[i] = i
         else:
             # Replace entire block with spaces.
             span_length = end - start
