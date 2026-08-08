@@ -4,7 +4,7 @@
   <img src="docs/assets/pi-container-logo.svg" alt="pi-container" width="360">
 </p>
 
-This tool runs a sandboxed [`pi-coding-agent`](https://pi.dev) and uses a local LLM. The sandbox proxy provides full auditability. In addition, the sandbox proxy intercepts the traffic from the agent, blocks traffic to hosts not on the allowlist and injects secrets to traffic. The tool works on macOS, Linux, and WSL2.
+This tool runs a sandboxed [`pi-coding-agent`](https://pi.dev) and uses a local LLM. The sandbox proxy provides full auditability. In addition, the sandbox proxy intercepts the traffic from the agent. Also, this proxy blocks traffic to hosts not on the allowlist and injects secrets into the traffic. The tool works on macOS, Linux, and WSL2.
 
 <div align="center" style="margin-top:50px;text-align:center;" markdown="1">
 
@@ -20,13 +20,13 @@ This tool runs a sandboxed [`pi-coding-agent`](https://pi.dev) and uses a local 
 
 **Sandboxed agent.** The agent sends all internet traffic through the proxy. The agent uses an internal network without a gateway. The system blocks all other protocols.
 
-**Traffic logging.** [`mitmproxy`](https://mitmproxy.org) intercepts the HTTP traffic, the HTTPS traffic, and the DNS traffic. The proxy uses a hostname allowlist and a token injector. You can configure the proxy to save traffic to a flow file per project.
+**Traffic logging.** [`mitmproxy`](https://mitmproxy.org) intercepts the HTTP traffic, the HTTPS traffic, and the DNS traffic. The proxy uses a hostname allowlist and a token injector. The proxy saves traffic to a flow file per project.
 
 **Local inference.** `llama-server` from [`llama.cpp`](https://llama.app) runs on the host computer. The tool supports the Metal backend, the CUDA backend, and the ROCm backend. The projects share one server per configuration fingerprint.
 
 **Isolated workspaces.** Each workspace gets an image, a proxy, a network, and own configuration. The system creates the artifacts automatically on the first run.
 
-**Rootless design.** The system runs on [`podman`](https://podman.io). The agent runs inside a user namespace. The root user in the container maps to a host user. The Podman machine requires 4 GB of memory on macOS or Windows. Read [Getting Started](docs/getting-started.md) for details.
+**Rootless design.** The system runs on [`podman`](https://podman.io). The agent runs inside a user namespace. The root user in the container maps to a host user. The Podman machine requires 4 GB of memory on macOS or Windows. The [Getting Started](docs/getting-started.md) page provides details.
 
 ## Quick setup
 

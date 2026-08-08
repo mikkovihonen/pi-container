@@ -183,8 +183,9 @@ def _get_first_content_word(sent):
 def _has_connecting_word(sent, connecting_words):
     """Check if a sentence starts with a connecting word or phrase.
     
-    Uses spaCy features to extract the first few content words and check if they
-    match any connecting words or phrases.
+    Uses spaCy features to extract the first few tokens and check if they
+    match any connecting words or phrases. This includes stop words like
+    "also", "additionally", etc. which are common connecting words.
     
     Args:
         sent: spaCy Span object (sentence)
@@ -193,21 +194,24 @@ def _has_connecting_word(sent, connecting_words):
     Returns:
         bool: True if sentence starts with a connecting word/phrase
     """
-    # Get the first few content words of the sentence
-    first_words = []
-    for token in _iter_content_tokens(sent):
-        first_words.append(token.lemma_.lower())
-        if len(first_words) >= 3:
+    # Get the first few tokens of the sentence (not just content words)
+    # Connecting words like "also", "additionally" are often stop words
+    first_tokens = []
+    for token in sent:
+        if token.pos_ == "PUNCT":
+            continue  # Skip punctuation
+        first_tokens.append(token.lemma_.lower())
+        if len(first_tokens) >= 3:
             break
     
-    # Check if any of the first words is a connecting word
-    for word in first_words:
+    # Check if any of the first tokens is a connecting word
+    for word in first_tokens:
         if word in connecting_words:
             return True
     
-    # Check if the first two words form a connecting phrase
-    if len(first_words) >= 2:
-        phrase = ' '.join(first_words[:2])
+    # Check if the first two tokens form a connecting phrase
+    if len(first_tokens) >= 2:
+        phrase = ' '.join(first_tokens[:2])
         if phrase in connecting_words:
             return True
     
