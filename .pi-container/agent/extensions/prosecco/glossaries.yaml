@@ -1,0 +1,23 @@
+# Glossary configuration for prosecco.
+#
+# Each glossary has a cardinality (priority). Higher cardinality wins when
+# the same constant appears in multiple glossaries. The project glossary
+# (cardinality 100) always overrides the base STE100 glossary (cardinality 0).
+#
+# Glossaries are loaded in ascending cardinality order. Later glossaries
+# override earlier ones for the same namespace+name pair.
+#
+# To remove a word from a mapping, set its value to "__REMOVE__":
+#   {"namespace":"words","name":"NON_APPROVED_WORDS","type":"mapping",
+#    "data":{"full-privilege":"__REMOVE__"}}
+
+glossaries:
+  - path: "spacy/asd-ste100_base.jsonl"
+    cardinality: 0
+    description: "Base ASD-STE100 constants"
+  - path: "spacy/company_glossary.jsonl"
+    cardinality: 50
+    description: "Company-wide policy glossary"
+  - path: "spacy/project_glossary.jsonl"
+    cardinality: 100
+    description: "Project-specific overrides (highest priority)"

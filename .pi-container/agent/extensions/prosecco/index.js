@@ -298,11 +298,10 @@ async function runLint(pi, userPath, minAlertLevel, outputFormat, steOnly, spacy
 	let spacyOutput = "";
 	if (spacy && filePaths.length > 0 && filePaths[0].endsWith('.md')) {
 		const spacyModule = pathResolve("/home/pi/.pi/agent/extensions/prosecco/spacy", "spacy_asd-ste100.py");
-		const spacyArgs = ["run", "python", spacyModule];
+		const spacyArgs = ["run", "python", spacyModule, filePaths[0]];
 		if (includeAll) {
 			spacyArgs.push("--include-all");
 		}
-		spacyArgs.push(filePaths[0]);
 		try {
 			const spacyResult = await pi.exec("uv", spacyArgs, {
 				cwd: ctx.cwd,
@@ -431,6 +430,68 @@ export default function (pi) {
 		},
 	});
 
+	// ── Tool: prosecco_add_to_glossary ───────────────────────────────────
+	pi.registerTool({
+		name: "prosecco_add_to_glossary",
+		label: "Add to Glossary",
+		description:
+			"Add a word to the project glossary. If --value is provided, sets the replacement. Otherwise, marks the word for removal from NON_APPROVED_WORDS.",
+		promptSnippet: "Add word to project glossary",
+		parameters: Type.Object({
+			word: Type.String({ description: "The word to add to the glossary (e.g., 'privilege')" }),
+			value: Type.Optional(Type.String({ description: "The replacement value. If not provided, the word will be removed from NON_APPROVED_WORDS." })),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const word = params.word;
+			const value = params.value;
+
+			if (!word) {
+				return {
+					content: [{ type: "text", text: "Error: word is required." }],
+					details: { isError: true },
+				};
+			}
+
+			// Run the Python script to add the entry.
+			const spacyModule = pathResolve("/home/pi/.pi/agent/extensions/prosecco/spacy", "add_to_glossary.py");
+			const spacyArgs = ["run", "python", spacyModule, "--key", word];
+			if (value !== undefined) {
+				spacyArgs.push("--value", value);
+			} else {
+				spacyArgs.push("--remove");
+			}
+			try {
+				const result = await pi.exec("uv", spacyArgs, {
+					cwd: ctx.cwd,
+					signal: _signal,
+					env: { PYTHONIOENCODING: "utf-8" },
+				});
+				if (result.killed) {
+					return {
+						content: [{ type: "text", text: "Command was cancelled." }],
+						details: { isError: false },
+					};
+				}
+				if (result.code !== 0) {
+					const stderr = result.stderr.trim();
+					return {
+						content: [{ type: "text", text: `Failed to add to glossary: ${stderr || result.stdout.trim()}`.trim() }],
+						details: { isError: true },
+					};
+				}
+				return {
+					content: [{ type: "text", text: result.stdout.trim() }],
+					details: { isError: false },
+				};
+			} catch (err) {
+				return {
+					content: [{ type: "text", text: `Failed to execute command: ${err.message}` }],
+					details: { isError: true },
+				};
+			}
+		},
+	});
+
 	// ── Command: /prosecco ─────────────────────────────────────────────
 	pi.registerCommand("prosecco", {
 		description: "Lint prose with Vale + spaCy. Usage: /prosecco [path] [--minAlertLevel=suggestion|warning|error] [--include-all]",
@@ -493,6 +554,57 @@ export default function (pi) {
 			} else {
 				// No UI — print the raw result.
 				console.log(text);
+			}
+		},
+	});
+
+	// ── Command: /prosecco-add-to-glossary ───────────────────────────
+	pi.registerCommand("prosecco-add-to-glossary", {
+		description: "Add a word to the project glossary. Usage: /prosecco-add-to-glossary <word> [--value <replacement>]",
+		handler: async (args, ctx) => {
+			// Parse arguments. The first non-flag token is the word.
+			let word = undefined;
+			let value = undefined;
+			const tokens = String(args || "").trim().split(/\s+/);
+			for (const tok of tokens) {
+				if (tok.startsWith("--value=")) {
+					value = tok.split("=", 2)[1];
+				} else if (!tok.startsWith("--")) {
+					word = tok;
+				}
+			}
+
+			if (!word) {
+				ctx.ui.notify("Usage: /prosecco-add-to-glossary <word> [--value <replacement>]");
+				return;
+			}
+
+			// Run the Python script to add the entry.
+			const spacyModule = pathResolve("/home/pi/.pi/agent/extensions/prosecco/spacy", "add_to_glossary.py");
+			const spacyArgs = ["run", "python", spacyModule, "--key", word];
+			if (value !== undefined) {
+				spacyArgs.push("--value", value);
+			} else {
+				spacyArgs.push("--remove");
+			}
+			try {
+				const result = await pi.exec("uv", spacyArgs, {
+					cwd: ctx.cwd,
+					signal: ctx.signal,
+					env: { PYTHONIOENCODING: "utf-8" },
+				});
+				if (result.killed) {
+					ctx.ui.notify("Command was cancelled.", "info");
+					return;
+				}
+				if (result.code !== 0) {
+					const stderr = result.stderr.trim();
+					ctx.ui.notify(`Failed to add to glossary: ${stderr || result.stdout.trim()}`.trim(), "error");
+					return;
+				}
+				ctx.ui.notify(result.stdout.trim(), "info");
+			} catch (err) {
+				ctx.ui.notify(`Failed to execute command: ${err.message}`, "error");
 			}
 		},
 	});

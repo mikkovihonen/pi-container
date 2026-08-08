@@ -51,4 +51,4 @@ docs/assets/coverage.svg
 site/
 
 # Generated index (from README.md)
-docs/index.md
+.pi-container/agent/extensions/prosecco/spacy/s2v

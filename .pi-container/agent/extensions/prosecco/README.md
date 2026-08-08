@@ -5,8 +5,10 @@ The Prosecco extension combines Vale and spaCy for comprehensive prose quality c
 ## Overview
 
 This extension provides:
-- **Tool**: `prosecco-lint` — Run Vale + spaCy on a file or directory
+- **Tool**: `prosecco` — Run Vale + spaCy on a file or directory
+- **Tool**: `prosecco_add_to_glossary` — Add overrides to the project glossary
 - **Command**: `/prosecco` — Lint prose with Vale + spaCy
+- **Command**: `/prosecco-add-to-glossary` — Add overrides to the project glossary
 
 ## Checks
 
@@ -38,6 +40,17 @@ prosecco-lint({
 })
 ```
 
+### Tool: `prosecco_add_to_glossary`
+
+```javascript
+prosecco_add_to_glossary({
+  namespace: "words",
+  name: "NON_APPROVED_WORDS",
+  key: "privilege",
+  remove: true   // Set to true to mark the key for removal
+})
+```
+
 ### Command: `/prosecco`
 
 ```bash
@@ -66,6 +79,21 @@ prosecco-lint({
   steOnly: true,
   spacy: true
 })
+```
+
+### Adding overrides to the project glossary
+
+When prosecco warns about a term that should be allowed (e.g., a technical term with special meaning), you can add it to the project glossary:
+
+```bash
+/prosecco-add-to-glossary <term>
+```
+
+This adds `"<term>": "__REMOVE__"` to the project glossary, which prevents the term from triggering warnings.
+
+Example:
+```bash
+/prosecco-add-to-glossary privilege
 ```
 
 ## Architecture

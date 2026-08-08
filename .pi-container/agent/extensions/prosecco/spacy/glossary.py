@@ -84,33 +84,68 @@ _NAMESPACE_MAP = {
 
 
 def _load_constants() -> Dict[str, Any]:
-    """Load all constants from asd-ste100_base.jsonl."""
+    """Load all constants from base and project glossaries according to glossaries.yaml config."""
+    import yaml
+    from pathlib import Path
+
     constants = {}
-    
-    if not _CONSTANTS_FILE.exists():
-        raise FileNotFoundError(f"asd-ste100_base.jsonl not found at {_CONSTANTS_FILE}")
-    
-    with open(_CONSTANTS_FILE, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            
-            obj = json.loads(line)
-            name = obj['name']
-            data = obj['data']
-            
-            # Convert tuple keys in mappings back to tuples for backward compatibility
-            if obj.get('type') == 'mapping_tuple_keys':
-                converted = {}
-                for key_val_pair in data:
-                    key = tuple(key_val_pair[0])
-                    value = key_val_pair[1]
-                    converted[key] = value
-                data = converted
-            
-            constants[name] = data
-    
+
+    # Load glossary configuration (two levels up from spacy/)
+    config_path = _CONSTANTS_FILE.parent.parent / 'glossaries.yaml'
+    if not config_path.exists():
+        raise FileNotFoundError(f"glossaries.yaml not found at {config_path}")
+
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+
+    # Sort glossaries by cardinality (ascending)
+    glossaries = sorted(config['glossaries'], key=lambda g: g['cardinality'])
+
+    # Base directory for glossaries (parent of spacy/)
+    base_dir = _CONSTANTS_FILE.parent.parent
+
+    # Load each glossary in order (later glossaries override earlier ones)
+    for glossary in glossaries:
+        glossary_path = base_dir / glossary['path']
+        if not glossary_path.exists():
+            # Skip missing glossary files (e.g., project_glossary.jsonl can be removed if empty)
+            continue
+
+        with open(glossary_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+
+                obj = json.loads(line)
+                name = obj['name']
+                data = obj['data']
+
+                # Handle __REMOVE__ sentinel values and merging for mappings
+                if obj.get('type') == 'mapping' and isinstance(data, dict):
+                    keys_to_remove = [k for k, v in data.items() if v == '__REMOVE__']
+                    other_keys = {k: v for k, v in data.items() if v != '__REMOVE__'}
+                    if name in constants and isinstance(constants[name], dict):
+                        # Merge: remove specified keys, then add/update other keys
+                        for k in keys_to_remove:
+                            constants[name].pop(k, None)
+                        constants[name].update(other_keys)
+                    else:
+                        # No existing constant - store as-is
+                        constants[name] = other_keys
+                    continue
+
+                # Convert tuple keys in mappings back to tuples for backward compatibility
+                if obj.get('type') == 'mapping_tuple_keys':
+                    converted = {}
+                    for key_val_pair in data:
+                        key = tuple(key_val_pair[0])
+                        value = key_val_pair[1]
+                        converted[key] = value
+                    data = converted
+
+                constants[name] = data
+
     return constants
 
 
@@ -168,10 +203,10 @@ AMBIGUOUS_THIS_CONTEXTS = _constants.get('AMBIGUOUS_THIS_CONTEXTS', [])
 def get_namespace(constant_name: str) -> str:
     """
     Get the namespace for a constant.
-    
+
     Args:
         constant_name: The constant name (e.g., 'NON_APPROVED_WORDS')
-        
+
     Returns:
         The namespace (e.g., 'words')
     """
@@ -181,22 +216,97 @@ def get_namespace(constant_name: str) -> str:
 def get_all_constants() -> Dict[str, Any]:
     """
     Get all loaded constants.
-    
+
     Returns:
         Dictionary of all constants
     """
     return _constants.copy()
 
 
+def add_to_project_glossary(namespace: str, name: str, key: str, value, project_glossary_path: str = None):
+    """
+    Add an entry to the project glossary file.
+
+    Args:
+        namespace: The namespace (e.g., 'words')
+        name: The constant name (e.g., 'NON_APPROVED_WORDS')
+        key: The key to add/update (e.g., 'privilege')
+        value: The value to set. Use '__REMOVE__' to mark the key for removal from the mapping.
+        project_glossary_path: Optional path to project glossary file. If None, uses default.
+
+    Returns:
+        'added' if the entry was added/updated, 'unchanged' if it already existed with the same value.
+    """
+    if project_glossary_path is None:
+        # Default to project_glossary.jsonl in the same directory as this file
+        project_glossary_path = _CONSTANTS_FILE.parent / 'project_glossary.jsonl'
+
+    # Load existing project glossary entries for this namespace/name
+    existing_data = {}
+    if os.path.exists(project_glossary_path):
+        with open(project_glossary_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    if obj.get('namespace') == namespace and obj.get('name') == name:
+                        existing_data = obj.get('data', {})
+                        break
+                except json.JSONDecodeError:
+                    continue
+
+    # Check if the entry already exists with the same value
+    if existing_data.get(key) == value:
+        return 'unchanged'
+
+    # Update the data
+    existing_data[key] = value
+
+    # Find the existing entry or create a new one
+    entries = []
+    if os.path.exists(project_glossary_path):
+        with open(project_glossary_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    entries.append(obj)
+                except json.JSONDecodeError:
+                    continue
+
+    # Remove existing entry with same namespace and name
+    entries = [e for e in entries if not (e.get('namespace') == namespace and e.get('name') == name)]
+
+    # Add the updated entry
+    new_entry = {
+        'namespace': namespace,
+        'name': name,
+        'type': 'mapping',
+        'data': existing_data
+    }
+    entries.append(new_entry)
+
+    # Write back to file
+    with open(project_glossary_path, 'w', encoding='utf-8') as f:
+        for entry in entries:
+            f.write(json.dumps(entry) + '\n')
+
+    return 'added'
+
+
 def reload_constants():
     """
     Reload constants from asd-ste100_base.jsonl.
-    
+
     This is useful after modifying the JSONL file or loading overrides.
     """
     global _constants
     _constants = _load_constants()
-    
+
     # Re-export all constants
     global APPROVED_ING_FORMS, APPROVED_ING_WORDS, APPROVED_VERB_TAGS, BE_VERBS
     global BRITISH_ENGLISH, COMMON_ABBREVIATIONS, COMMON_COMPOUND_NOUNS, COMMON_DETERMINERS
@@ -210,7 +320,7 @@ def reload_constants():
     global RESTRICTED_WORDS_MEANING, RESTRICTED_WORDS_POS, RESTRICTED_WORD_USAGE
     global RISK_INDICATORS, SAFETY_KEYWORDS, TECHNICAL_NOUNS_NOT_AS_VERBS, TECHNICAL_VERBS_NOT_AS_NOUNS
     global CONJUNCTION_THAT_PATTERNS, AMBIGUOUS_PRONOUNS, AMBIGUOUS_WITH_VERB_GROUPS, AMBIGUOUS_THIS_CONTEXTS
-    
+
     APPROVED_ING_FORMS = _constants['APPROVED_ING_FORMS']
     APPROVED_ING_WORDS = _constants['APPROVED_ING_WORDS']
     APPROVED_VERB_TAGS = _constants['APPROVED_VERB_TAGS']

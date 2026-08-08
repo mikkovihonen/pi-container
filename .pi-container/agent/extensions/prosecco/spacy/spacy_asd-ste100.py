@@ -124,7 +124,7 @@ def main():
     include_all = "--include-all" in sys.argv
     # Filter argv to remove our custom flag before passing to the rest of the script.
     sys.argv = [arg for arg in sys.argv if arg != "--include-all"]
-    
+
     # Read input from file or stdin
     filepath = None
     if len(sys.argv) > 1:
@@ -172,7 +172,7 @@ def main():
                 if not (error_end < start or cleaned_offset > end):
                     return True
         return False
-    
+
     # Build a tree structure from regions for suppression traversal.
     # Each node has: start, end, type, children, suppress (list of issue types)
     def _build_metadata_tree():
@@ -186,17 +186,17 @@ def main():
                 "suppress": _get_suppression_types(rtype),
             }
             nodes.append(node)
-        
+
         # Link parent-child relationships (parent contains child)
         for node in nodes:
             for other in nodes:
                 if node is other:
                     continue
-                if (node["start"] <= other["start"] and 
+                if (node["start"] <= other["start"] and
                     node["end"] >= other["end"] and
                     (node["start"] != other["start"] or node["end"] != other["end"])):
                     node["children"].append(other)
-        
+
         # Return root nodes (not contained in any other)
         roots = []
         for node in nodes:
@@ -204,16 +204,16 @@ def main():
             for other in nodes:
                 if other is node:
                     continue
-                if (other["start"] <= node["start"] and 
+                if (other["start"] <= node["start"] and
                     other["end"] >= node["end"] and
                     (other["start"] != node["start"] or other["end"] != node["end"])):
                     is_child = True
                     break
             if not is_child:
                 roots.append(node)
-        
+
         return roots
-    
+
     def _is_suppressed_in_tree(tree_root: dict, issue_type: str) -> bool:
         """Check if an issue type is suppressed by this node or any ancestor."""
         if issue_type in tree_root.get("suppress", []):
@@ -222,7 +222,7 @@ def main():
             if _is_suppressed_in_tree(child, issue_type):
                 return True
         return False
-    
+
     def _find_node_at_position(tree_roots: list, cleaned_offset: int):
         """Find the innermost node containing the given position."""
         best_match = None
@@ -235,7 +235,7 @@ def main():
                     best_match = node
                     best_size = size
         return best_match
-    
+
     def _find_node_in_tree(node: dict, cleaned_offset: int):
         """Recursively find the innermost node containing the position."""
         if node["start"] <= cleaned_offset < node["end"]:
@@ -246,7 +246,7 @@ def main():
                     return child_match
             return node
         return None
-    
+
     def _is_suppressed_by_metadata(cleaned_offset: int, issue_type: str, cleaned_text: str) -> bool:
         """Check if an issue is suppressed by metadata (bold labels, headers, etc.)."""
         # Check if position is on a bold label (between opening and closing **)
@@ -263,14 +263,14 @@ def main():
                         # Check if position is between the closing of first and opening of second
                         if e1 <= cleaned_offset < s2:
                             return True
-        
+
         # Check tree-based suppression
         tree_roots = _build_metadata_tree()
         node = _find_node_at_position(tree_roots, cleaned_offset)
         if node and issue_type in node.get("suppress", []):
             return True
         return False
-    
+
     def _get_suppression_types(region_type: str) -> list[str]:
         """Get the list of issue types that should be suppressed for a region type."""
         suppression_map = {
@@ -387,6 +387,18 @@ def main():
     # Sort by offset
     all_issues.sort(key=lambda x: x["offset"])
 
+    # Deduplicate exact duplicate warnings (same type, message, and offset).
+    # Multiple checks can emit identical warnings for the same issue.
+    seen_issues = set()
+    unique_issues = []
+    for issue in all_issues:
+        # Create a dedup key from issue type, message, and offset.
+        dedup_key = (issue["type"], issue["message"], issue["offset"])
+        if dedup_key not in seen_issues:
+            seen_issues.add(dedup_key)
+            unique_issues.append(issue)
+    all_issues = unique_issues
+
     # Output in Vale-compatible format: file:line:col CheckName:message
     # Map cleaned-text offsets back to original-text positions via the
     # offset_map, then convert to line:col in the original file.
@@ -397,14 +409,14 @@ def main():
     for issue in all_issues:
         cleaned_offset = issue["offset"]
         error_length = issue.get("length", 1)
-        
+
         # Skip errors in link regions (visible link text).
         if _is_in_link(cleaned_offset, error_length):
             continue
-        
+
         original_offset = offset_map.get(cleaned_offset, cleaned_offset)
         region_type = _get_region_type(cleaned_offset)
-        
+
         # Skip errors suppressed by metadata (bold labels, headers, etc.)
         if _is_suppressed_by_metadata(cleaned_offset, issue["type"], cleaned_text):
             continue
@@ -424,7 +436,7 @@ def main():
         # Skip errors with metadata annotations unless --include-all is set.
         if not include_all and region_type:
             continue
-        
+
         # Collapse consecutive whitespace in the message to a single space.
         message = ' '.join(issue['message'].split())
 
