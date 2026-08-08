@@ -3078,3 +3078,147 @@ class TestPreprocessMarkdownLinkHandling:
         assert len(text) == len(md)
         # Link text should be preserved.
         assert "code" in text
+
+
+class TestPreprocessMarkdownDiscoveredBugs:
+    """Test cases for bugs discovered during debugging."""
+
+    def test_bold_markers_replaced_with_spaces(self):
+        """Bold markers should be replaced with spaces, not kept visible."""
+        md = "**Sandboxed agent.** The agent runs."
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Bold markers should be spaces
+        assert text[0:2] == "  "
+        assert text[18:20] == "  "
+        # Text content preserved
+        assert "Sandboxed agent" in text
+        # No asterisks in output
+        assert "*" not in text
+
+    def test_link_text_with_backticks_stripped(self):
+        """Link text wrapped in backticks should have backticks stripped."""
+        md = "Use [`podman`](https://podman.io) here."
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Backticks should be replaced with spaces
+        assert "`" not in text
+        # Link text should be preserved without backticks
+        assert "podman" in text
+        # No brackets in link region
+        assert "[" not in text
+        assert "]" not in text
+
+    def test_link_text_with_image_syntax_stripped(self):
+        """Link text containing image syntax should have ![]() stripped."""
+        md = "[![CI](https://ci-img.png)](https://ci-url)"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Image syntax characters should be replaced
+        assert "!" not in text
+        # Link text (CI) should be preserved
+        assert "CI" in text
+        # URL should be replaced
+        assert "ci-img.png" not in text
+        assert "ci-url" not in text
+
+    def test_no_markdown_characters_in_output(self):
+        """Cleaned output should contain no markdown characters."""
+        md = "**bold** *italic* `code` [link](url) ![img](pic.png)"
+        text, mapping, regions = preprocess_markdown(md)
+        markdown_chars = ['`', '*', '[', ']', '#', '!', '|']
+        found_chars = [ch for ch in text if ch in markdown_chars]
+        assert len(found_chars) == 0, f"Found markdown characters: {set(found_chars)}"
+
+    def test_cleaned_text_same_length_as_original(self):
+        """Cleaned text should be same length as original (no characters removed)."""
+        md = "# Title\n\nSome `code` and [link](url).\n\n![img](pic.png)"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md), f"Cleaned length {len(text)} != original length {len(md)}"
+
+    def test_offset_mapping_no_none_values(self):
+        """Offset mapping should have no None values."""
+        md = "# Title\n\nSome `code` and [link](url).\n\n![img](pic.png)"
+        text, mapping, regions = preprocess_markdown(md)
+        none_count = sum(1 for v in mapping.values() if v is None)
+        assert none_count == 0, f"Found {none_count} None values in offset mapping"
+
+    def test_header_markers_replaced_with_spaces(self):
+        """Header # markers should be replaced with spaces."""
+        md = "## Highlights\n\nText"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # # markers should be spaces
+        assert text[0:2] == "  "
+        # Header text should be preserved
+        assert "Highlights" in text
+        # No # in header region
+        header_end = text.find("\n\n")
+        assert "#" not in text[:header_end]
+
+    def test_nested_image_in_link(self):
+        """Test nested image syntax in link text is properly stripped."""
+        md = "[![Coverage](docs/assets/coverage.svg)](docs/development.md#coverage)"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # All markdown characters should be replaced
+        assert "!" not in text
+        # Badge texts should be preserved
+        assert "Coverage" in text
+        # URLs should be replaced
+        assert "coverage.svg" not in text
+        assert "development.md" not in text
+
+    def test_complex_readme_preprocessing(self):
+        """Test preprocessing of a complex README with multiple features."""
+        md = """# pi-container
+
+This tool runs a sandboxed [`pi-coding-agent`](https://pi.dev) and uses a local LLM.
+
+[![CI](https://ci-img.png)](https://ci-url)
+[![Coverage](docs/assets/coverage.svg)](docs/development.md#coverage)
+
+## Highlights
+
+**Sandboxed agent.** The agent sends all internet traffic through the proxy.
+
+**Traffic logging.** [`mitmproxy`](https://mitmproxy.org) intercepts traffic.
+
+**Local inference.** `llama-server` from [`llama.cpp`](https://llama.app) runs.
+
+## Quick setup
+
+```bash
+cp .env.example .env
+```
+
+Read **[Getting Started](docs/getting-started.md)** for details.
+"""
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md), "Cleaned text length should match original"
+        
+        # Check no markdown characters
+        markdown_chars = ['`', '*', '[', ']', '#', '!', '|']
+        found_chars = [ch for ch in text if ch in markdown_chars]
+        assert len(found_chars) == 0, f"Found markdown characters: {set(found_chars)}"
+        
+        # Check no None values in mapping
+        none_count = sum(1 for v in mapping.values() if v is None)
+        assert none_count == 0, f"Found {none_count} None values in offset mapping"
+        
+        # Check key text content is preserved
+        assert "pi-container" in text
+        assert "pi-coding-agent" in text
+        assert "CI" in text
+        assert "Coverage" in text
+        assert "Sandboxed agent" in text
+        assert "mitmproxy" in text
+        assert "llama.cpp" in text
+        assert "Getting Started" in text
+        
+        # Check key content is removed
+        assert "pi.dev" not in text
+        assert "ci-img.png" not in text
+        assert "mitmproxy.org" not in text
+        assert "llama.app" not in text
+        assert "docs/getting-started.md" not in text

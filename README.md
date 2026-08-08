@@ -4,7 +4,7 @@
   <img src="docs/assets/pi-container-logo.svg" alt="pi-container" width="360">
 </p>
 
-This tool runs a sandboxed [`pi-coding-agent`](https://pi.dev) and uses a local LLM. The sandbox proxy provides full auditability. In addition, the sandbox proxy intercepts the traffic from the agent. Also, this proxy blocks traffic to hosts not on the allowlist and injects secrets into the traffic. The tool works on macOS, Linux, and WSL2.
+This tool runs a sandboxed [`pi-coding-agent`](https://pi.dev) and uses a local LLM. The sandbox proxy provides full auditability via traffic interception. Also, this proxy blocks traffic to hosts not on the allowlist and injects secrets into the traffic. The tool works on macOS, Linux, and WSL2.
 
 <div align="center" style="margin-top:50px;text-align:center;" markdown="1">
 
