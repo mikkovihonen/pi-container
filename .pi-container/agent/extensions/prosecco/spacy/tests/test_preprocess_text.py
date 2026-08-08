@@ -984,7 +984,117 @@ class TestPreprocessHtmlTrivialCases:
         assert "after" in text
 
 
-class TestPreprocessMarkdownAutolink:
+class TestPreprocessMarkdownMath:
+    """Test cases for Math/LaTeX handling."""
+
+    def test_inline_math_replaced(self):
+        """Inline math ($...$) should be replaced with spaces."""
+        md = "Equate $E=mc^2$ to energy"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Dollar signs should be replaced with spaces
+        assert "$" not in text
+        # Text content preserved
+        assert "Equate" in text
+        assert "to" in text
+        assert "energy" in text
+
+    def test_display_math_replaced(self):
+        """Display math ($$...$$) should be replaced with spaces."""
+        md = "Formula:\n\n$$x^2 + y^2 = z^2$$"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Dollar signs should be replaced with spaces
+        assert "$$" not in text
+        # Text content preserved
+        assert "Formula:" in text
+
+    def test_math_with_subscripts(self):
+        """Math with subscripts and superscripts."""
+        md = "Use $x_1 + x_2$ here"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Dollar signs replaced
+        assert "$" not in text
+        # Text content preserved
+        assert "Use" in text
+        assert "here" in text
+
+    def test_math_with_inline_formatting(self):
+        """Math with inline formatting."""
+        md = "See $**bold**$ formula"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Dollar signs replaced
+        assert "$" not in text
+        # Bold markers replaced
+        assert "**" not in text
+        # Text content preserved
+        assert "See" in text
+        assert "formula" in text
+
+    def test_multiple_math_expressions(self):
+        """Multiple math expressions."""
+        md = "$a^2$ and $b^2$"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # All dollar signs replaced
+        assert "$" not in text
+        # Text content preserved
+        assert "and" in text
+    """Test cases for definition list handling."""
+
+    def test_definition_marker_replaced(self):
+        """Definition marker (: ) should be replaced with spaces."""
+        md = "Term\n: Definition text"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # : and space should be replaced with spaces
+        assert ":" not in text.split("Term")[1] if "Term" in text else True
+        # Text content preserved
+        assert "Term" in text
+        assert "Definition text" in text
+
+    def test_definition_with_inline_formatting(self):
+        """Definition with inline formatting."""
+        md = "Term\n: Use **bold** here"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Bold markers replaced
+        assert "**" not in text
+        # Text content preserved
+        assert "Term" in text
+        assert "Use" in text
+        assert "bold" in text
+        assert "here" in text
+
+    def test_multiple_definitions(self):
+        """Multiple definition terms."""
+        md = "Term1\n: Definition 1\n\nTerm2\n: Definition 2"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Text content preserved
+        assert "Term1" in text
+        assert "Definition 1" in text
+        assert "Term2" in text
+        assert "Definition 2" in text
+        # No definition markers in definition lines
+        lines = text.split("\n")
+        for line in lines:
+            if line.strip().startswith(":"):
+                assert False, f"Found definition marker in line: {repr(line)}"
+
+    def test_definition_with_code(self):
+        """Definition containing inline code."""
+        md = "Command\n: Run `npm install`"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Inline code normalized
+        assert "`" not in text
+        # Text content preserved
+        assert "Command" in text
+        assert "Run" in text
+        assert "npm" in text
     """Test cases for autolink handling."""
 
     def test_autolink_replaced(self):

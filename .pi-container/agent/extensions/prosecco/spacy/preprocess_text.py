@@ -373,6 +373,18 @@ def _get_markdown_blocks(md: str) -> list[tuple[int, int, str]]:
     for m in email_autolink_pattern.finditer(md):
         blocks.append((m.start(), m.end(), "email_autolink"))
 
+    # Collect definition list markers: : at start of line
+    # Replace : with space, preserve definition text.
+    definition_marker_pattern = re.compile(r"^:[\t ]", re.MULTILINE)
+    for m in definition_marker_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "definition_marker"))
+
+    # Collect math delimiters: $ for inline math, $$ for display math
+    # Replace $ with spaces, preserve math content.
+    math_delimiter_pattern = re.compile(r"\$")
+    for m in math_delimiter_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "math_delimiter"))
+
     # Collect Markdown headers: # heading text
     # Match from the first # to the end of the line.
     # Headers are kept visible but marked so the linter can add metadata.
@@ -575,6 +587,18 @@ def preprocess_markdown(
                 offset_map[i] = i
         elif btype == "email_autolink":
             # Replace email autolink with spaces, preserve surrounding text.
+            span_length = end - start
+            parts.append(" " * span_length)
+            for i in range(start, end):
+                offset_map[i] = i
+        elif btype == "definition_marker":
+            # Replace definition marker with spaces, preserve definition text.
+            span_length = end - start
+            parts.append(" " * span_length)
+            for i in range(start, end):
+                offset_map[i] = i
+        elif btype == "math_delimiter":
+            # Replace math delimiter ($ or $$) with spaces, preserve math content.
             span_length = end - start
             parts.append(" " * span_length)
             for i in range(start, end):
