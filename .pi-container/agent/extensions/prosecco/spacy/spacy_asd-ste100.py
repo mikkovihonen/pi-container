@@ -172,6 +172,130 @@ def main():
                 if not (error_end < start or cleaned_offset > end):
                     return True
         return False
+    
+    # Build a tree structure from regions for suppression traversal.
+    # Each node has: start, end, type, children, suppress (list of issue types)
+    def _build_metadata_tree():
+        nodes = []
+        for start, end, rtype in regions:
+            node = {
+                "start": start,
+                "end": end,
+                "type": rtype,
+                "children": [],
+                "suppress": _get_suppression_types(rtype),
+            }
+            nodes.append(node)
+        
+        # Link parent-child relationships (parent contains child)
+        for node in nodes:
+            for other in nodes:
+                if node is other:
+                    continue
+                if (node["start"] <= other["start"] and 
+                    node["end"] >= other["end"] and
+                    (node["start"] != other["start"] or node["end"] != other["end"])):
+                    node["children"].append(other)
+        
+        # Return root nodes (not contained in any other)
+        roots = []
+        for node in nodes:
+            is_child = False
+            for other in nodes:
+                if other is node:
+                    continue
+                if (other["start"] <= node["start"] and 
+                    other["end"] >= node["end"] and
+                    (other["start"] != node["start"] or other["end"] != node["end"])):
+                    is_child = True
+                    break
+            if not is_child:
+                roots.append(node)
+        
+        return roots
+    
+    def _is_suppressed_in_tree(tree_root: dict, issue_type: str) -> bool:
+        """Check if an issue type is suppressed by this node or any ancestor."""
+        if issue_type in tree_root.get("suppress", []):
+            return True
+        for child in tree_root.get("children", []):
+            if _is_suppressed_in_tree(child, issue_type):
+                return True
+        return False
+    
+    def _find_node_at_position(tree_roots: list, cleaned_offset: int):
+        """Find the innermost node containing the given position."""
+        best_match = None
+        best_size = float('inf')
+        for root in tree_roots:
+            node = _find_node_in_tree(root, cleaned_offset)
+            if node:
+                size = node["end"] - node["start"]
+                if size < best_size:
+                    best_match = node
+                    best_size = size
+        return best_match
+    
+    def _find_node_in_tree(node: dict, cleaned_offset: int):
+        """Recursively find the innermost node containing the position."""
+        if node["start"] <= cleaned_offset < node["end"]:
+            # Check children first
+            for child in node["children"]:
+                child_match = _find_node_in_tree(child, cleaned_offset)
+                if child_match:
+                    return child_match
+            return node
+        return None
+    
+    def _is_suppressed_by_metadata(cleaned_offset: int, issue_type: str, cleaned_text: str) -> bool:
+        """Check if an issue is suppressed by metadata (bold labels, headers, etc.)."""
+        # Check if position is on a bold label (between opening and closing **)
+        if issue_type == "MissingArticles":
+            # Find bold_marker regions and pair them
+            bold_regions = sorted([(s, e) for s, e, r in regions if r == "bold_marker"])
+            # Check each pair of adjacent bold markers
+            for i in range(0, len(bold_regions) - 1, 2):
+                if i + 1 < len(bold_regions):
+                    s1, e1 = bold_regions[i]
+                    s2, e2 = bold_regions[i + 1]
+                    # Check if they're on the same line (no newline between them)
+                    if '\n' not in cleaned_text[e1:s2]:
+                        # Check if position is between the closing of first and opening of second
+                        if e1 <= cleaned_offset < s2:
+                            return True
+        
+        # Check tree-based suppression
+        tree_roots = _build_metadata_tree()
+        node = _find_node_at_position(tree_roots, cleaned_offset)
+        if node and issue_type in node.get("suppress", []):
+            return True
+        return False
+    
+    def _get_suppression_types(region_type: str) -> list[str]:
+        """Get the list of issue types that should be suppressed for a region type."""
+        suppression_map = {
+            "bold_marker": ["MissingArticles"],
+            "header": ["MissingArticles", "ConnectingWords"],
+            "table_delimiter": [],
+            "code_inline": [],
+            "link_text": [],
+            "link_url": [],
+            "image": [],
+            "html_block": [],
+            "code_fence": [],
+            "blockquote": [],
+            "list_marker": [],
+            "footnote_ref": [],
+            "footnote_def": [],
+            "task_checkbox": [],
+            "email_autolink": [],
+            "math_delimiter": [],
+            "definition_marker": [],
+            "horizontal_rule": [],
+            "strikethrough": [],
+            "italic_marker": [],
+        }
+        return suppression_map.get(region_type, [])
 
     # Run all ASD-STE100 checks (Section 1: Words)
     all_issues = []
@@ -280,6 +404,10 @@ def main():
         
         original_offset = offset_map.get(cleaned_offset, cleaned_offset)
         region_type = _get_region_type(cleaned_offset)
+        
+        # Skip errors suppressed by metadata (bold labels, headers, etc.)
+        if _is_suppressed_by_metadata(cleaned_offset, issue["type"], cleaned_text):
+            continue
 
         # Calculate line and column from original character offset.
         line = 1
