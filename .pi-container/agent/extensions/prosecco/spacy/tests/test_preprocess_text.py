@@ -984,7 +984,123 @@ class TestPreprocessHtmlTrivialCases:
         assert "after" in text
 
 
-class TestPreprocessMarkdownFootnote:
+class TestPreprocessMarkdownAutolink:
+    """Test cases for autolink handling."""
+
+    def test_autolink_replaced(self):
+        """Autolink should be replaced with spaces."""
+        md = "See <http://example.com> for more"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Autolink should be replaced with spaces
+        assert "<http://example.com>" not in text
+        # Text content preserved
+        assert "See" in text
+        assert "for more" in text
+
+    def test_autolink_with_angle_brackets(self):
+        """Autolink with angle brackets."""
+        md = "Visit <https://github.com> now"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Autolink replaced
+        assert "<https://github.com>" not in text
+        # Text content preserved
+        assert "Visit" in text
+        assert "now" in text
+
+    def test_multiple_autolinks(self):
+        """Multiple autolinks in text."""
+        md = "See <http://a.com> and <http://b.com>"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # All autolinks replaced
+        assert "<http://a.com>" not in text
+        assert "<http://b.com>" not in text
+        # Text content preserved
+        assert "See" in text
+        assert "and" in text
+
+    def test_autolink_with_inline_formatting(self):
+        """Autolink with inline formatting."""
+        md = "See **<http://example.com>** for more"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Autolink replaced
+        assert "<http://example.com>" not in text
+        # Bold markers replaced
+        assert "**" not in text
+        # Text content preserved
+        assert "See" in text
+        assert "for more" in text
+
+    def test_email_autolink(self):
+        """Email autolink should be replaced."""
+        md = "Contact <user@example.com> for help"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Email autolink replaced
+        assert "<user@example.com>" not in text
+        # Text content preserved
+        assert "Contact" in text
+        assert "for help" in text
+    """Test cases for task list handling."""
+
+    def test_unchecked_task_replaced(self):
+        """Unchecked task checkbox should be replaced with spaces."""
+        md = "- [ ] Unchecked task"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # [ ] should be replaced with spaces
+        assert "[ ]" not in text
+        # Text content preserved
+        assert "Unchecked task" in text
+
+    def test_checked_task_replaced(self):
+        """Checked task checkbox should be replaced with spaces."""
+        md = "- [x] Checked task"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # [x] should be replaced with spaces
+        assert "[x]" not in text
+        # Text content preserved
+        assert "Checked task" in text
+
+    def test_task_list_with_dash(self):
+        """Task list with dash marker."""
+        md = "- [ ] Item one\n- [x] Item two"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Task checkboxes replaced
+        assert "[ ]" not in text
+        assert "[x]" not in text
+        # Text content preserved
+        assert "Item one" in text
+        assert "Item two" in text
+
+    def test_task_list_with_star(self):
+        """Task list with star marker."""
+        md = "* [ ] Star task"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Task checkbox replaced
+        assert "[ ]" not in text
+        # Text content preserved
+        assert "Star task" in text
+
+    def test_task_with_inline_formatting(self):
+        """Task with inline formatting."""
+        md = "- [ ] Use `code` here"
+        text, mapping, regions = preprocess_markdown(md)
+        assert len(text) == len(md)
+        # Task checkbox replaced
+        assert "[ ]" not in text
+        # Inline code normalized
+        assert "`" not in text
+        # Text content preserved
+        assert "Use" in text
+        assert "code" in text
+        assert "here" in text
     """Test cases for footnote handling."""
 
     def test_footnote_reference_replaced(self):

@@ -361,6 +361,18 @@ def _get_markdown_blocks(md: str) -> list[tuple[int, int, str]]:
     for m in footnote_def_pattern.finditer(md):
         blocks.append((m.start(), m.end(), "footnote_def"))
 
+    # Collect task list checkboxes: [ ] (unchecked) or [x] (checked)
+    # Replace with spaces, preserve surrounding text.
+    task_checkbox_pattern = re.compile(r"\[[ x]\]", re.IGNORECASE)
+    for m in task_checkbox_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "task_checkbox"))
+
+    # Collect email autolinks: <user@example.com>
+    # Replace with spaces, preserve surrounding text.
+    email_autolink_pattern = re.compile(r"<[^>@\s]+@[^>@\s]+\.[^>@\s]+>")
+    for m in email_autolink_pattern.finditer(md):
+        blocks.append((m.start(), m.end(), "email_autolink"))
+
     # Collect Markdown headers: # heading text
     # Match from the first # to the end of the line.
     # Headers are kept visible but marked so the linter can add metadata.
@@ -551,6 +563,18 @@ def preprocess_markdown(
                 offset_map[i] = i
         elif btype == "footnote_def":
             # Replace footnote definition marker with spaces, preserve text.
+            span_length = end - start
+            parts.append(" " * span_length)
+            for i in range(start, end):
+                offset_map[i] = i
+        elif btype == "task_checkbox":
+            # Replace task checkbox with spaces, preserve surrounding text.
+            span_length = end - start
+            parts.append(" " * span_length)
+            for i in range(start, end):
+                offset_map[i] = i
+        elif btype == "email_autolink":
+            # Replace email autolink with spaces, preserve surrounding text.
             span_length = end - start
             parts.append(" " * span_length)
             for i in range(start, end):
