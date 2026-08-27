@@ -1,4 +1,5 @@
 from typing import Any
+from urllib.parse import urlparse
 
 """Shared schema definitions and validators.
 
@@ -148,6 +149,10 @@ MODELS_SCHEMA: dict = {
     "providers": {
         "type": dict,
         "keys": {
+            "baseUrl": {
+                "type": str,
+                "required": False,
+            },
             "serverCustomParameters": {
                 "type": dict,
                 "required": False,
@@ -267,5 +272,82 @@ def _validate_hf_models(
                     f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}.{field}: "
                     f"expected str, got {type(value).__name__}"
                 )
+
+    return errors
+
+
+def _validate_provider_base_urls(providers: dict) -> list[str]:
+    """Validate baseUrl for providers that have serverCustomParameters.
+
+    Checks:
+    1. baseUrl is present and non-empty string for local providers.
+    2. baseUrl starts with http:// or https://.
+    3. Hostname in baseUrl is not localhost / 127.0.0.1 / ::1.
+    4. baseUrl specifies an explicit port.
+    5. Container ports are unique across all local providers.
+    """
+    errors: list[str] = []
+    ports_seen: dict[int, list[str]] = {}
+
+    for provider_name, provider_cfg in providers.items():
+        if not isinstance(provider_cfg, dict):
+            continue
+        if "serverCustomParameters" not in provider_cfg:
+            continue
+
+        base_url = provider_cfg.get("baseUrl")
+        if base_url is None:
+            errors.append(
+                f"  providers.{provider_name}.baseUrl: required field missing for local provider (e.g. 'http://llama:9999/v1')"
+            )
+            continue
+        if not isinstance(base_url, str) or not base_url.strip():
+            errors.append(
+                f"  providers.{provider_name}.baseUrl: must be a non-empty string URL (e.g. 'http://llama:9999/v1')"
+            )
+            continue
+
+        try:
+            parsed = urlparse(base_url)
+        except Exception as e:
+            errors.append(f"  providers.{provider_name}.baseUrl: invalid URL '{base_url}': {e}")
+            continue
+
+        if parsed.scheme not in ("http", "https"):
+            errors.append(
+                f"  providers.{provider_name}.baseUrl: must start with http:// or https:// (got '{base_url}')"
+            )
+            continue
+
+        hostname = parsed.hostname
+        if not hostname:
+            errors.append(f"  providers.{provider_name}.baseUrl: missing hostname in '{base_url}'")
+            continue
+
+        if hostname.lower() in ("localhost", "127.0.0.1", "::1"):
+            errors.append(
+                f"  providers.{provider_name}.baseUrl: '{hostname}' cannot be reached from inside the container; "
+                f"use 'llama', the provider name ('{provider_name}'), or a custom hostname instead"
+            )
+            continue
+
+        port = parsed.port
+        if port is None:
+            errors.append(f"  providers.{provider_name}.baseUrl: port is required (e.g. 'http://llama:9999/v1')")
+            continue
+
+        if not (1 <= port <= 65535):
+            errors.append(f"  providers.{provider_name}.baseUrl: invalid port {port} (must be between 1 and 65535)")
+            continue
+
+        ports_seen.setdefault(port, []).append(provider_name)
+
+    for port, prov_list in ports_seen.items():
+        if len(prov_list) > 1:
+            prov_str = ", ".join(prov_list)
+            errors.append(
+                f"  Duplicate container port {port} in baseUrl for providers: {prov_str}; "
+                f"each local provider must use a unique port (e.g. 9999, 9998)"
+            )
 
     return errors

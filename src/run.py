@@ -1141,6 +1141,27 @@ def _port_holders(runtime: str, ports: list[int], project_key: str = "") -> dict
     return holders
 
 
+def _extract_server_configs(data: dict) -> tuple[list[dict], set[str]]:
+    """Extract ServerConfig dicts and hostnames to resolve from models.json data.
+
+    Returns:
+      (server_configs, llama_hostnames)
+    """
+    server_configs = []
+    llama_hostnames: set[str] = {"llama"}
+    for name, val in data.get("providers", {}).items():
+        if isinstance(val, dict) and "serverCustomParameters" in val:
+            server_config = ServerConfig.from_dict(val["serverCustomParameters"])
+            base_url = val.get("baseUrl")
+            server_configs.append({"name": name, "config": server_config, "baseUrl": base_url})
+            llama_hostnames.add(name)
+            if base_url:
+                parsed_host = urlparse(base_url).hostname
+                if parsed_host and parsed_host not in ("localhost", "127.0.0.1", "::1"):
+                    llama_hostnames.add(parsed_host)
+    return server_configs, llama_hostnames
+
+
 # ─── Main ──────────────────────────────────────────────────────────────────
 
 
@@ -1186,9 +1207,9 @@ def main() -> None:
     models_path = pi_container_dir / "agent" / "models.json"
     models_valid, models_errors = validate_models(models_path)
     if not models_valid:
-        logger.error("Models configuration invalid:")
-        for error in models_errors:
-            logger.error(error)
+        logger.error("Configuration error in models.json:")
+        for err in models_errors:
+            logger.error(err)
         logger.error("\nFix: update .pi-container/agent/models.json to match the expected schema.")
         sys.exit(1)
     flow_export_enabled = read_flow_export_enabled(pi_container_dir)
@@ -1236,11 +1257,7 @@ def main() -> None:
 
     with config_path.open("r") as file:
         data = json.load(file)
-        server_configs = []
-        for name, val in data["providers"].items():
-            if isinstance(val, dict) and "serverCustomParameters" in val:
-                server_config = ServerConfig.from_dict(val["serverCustomParameters"])
-                server_configs.append({"name": name, "config": server_config, "baseUrl": val.get("baseUrl")})
+        server_configs, llama_hostnames = _extract_server_configs(data)
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
@@ -1288,6 +1305,7 @@ def main() -> None:
                 proxy_name=proxy_name,
                 config_dir=pi_container_dir,
                 llama_ports=portconfig,
+                llama_hostnames=" ".join(sorted(llama_hostnames)),
                 ipv6=ipv6_enabled,
             ) as netmgr:
                 mitmweb_url = netmgr.mitmweb_url()

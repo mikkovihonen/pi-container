@@ -220,6 +220,9 @@ class TestContainerNetworkManagerRefCount:
         # Mock _actually_start and _actually_stop
         mgr._actually_start = MagicMock()
         mgr._actually_stop = MagicMock()
+        # Pretend the existing proxy is healthy so the second start only
+        # increments the refcount (does not call _actually_start again).
+        mgr._is_existing_proxy_healthy = MagicMock(return_value=True)
 
         # First start
         with patch("fcntl.flock"):
@@ -253,6 +256,30 @@ class TestContainerNetworkManagerRefCount:
 
         # Ref count file should be removed
         assert not mgr.paths["ref_count_file"].exists()
+
+    def test_start_recovers_from_stale_refcount(self, tmp_path):
+        """When refcount > 0 but the proxy is unreachable, start must restart it."""
+        mgr = self._make_manager(tmp_path)
+        mgr.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
+        mgr._actually_start = MagicMock()
+        mgr._actually_stop = MagicMock()
+
+        # Pre-seed a stale refcount file (container is gone).
+        mgr.paths["ref_count_file"].write_text("2\n")
+
+        # _is_existing_proxy_healthy returns False → stale refcount detected.
+        mgr._is_existing_proxy_healthy = MagicMock(return_value=False)
+
+        with patch("fcntl.flock"):
+            mgr.start()
+
+        # _actually_stop must be called first (to remove any zombie container),
+        # then _actually_start to bring the proxy up fresh.
+        mgr._actually_stop.assert_called_once()
+        mgr._actually_start.assert_called_once()
+        # A fresh refcount file is written (the stale value was replaced).
+        assert mgr.paths["ref_count_file"].exists()
+        assert int(mgr.paths["ref_count_file"].read_text().strip()) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -859,3 +886,95 @@ class TestWarnIfProxyLacksIpv6Egress:
         monkeypatch.setattr("subprocess.run", mock_run)
         # Should not raise
         mgr.warn_if_proxy_lacks_ipv6_egress()
+
+
+class TestContainerNetworkManagerLlamaHostnames:
+    """Tests for LLAMA_HOSTNAMES in ContainerNetworkManager."""
+
+    def test_llama_hostnames_passed_to_proxy_run_cmd(self, tmp_path, monkeypatch):
+        """When llama_hostnames is provided, --env LLAMA_HOSTNAMES=... is passed in proxy run cmd."""
+        from network import ContainerNetworkManager
+
+        recorded_cmds = []
+
+        def mock_run_quiet(cmd, **kwargs):
+            recorded_cmds.append(cmd)
+
+        monkeypatch.setattr("network.run_quiet", mock_run_quiet)
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda cmd, **kwargs: MagicMock(return_value=MagicMock(returncode=0)),
+        )
+
+        mgr = ContainerNetworkManager(
+            container_runtime="podman",
+            network_name="test-net",
+            proxy_image="test-proxy:latest",
+            proxy_name="test-proxy",
+            config_dir=tmp_path,
+            llama_ports='[{"cp": 9999, "hp": 50001}]',
+            llama_hostnames="llama local-gemma local-ornith",
+        )
+        mgr._wait_for_proxy_health = MagicMock()
+
+        mgr._actually_start()
+
+        proxy_run_cmds = [cmd for cmd in recorded_cmds if "run" in cmd and "test-proxy" in cmd]
+        assert len(proxy_run_cmds) == 1
+        cmd = proxy_run_cmds[0]
+        assert "--env" in cmd
+        assert "LLAMA_HOSTNAMES=llama local-gemma local-ornith" in cmd
+        assert 'LLAMA_PORTS=[{"cp": 9999, "hp": 50001}]' in cmd
+
+    def test_is_existing_proxy_healthy_checks_llama_ports_match(self, tmp_path, monkeypatch):
+        """When running proxy has different LLAMA_PORTS, _is_existing_proxy_healthy returns False."""
+        import json
+
+        from network import ContainerNetworkManager
+
+        mgr = ContainerNetworkManager(
+            container_runtime="podman",
+            network_name="test-net",
+            proxy_image="test-proxy:latest",
+            proxy_name="test-proxy",
+            config_dir=tmp_path,
+            llama_ports='[{"cp": 9999, "hp": 50002}]',
+            llama_hostnames="llama",
+        )
+        mgr._query_published_port = MagicMock(return_value=8080)
+        monkeypatch.setattr("urllib.request.urlopen", lambda url, timeout=3: MagicMock())
+
+        # Mock inspect returning old ports (50001)
+        mock_env = json.dumps(['LLAMA_PORTS=[{"cp": 9999, "hp": 50001}]', "LLAMA_HOSTNAMES=llama"])
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda cmd, **kwargs: MagicMock(returncode=0, stdout=mock_env),
+        )
+
+        assert mgr._is_existing_proxy_healthy() is False
+
+    def test_is_existing_proxy_healthy_returns_true_when_matching(self, tmp_path, monkeypatch):
+        """When running proxy matches LLAMA_PORTS and LLAMA_HOSTNAMES, returns True."""
+        import json
+
+        from network import ContainerNetworkManager
+
+        mgr = ContainerNetworkManager(
+            container_runtime="podman",
+            network_name="test-net",
+            proxy_image="test-proxy:latest",
+            proxy_name="test-proxy",
+            config_dir=tmp_path,
+            llama_ports='[{"cp": 9999, "hp": 50001}]',
+            llama_hostnames="llama",
+        )
+        mgr._query_published_port = MagicMock(return_value=8080)
+        monkeypatch.setattr("urllib.request.urlopen", lambda url, timeout=3: MagicMock())
+
+        mock_env = json.dumps(['LLAMA_PORTS=[{"cp": 9999, "hp": 50001}]', "LLAMA_HOSTNAMES=llama"])
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda cmd, **kwargs: MagicMock(returncode=0, stdout=mock_env),
+        )
+
+        assert mgr._is_existing_proxy_healthy() is True

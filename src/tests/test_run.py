@@ -1910,3 +1910,76 @@ class TestPortHolders:
         )
         self._ps(payload, monkeypatch)
         assert run._port_holders("podman", [18080]) == {18080: "good (Up)"}
+
+
+# ---------------------------------------------------------------------------
+# Extract server configs and hostnames
+# ---------------------------------------------------------------------------
+
+
+class TestExtractServerConfigs:
+    def test_extract_single_provider(self):
+        data = {
+            "providers": {
+                "local-ornith": {
+                    "baseUrl": "http://llama:9999/v1",
+                    "serverCustomParameters": {
+                        "flags": [],
+                        "hfModels": {
+                            "main": {
+                                "fileFlag": "--model",
+                                "repo": "r",
+                                "file": "f",
+                                "dir": "d",
+                            }
+                        },
+                    },
+                }
+            }
+        }
+        configs, hostnames = run._extract_server_configs(data)
+        assert len(configs) == 1
+        assert configs[0]["name"] == "local-ornith"
+        assert configs[0]["baseUrl"] == "http://llama:9999/v1"
+        assert hostnames == {"llama", "local-ornith"}
+
+    def test_extract_multiple_providers_with_custom_hostnames(self):
+        data = {
+            "providers": {
+                "local-ornith": {
+                    "baseUrl": "http://llama:9999/v1",
+                    "serverCustomParameters": {
+                        "flags": [],
+                        "hfModels": {
+                            "main": {
+                                "fileFlag": "--model",
+                                "repo": "r",
+                                "file": "f",
+                                "dir": "d",
+                            }
+                        },
+                    },
+                },
+                "local-gemma": {
+                    "baseUrl": "http://gemma-server:9998/v1",
+                    "serverCustomParameters": {
+                        "flags": [],
+                        "hfModels": {
+                            "main": {
+                                "fileFlag": "--model",
+                                "repo": "r",
+                                "file": "f",
+                                "dir": "d",
+                            }
+                        },
+                    },
+                },
+                "anthropic": {
+                    "baseUrl": "https://api.anthropic.com/v1",
+                },
+            }
+        }
+        configs, hostnames = run._extract_server_configs(data)
+        assert len(configs) == 2
+        assert {c["name"] for c in configs} == {"local-ornith", "local-gemma"}
+        assert hostnames == {"llama", "local-ornith", "local-gemma", "gemma-server"}

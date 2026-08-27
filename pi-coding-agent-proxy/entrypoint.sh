@@ -45,14 +45,23 @@ IP_FAMILIES=(iptables)
 [ "${IPV6_ENABLED}" = "true" ] && IP_FAMILIES+=(ip6tables)
 ipt() { for _fam in "${IP_FAMILIES[@]}"; do "$_fam" "$@"; done; }
 
-# ─── Resolve "llama" hostname to this container's eth1 IP ─────────────────
+# ─── Resolve "llama" and provider hostnames to this container's eth1 IP ───
 # mitmproxy's DNS addon reads /etc/hosts by default (dns_use_hosts_file=True),
-# so the pi-coding-agent can use http://llama:<cp>/v1 in models.json and
-# mitmproxy (running as its DNS server) will resolve "llama" to eth1's IP.
+# so the pi-coding-agent can use http://llama:<cp>/v1 or http://<provider>:<cp>/v1
+# in models.json and mitmproxy (running as its DNS server) will resolve them
+# to eth1's IP.
 ETH1_IP=$(ip -j -4 addr show eth1 2>/dev/null | jq -r '.[0].addr_info[0].local // empty')
 if [ -n "$ETH1_IP" ]; then
     echo "$ETH1_IP  llama" >> /etc/hosts
     echo "[hosts] llama → $ETH1_IP"
+    if [ -n "$LLAMA_HOSTNAMES" ]; then
+        for host in $LLAMA_HOSTNAMES; do
+            if [ "$host" != "llama" ] && [ -n "$host" ]; then
+                echo "$ETH1_IP  $host" >> /etc/hosts
+                echo "[hosts] $host → $ETH1_IP"
+            fi
+        done
+    fi
 else
     echo "WARNING: Could not determine eth1 IP; 'llama' hostname will not resolve."
 fi
@@ -94,7 +103,7 @@ if [ -n "$LLAMA_PORTS" ]; then
     fi
 
     echo "$LLAMA_PORTS" | jq -r '.[] | "\(.cp):\(.hp)"' | while IFS=: read -r cp hp; do
-        [ -z "$cp" ] || [ -z "$hp" ] && continue
+        [ -z "$cp" ] || [ -z "$hp" ] || [ "$cp" = "null" ] || [ "$hp" = "null" ] && continue
         iptables -t nat -A PREROUTING -i eth1 -p tcp --dport "$cp" -j DNAT --to-destination "${LLAMA_TARGET}:${hp}"
         # Permit the DNAT'd model traffic through the (default-deny) FORWARD chain.
         iptables -A FORWARD -i eth1 -o eth0 -p tcp -d "$LLAMA_TARGET" --dport "$hp" -j ACCEPT

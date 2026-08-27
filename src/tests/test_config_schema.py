@@ -331,6 +331,99 @@ class TestValidateModels:
         assert is_valid is True
         assert errors == []
 
+    def test_valid_multiple_providers_passes(self, tmp_path: Path):
+        """When multiple providers have valid distinct ports, validation passes."""
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path,
+            {
+                "local-ornith": {
+                    "baseUrl": "http://llama:9999/v1",
+                    "serverCustomParameters": {
+                        "flags": ["--ctx-size", 4096],
+                        "hfModels": {
+                            "main": {
+                                "fileFlag": "--model",
+                                "repo": "test/repo1",
+                                "file": "model1.gguf",
+                                "dir": "model-dir1",
+                                "additionalServerFlags": [],
+                                "sha256": "",
+                            },
+                        },
+                    },
+                },
+                "local-gemma": {
+                    "baseUrl": "http://local-gemma:9998/v1",
+                    "serverCustomParameters": {
+                        "flags": ["--ctx-size", 8192],
+                        "hfModels": {
+                            "main": {
+                                "fileFlag": "--model",
+                                "repo": "test/repo2",
+                                "file": "model2.gguf",
+                                "dir": "model-dir2",
+                                "additionalServerFlags": [],
+                                "sha256": "",
+                            },
+                        },
+                    },
+                },
+                "anthropic": {
+                    "baseUrl": "https://api.anthropic.com/v1",
+                },
+            },
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is True
+        assert errors == []
+
+    def test_duplicate_port_fails(self, tmp_path: Path):
+        """When multiple local providers share the same container port, validation fails."""
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path,
+            {
+                "local-ornith": {
+                    "baseUrl": "http://llama:9999/v1",
+                    "serverCustomParameters": {
+                        "flags": [],
+                        "hfModels": {
+                            "main": {
+                                "fileFlag": "--model",
+                                "repo": "test/repo1",
+                                "file": "model1.gguf",
+                                "dir": "model-dir1",
+                                "additionalServerFlags": [],
+                                "sha256": "",
+                            },
+                        },
+                    },
+                },
+                "local-gemma": {
+                    "baseUrl": "http://llama:9999/v1",
+                    "serverCustomParameters": {
+                        "flags": [],
+                        "hfModels": {
+                            "main": {
+                                "fileFlag": "--model",
+                                "repo": "test/repo2",
+                                "file": "model2.gguf",
+                                "dir": "model-dir2",
+                                "additionalServerFlags": [],
+                                "sha256": "",
+                            },
+                        },
+                    },
+                },
+            },
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("Duplicate container port 9999" in e for e in errors)
+
     def test_missing_models_file(self, tmp_path: Path):
         """When models.json does not exist, validation fails."""
         from config_schema import validate_models
@@ -482,6 +575,7 @@ class TestValidateModels:
                 {
                     "providers": {
                         "local-test": {
+                            "baseUrl": "http://llama:9999/v1",
                             "serverCustomParameters": {
                                 "flags": [
                                     "--ctx-size",
@@ -802,3 +896,116 @@ class TestSchemaCommonDirect:
         errors = _validate_hf_models(None, "test-provider")
         assert len(errors) == 1
         assert "must not be null" in errors[0]
+
+    def test_validate_provider_base_urls_valid_multiple(self):
+        """When multiple local providers have valid distinct ports, validation passes."""
+        from schema_common import _validate_provider_base_urls
+
+        providers = {
+            "local-ornith": {
+                "baseUrl": "http://llama:9999/v1",
+                "serverCustomParameters": {"hfModels": {}},
+            },
+            "local-gemma": {
+                "baseUrl": "http://local-gemma:9998/v1",
+                "serverCustomParameters": {"hfModels": {}},
+            },
+            "anthropic": {
+                "baseUrl": "https://api.anthropic.com/v1",
+            },
+        }
+        errors = _validate_provider_base_urls(providers)
+        assert errors == []
+
+    def test_validate_provider_base_urls_missing(self):
+        """When local provider is missing baseUrl, validation fails."""
+        from schema_common import _validate_provider_base_urls
+
+        providers = {
+            "local-ornith": {
+                "serverCustomParameters": {"hfModels": {}},
+            }
+        }
+        errors = _validate_provider_base_urls(providers)
+        assert len(errors) == 1
+        assert "required field missing" in errors[0]
+
+    def test_validate_provider_base_urls_non_string(self):
+        """When baseUrl is not a string, validation fails."""
+        from schema_common import _validate_provider_base_urls
+
+        providers = {
+            "local-ornith": {
+                "baseUrl": 12345,
+                "serverCustomParameters": {"hfModels": {}},
+            }
+        }
+        errors = _validate_provider_base_urls(providers)
+        assert len(errors) == 1
+        assert "must be a non-empty string URL" in errors[0]
+
+    def test_validate_provider_base_urls_invalid_scheme(self):
+        """When baseUrl has invalid scheme, validation fails."""
+        from schema_common import _validate_provider_base_urls
+
+        providers = {
+            "local-ornith": {
+                "baseUrl": "ftp://llama:9999/v1",
+                "serverCustomParameters": {"hfModels": {}},
+            }
+        }
+        errors = _validate_provider_base_urls(providers)
+        assert len(errors) == 1
+        assert "must start with http:// or https://" in errors[0]
+
+    def test_validate_provider_base_urls_missing_port(self):
+        """When baseUrl has no port, validation fails."""
+        from schema_common import _validate_provider_base_urls
+
+        providers = {
+            "local-ornith": {
+                "baseUrl": "http://llama/v1",
+                "serverCustomParameters": {"hfModels": {}},
+            }
+        }
+        errors = _validate_provider_base_urls(providers)
+        assert len(errors) == 1
+        assert "port is required" in errors[0]
+
+    def test_validate_provider_base_urls_localhost_rejected(self):
+        """When baseUrl uses localhost or 127.0.0.1, validation fails with helpful message."""
+        from schema_common import _validate_provider_base_urls
+
+        providers = {
+            "local-ornith": {
+                "baseUrl": "http://localhost:9999/v1",
+                "serverCustomParameters": {"hfModels": {}},
+            },
+            "local-gemma": {
+                "baseUrl": "http://127.0.0.1:9998/v1",
+                "serverCustomParameters": {"hfModels": {}},
+            },
+        }
+        errors = _validate_provider_base_urls(providers)
+        assert len(errors) == 2
+        assert any("cannot be reached from inside the container" in e and "localhost" in e for e in errors)
+        assert any("cannot be reached from inside the container" in e and "127.0.0.1" in e for e in errors)
+
+    def test_validate_provider_base_urls_duplicate_port(self):
+        """When multiple local providers share the same container port, validation fails."""
+        from schema_common import _validate_provider_base_urls
+
+        providers = {
+            "local-ornith": {
+                "baseUrl": "http://llama:9999/v1",
+                "serverCustomParameters": {"hfModels": {}},
+            },
+            "local-gemma": {
+                "baseUrl": "http://llama:9999/v1",
+                "serverCustomParameters": {"hfModels": {}},
+            },
+        }
+        errors = _validate_provider_base_urls(providers)
+        assert len(errors) == 1
+        assert "Duplicate container port 9999" in errors[0]
+        assert "local-ornith" in errors[0] and "local-gemma" in errors[0]

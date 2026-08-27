@@ -23,7 +23,7 @@ flowchart TB
     subgraph proxy["<b>pi-coding-agent-proxy</b>"]
         direction TB
         mitm["mitmproxy<br/>transparent :8080<br/>allowlist + token_replacer"]
-        dns["mitmproxy<br/>DNS :5353<br/>resolves 'llama' → eth1 IP"]
+        dns["mitmproxy<br/>DNS :5353<br/>resolves 'llama' / provider hosts → eth1 IP"]
     end
     style proxy fill:none,text-align:left
 
@@ -43,7 +43,7 @@ flowchart TB
     %% Proxy internal: L4 interception & forwarding
     eth1 -->|REDIRECT<br/>80/443 → :8080| mitm
     eth1 -->|REDIRECT<br/>53 → :5353| dns
-    eth1 -->|DNAT llama:<cp> → llama_net| llama_net
+    eth1 -->|DNAT provider:<cp> → llama_net| llama_net
     mitm -->|egress| eth0
     dns -->|egress| eth0
     eth1 -.->|opt-in FORWARD → eth0 → MASQUERADE| eth0

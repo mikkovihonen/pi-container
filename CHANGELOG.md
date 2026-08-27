@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+- **Multi-provider support and dynamic hostname resolution.** Multiple local `llama-server` providers and external cloud providers can now be configured in `.pi-container/agent/models.json`. Each local provider launches its own host server instance and routes via a unique container port.
+- **Provider `baseUrl` validation in `models.json`.** `validate_models()` now validates `baseUrl` for all local providers (`serverCustomParameters`), enforcing `http://` or `https://` URLs, requiring explicit ports, rejecting loopback addresses (`localhost`/`127.0.0.1`/`::1`) with actionable guidance, and rejecting duplicate container ports across local providers before containers start.
+- **Dynamic proxy DNS mapping for provider hostnames.** `run.py` and `ContainerNetworkManager` collect provider names and custom hostnames from `models.json` and pass them via `LLAMA_HOSTNAMES` to `pi-coding-agent-proxy`, which dynamically adds them to `/etc/hosts` so mitmproxy DNS resolves them to the proxy's internal address (`ETH1_IP`).
+
+### Fixed
+- **Multi-provider `baseUrl`s unreachable from within container.** Previously, the proxy only resolved the literal hostname `llama`, causing custom hostnames and provider names to fail DNS lookup, while multiple providers sharing port 9999 suffered iptables DNAT collisions.
+- **Stale proxy port routing detection.** `ContainerNetworkManager._is_existing_proxy_healthy()` now validates that an already-running proxy container's `LLAMA_PORTS` and `LLAMA_HOSTNAMES` match the current run. When `llama-server` restarts on newly allocated host ports, stale proxy containers holding obsolete DNAT rules are automatically cleaned up and restarted with fresh port mappings.
+
 ## [0.5.1] - 2026-08-06
 
 ### Fixed

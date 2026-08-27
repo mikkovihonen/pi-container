@@ -83,14 +83,21 @@ pi-container reads only a subset of pi-coding-agent's `models.json` fields. pi-c
 | Field | Used by pi-container? | Notes |
 |-------|----------------------|-------|
 | `providers.<name>` (key) | **Yes** — as `server_id` | Becomes the llama-server `--alias` and the sharing key. Must be unique per provider. |
-| `baseUrl` | **Yes** — port only | `run.py` parses `http://llama:9999/v1` and extracts the port (`9999`) so the agent container knows which llama-server port to target. The scheme/host/path are not validated. |
+| `baseUrl` | **Yes** | Required for local providers (`serverCustomParameters`). Must start with `http://` or `https://` and include an explicit container port. Hostnames (`llama`, the provider name, or custom hostnames) are automatically resolved to the proxy. Ports must be unique across local providers (e.g. `9999`, `9998`). Note: `localhost`/`127.0.0.1` cannot be used because it resolves to the container's own loopback. |
 | `serverCustomParameters.hfModels` | **Yes** | Model file download config + per-model additional flags. |
 | `serverCustomParameters.flags` | **Yes** | llama-server CLI flags, passed verbatim. |
 | `api`, `apiKey` | No | pi-coding-agent uses these for API negotiation. pi-container ignores them. |
 | `compat` | No | pi-coding-agent compatibility flags. pi-container ignores them. |
 | `models[].id`, `models[].name`, `models[].contextWindow`, `models[].toolCalling`, `models[].vision`, `models[].reasoning`, `models[].options`, etc. | No | pi-coding-agent model metadata. pi-container does not read these. |
 
-In short, pi-container only needs `baseUrl` (for the port), the provider name, and `serverCustomParameters`. The rest of the `models.json` structure is for pi-coding-agent's model registry. pi-container passes it through untouched.
+In short, pi-container only needs `baseUrl` (for the port and hostname routing), the provider name, and `serverCustomParameters`. The rest of the `models.json` structure is for pi-coding-agent's model registry. pi-container passes it through untouched.
+
+#### Multiple providers
+
+You can configure multiple local providers (or a mix of local and cloud providers) in `models.json`. When multiple local providers are configured:
+- Each provider with `serverCustomParameters` launches its own `llama-server` process on the host.
+- Each local provider's `baseUrl` must use a **unique container port** (for example, `http://llama:9999/v1` for the first provider, `http://llama:9998/v1` or `http://local-gemma:9998/v1` for the second) so the transparent proxy can forward traffic to the appropriate server.
+- The proxy automatically resolves `llama`, each provider name, and custom hostnames in `baseUrl` to the proxy's internal address.
 
 The `serverCustomParameters` object has two fields:
 

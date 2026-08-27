@@ -9,6 +9,7 @@ from schema_common import (
     _validate_hf_models,
     _validate_models_flags,
     _validate_models_schema,
+    _validate_provider_base_urls,
     _validate_schema,
 )
 from template_paths import _check_chat_template_paths as _shared_check_chat_template_paths
@@ -189,6 +190,8 @@ def validate_models(
     # Validate flags arrays
     providers = data.get("providers", {})
     for provider_name, provider_cfg in providers.items():
+        if not isinstance(provider_cfg, dict) or "serverCustomParameters" not in provider_cfg:
+            continue
         server_params = provider_cfg.get("serverCustomParameters", {})
         flags = server_params.get("flags", [])
         if not isinstance(flags, list):
@@ -200,11 +203,18 @@ def validate_models(
 
     # Validate hfModels entries
     for provider_name, provider_cfg in providers.items():
+        if not isinstance(provider_cfg, dict) or "serverCustomParameters" not in provider_cfg:
+            continue
         server_params = provider_cfg.get("serverCustomParameters", {})
         hf_models = server_params.get("hfModels")
         hf_errors = _validate_hf_models(hf_models, provider_name)
         if hf_errors:
             errors.extend(hf_errors)
+
+    # Validate baseUrl on providers with serverCustomParameters
+    base_url_errors = _validate_provider_base_urls(providers)
+    if base_url_errors:
+        errors.extend(base_url_errors)
 
     # Validate --chat-template-file paths if requested
     if check_chat_template_paths:

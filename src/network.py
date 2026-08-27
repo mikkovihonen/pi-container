@@ -374,6 +374,7 @@ class ContainerNetworkManager:
         proxy_name: str = "proxy",
         config_dir: Path | None = None,
         llama_ports: str | None = None,
+        llama_hostnames: str | None = None,
         ipv6: bool = False,
     ) -> None:
         # Accept either a runtime name (used by tests) or a ready ContainerRuntime.
@@ -388,6 +389,7 @@ class ContainerNetworkManager:
         self.proxy_name: str = proxy_name
         self.config_dir: Path = config_dir or CONFIG_DIR
         self.llama_ports: str | None = llama_ports
+        self.llama_hostnames: str | None = llama_hostnames
         self.ipv6: bool = ipv6
         # Host port the proxy's mitmweb UI is published on. Auto-assigned when
         # this process starts the proxy; resolved from the running container when
@@ -542,6 +544,23 @@ class ContainerNetworkManager:
             ref_count = self._get_ref_count()
             if ref_count == 0:
                 self._actually_start()
+            else:
+                # Attach to an existing proxy — but only if it is still alive.
+                # A stale .refcount file (e.g. after OOM, reboot, or manual
+                # ``podman stop``) must not silently skip startup.
+                if not self._is_existing_proxy_healthy():
+                    logger.warning(
+                        "Existing proxy refcount > 0 but proxy container is "
+                        "unreachable; cleaning up stale state and restarting."
+                    )
+                    # Stop/remove any zombie container (best-effort — the
+                    # container may already be gone, and _actually_stop uses
+                    # check=False so that is harmless). Then clear the stale
+                    # refcount file and bring the proxy up fresh.
+                    self._actually_stop()
+                    self._cleanup_stale_refcount()
+                    self._actually_start()
+                    ref_count = 1
 
             ref_count += 1
             self.paths["ref_count_file"].write_text(str(ref_count))
@@ -678,6 +697,7 @@ class ContainerNetworkManager:
             "--env",
             f"ADMIN_PASSWORD={ADMIN_PASSWORD}",
             *(["--env", f"LLAMA_PORTS={self.llama_ports}"] if self.llama_ports else []),
+            *(["--env", f"LLAMA_HOSTNAMES={self.llama_hostnames}"] if self.llama_hostnames else []),
             *(["--env", f"LLAMA_HOST_ADDR={llama_host_addr}"] if llama_host_addr else []),
             # Per-protocol forwarding opt-ins (uninspected protocols), read from
             # this project's config.yaml (egress.allow).
@@ -699,13 +719,17 @@ class ContainerNetworkManager:
         self._wait_for_proxy_health(timeout=30)
 
     def _actually_stop(self) -> None:
-        logger.info(f"Stopping proxy container {self.proxy_name}...")
+        logger.info(f"Removing proxy container {self.proxy_name}...")
         # Teardown is best-effort: a container/network that is already gone must
         # not abort cleanup, so check=False (log a warning, don't raise).
+        # ``rm -f`` handles both running and exited containers in one step —
+        # running containers are killed, exited ones are removed. Using rm
+        # instead of stop+rm avoids the two-step gap where an exited container
+        # still occupies the name and blocks a subsequent ``run --name``.
         run_quiet(
-            [self.container_runtime, "stop", self.proxy_name],
+            [self.container_runtime, "rm", "-f", self.proxy_name],
             check=False,
-            label=f"stop proxy container {self.proxy_name}",
+            label=f"remove proxy container {self.proxy_name}",
             logger=logger,
         )
 
@@ -718,6 +742,80 @@ class ContainerNetworkManager:
                 label=f"remove network {self.network_name}",
                 logger=logger,
             )
+
+    def _is_existing_proxy_healthy(self) -> bool:
+        """Check whether the already-running proxy container is alive, responsive,
+        and configured for this run's port forwarding.
+
+        Checks:
+          1. ``podman port`` resolves the published mitmweb port.
+          2. An HTTP request to mitmweb returns 2xx/3xx/4xx.
+          3. The running container's LLAMA_PORTS and LLAMA_HOSTNAMES match this run.
+             If llama-server was restarted on new host ports, the existing proxy
+             holds stale DNAT rules and must be restarted.
+        """
+        port = self._query_published_port()
+        if port is None:
+            return False
+        url = f"http://127.0.0.1:{port}"
+        try:
+            with urllib.request.urlopen(url, timeout=3):
+                pass
+        except urllib.error.HTTPError as e:
+            # 4xx means the server is alive and responding (e.g. mitmweb
+            # returns 401 for unauthenticated endpoints). 5xx means the
+            # server is up but broken — treat as unhealthy.
+            if not (400 <= e.code < 500):
+                return False
+        except Exception:
+            return False
+
+        # Verify that the running proxy's LLAMA_PORTS and LLAMA_HOSTNAMES match
+        try:
+            inspect_res = subprocess.run(
+                [self.container_runtime, "inspect", self.proxy_name, "--format", "{{json .Config.Env}}"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if inspect_res.returncode != 0:
+                return False
+            import json as _json
+
+            env_list = _json.loads(inspect_res.stdout.strip())
+            env_dict = {}
+            for item in env_list:
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    env_dict[k] = v
+
+            running_ports = env_dict.get("LLAMA_PORTS")
+            expected_ports = self.llama_ports
+            if (running_ports or None) != (expected_ports or None):
+                logger.info(
+                    f"Running proxy {self.proxy_name} has stale LLAMA_PORTS "
+                    f"({running_ports!r} != {expected_ports!r}); restarting proxy."
+                )
+                return False
+
+            running_hosts = env_dict.get("LLAMA_HOSTNAMES")
+            expected_hosts = self.llama_hostnames
+            if (running_hosts or None) != (expected_hosts or None):
+                logger.info(
+                    f"Running proxy {self.proxy_name} has stale LLAMA_HOSTNAMES "
+                    f"({running_hosts!r} != {expected_hosts!r}); restarting proxy."
+                )
+                return False
+
+        except Exception as e:
+            logger.debug(f"Could not inspect running proxy env: {e}")
+            return False
+
+        return True
+
+    def _cleanup_stale_refcount(self) -> None:
+        """Remove the stale refcount artifact so the next start() begins fresh."""
+        self.paths["ref_count_file"].unlink(missing_ok=True)
 
     def _wait_for_proxy_health(self, timeout: int = 30) -> None:
         """Wait for the proxy container's mitmweb UI to become healthy.
