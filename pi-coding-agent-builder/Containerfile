@@ -55,7 +55,7 @@ ARG RUST_DIST_DATE=2026-07-16
 ARG RUST_SHA256_X86_64=b4cdbc7cc6b0ee0a2666b1872769fdb2ad8393b28b63952f6493b4b400e4832b
 ARG RUST_SHA256_AARCH64=2f2496c70bd336a66a4c8baf2d303ba161f3552f192444c3639ba903c7c1e2c5
 
-FROM debian:13.6-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258 AS deps
+FROM debian:13.6-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS deps
 
 # Everything that will be copied into the agent image is staged here, mirroring its
 # final layout: /out/usr/local/bin/podman → /usr/local/bin/podman.
