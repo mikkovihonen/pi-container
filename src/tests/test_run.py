@@ -1983,3 +1983,144 @@ class TestExtractServerConfigs:
         assert len(configs) == 2
         assert {c["name"] for c in configs} == {"local-ornith", "local-gemma"}
         assert hostnames == {"llama", "local-ornith", "local-gemma", "gemma-server"}
+
+
+# ---------------------------------------------------------------------------
+# Cleanup orphaned agent containers
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupOrphanedAgentContainers:
+    def test_removes_container_with_dead_launcher_pid(self, monkeypatch):
+        container_json = json.dumps(
+            [
+                {
+                    "Names": ["pi-coding-agent-1234567890ab"],
+                    "Image": "localhost/pi-container-project-f155d7064f-60e201e6.local:latest",
+                    "Labels": {
+                        "pi-container.project.hash": "f155d7064f",
+                        "pi-container.launcher_pid": "88888",
+                        "pi-container.type": "agent",
+                    },
+                    "Status": "Up 10 minutes",
+                }
+            ]
+        )
+        monkeypatch.setattr(
+            run.subprocess,
+            "run",
+            lambda cmd, **kw: MagicMock(returncode=0, stdout=container_json, stderr=""),
+        )
+        monkeypatch.setattr(run, "is_pid_alive", lambda pid: False)
+        removed_calls: list[list[str]] = []
+        monkeypatch.setattr(
+            run,
+            "run_quiet",
+            lambda cmd, **kw: removed_calls.append(cmd) or MagicMock(returncode=0),
+        )
+
+        removed = run._cleanup_orphaned_agent_containers("podman", "f155d7064f")
+        assert removed == ["pi-coding-agent-1234567890ab"]
+        assert len(removed_calls) == 1
+        assert removed_calls[0][:4] == ["podman", "rm", "-f", "pi-coding-agent-1234567890ab"]
+
+    def test_skips_container_with_live_launcher_pid(self, monkeypatch):
+        import os
+
+        container_json = json.dumps(
+            [
+                {
+                    "Names": ["pi-coding-agent-1234567890ab"],
+                    "Image": "localhost/pi-container-project-f155d7064f-60e201e6.local:latest",
+                    "Labels": {
+                        "pi-container.project.hash": "f155d7064f",
+                        "pi-container.launcher_pid": str(os.getpid()),
+                        "pi-container.type": "agent",
+                    },
+                    "Status": "Up 10 minutes",
+                }
+            ]
+        )
+        monkeypatch.setattr(
+            run.subprocess,
+            "run",
+            lambda cmd, **kw: MagicMock(returncode=0, stdout=container_json, stderr=""),
+        )
+        monkeypatch.setattr(run, "is_pid_alive", lambda pid: True)
+        removed_calls: list[list[str]] = []
+        monkeypatch.setattr(
+            run,
+            "run_quiet",
+            lambda cmd, **kw: removed_calls.append(cmd) or MagicMock(returncode=0),
+        )
+
+        removed = run._cleanup_orphaned_agent_containers("podman", "f155d7064f")
+        assert removed == []
+        assert len(removed_calls) == 0
+
+    def test_skips_containers_from_other_projects(self, monkeypatch):
+        container_json = json.dumps(
+            [
+                {
+                    "Names": ["pi-coding-agent-other-project"],
+                    "Image": "localhost/pi-container-project-other123-60e201e6.local:latest",
+                    "Labels": {
+                        "pi-container.project.hash": "other123",
+                        "pi-container.launcher_pid": "88888",
+                    },
+                    "Status": "Up 10 minutes",
+                }
+            ]
+        )
+        monkeypatch.setattr(
+            run.subprocess,
+            "run",
+            lambda cmd, **kw: MagicMock(returncode=0, stdout=container_json, stderr=""),
+        )
+        monkeypatch.setattr(run, "is_pid_alive", lambda pid: False)
+        removed = run._cleanup_orphaned_agent_containers("podman", "f155d7064f")
+        assert removed == []
+
+    def test_removes_exited_container_without_launcher_label(self, monkeypatch):
+        container_json = json.dumps(
+            [
+                {
+                    "Names": ["pi-coding-agent-old"],
+                    "Image": "localhost/pi-container-project-f155d7064f-60e201e6.local:latest",
+                    "Labels": {
+                        "pi-container.project.hash": "f155d7064f",
+                    },
+                    "Status": "Exited (137) 5 minutes ago",
+                }
+            ]
+        )
+        monkeypatch.setattr(
+            run.subprocess,
+            "run",
+            lambda cmd, **kw: MagicMock(returncode=0, stdout=container_json, stderr=""),
+        )
+        monkeypatch.setattr(
+            run,
+            "run_quiet",
+            lambda cmd, **kw: MagicMock(returncode=0),
+        )
+        removed = run._cleanup_orphaned_agent_containers("podman", "f155d7064f")
+        assert removed == ["pi-coding-agent-old"]
+
+
+# ---------------------------------------------------------------------------
+# Sweep orphaned servers
+# ---------------------------------------------------------------------------
+
+
+class TestSweepOrphanedServers:
+    def test_delegates_to_server_cleanup(self, monkeypatch, tmp_path):
+        called_with = []
+        monkeypatch.setattr(
+            run.Server,
+            "cleanup_orphaned_servers",
+            lambda lock_dir: called_with.append(lock_dir) or ["cleaned-instance"],
+        )
+        res = run._sweep_orphaned_servers(tmp_path)
+        assert res == ["cleaned-instance"]
+        assert called_with == [tmp_path]

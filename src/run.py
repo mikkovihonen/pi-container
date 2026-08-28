@@ -5,6 +5,7 @@ sys.dont_write_bytecode = True
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import signal
@@ -29,7 +30,7 @@ from config import (
     REPO_ROOT,
 )
 from config_schema import SCHEMA_VERSION_MISMATCH, validate_config, validate_models, validate_project_yaml
-from flow_export import export_mitmweb_flows, poll_agent_container_ips
+from flow_export import export_mitmweb_flows, poll_agent_container_ips, recover_dangling_flows
 from models import Model, ServerConfig
 from network import (
     ContainerNetworkManager,
@@ -49,7 +50,10 @@ from util import (
     extract_ipv4_from_ip_addr,
     get_sanitized_git_config_json,
     handle_signal,
+    is_pid_alive,
+    run_quiet,
     validate_environment,
+    warn_missing_gitignore,
 )
 
 logger = logging.getLogger(__name__)
@@ -725,6 +729,81 @@ def _cleanup_orphaned_project_images(runtime: str) -> list[str]:
     return removed
 
 
+def _cleanup_orphaned_agent_containers(runtime: str, project_key: str) -> list[str]:
+    """Discover and remove orphaned agent containers for this project.
+
+    An agent container is considered orphaned if:
+    - Its name starts with 'pi-coding-agent-' or its labels match pi-container.project.hash=project_key.
+    - Its launcher process PID (from label pi-container.launcher_pid) is no longer alive,
+      or its state is Exited/Created.
+
+    Containers belonging to active concurrent runs (launcher PID still alive) are skipped.
+    """
+    removed: list[str] = []
+    try:
+        result = subprocess.run(
+            [runtime, "ps", "--all", "--format", "json"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+        containers = json.loads(result.stdout or "[]")
+    except Exception as e:
+        logger.warning(f"Could not list containers for agent orphan cleanup: {e}")
+        return removed
+
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        raw_names = container.get("Names") or []
+        if isinstance(raw_names, str):
+            name = raw_names
+        elif raw_names:
+            name = raw_names[0]
+        else:
+            name = str(container.get("Id") or "")[:12]
+        name = str(name).lstrip("/")
+        if not name or not name.startswith("pi-coding-agent-"):
+            continue
+
+        image = str(container.get("Image") or "")
+        labels = container.get("Labels") or {}
+        project_label = labels.get("pi-container.project.hash")
+        is_my_project = (project_label == project_key) or (project_key in image)
+        if not is_my_project:
+            continue
+
+        launcher_pid_str = labels.get("pi-container.launcher_pid")
+        is_orphan = False
+        if launcher_pid_str:
+            try:
+                launcher_pid = int(launcher_pid_str)
+                if not is_pid_alive(launcher_pid):
+                    is_orphan = True
+            except ValueError:
+                is_orphan = True
+        else:
+            status = str(container.get("Status") or "").lower()
+            if "exited" in status or "created" in status:
+                is_orphan = True
+
+        if is_orphan:
+            logger.info(f"Removing orphaned agent container from previous crashed run: {name}")
+            res = run_quiet(
+                [runtime, "rm", "-f", name], check=False, label=f"remove orphaned agent {name}", logger=logger
+            )
+            if res.returncode == 0:
+                removed.append(name)
+
+    return removed
+
+
+def _sweep_orphaned_servers(lock_dir: Path) -> list[str]:
+    """Stop llama-server processes whose client sessions have all died."""
+    return Server.cleanup_orphaned_servers(lock_dir)
+
+
 # ─── Nested-container image store (a per-project named volume) ─────────────
 #
 # Nested image layers cannot live on the agent's default paths: /home/pi is
@@ -1167,6 +1246,7 @@ def _extract_server_configs(data: dict) -> tuple[list[dict], set[str]]:
 
 def main() -> None:
     agent_config_dir = _ensure_project_config()
+    warn_missing_gitignore(PROJECT_DIR, logger)
     config_path: Path = agent_config_dir / "models.json"
     if not config_path.exists():
         logger.error(f"Config file not found: {config_path}")
@@ -1216,6 +1296,16 @@ def main() -> None:
     ipv6_enabled = read_network_config(pi_container_dir)["ipv6"]
     llama_cfg = read_llama_config(pi_container_dir)
     agent_extras = read_agent_extras(pi_container_dir)
+
+    # Crash recovery: reap orphaned servers and agent containers from prior crashed runs
+    _sweep_orphaned_servers(LLAMA_SERVER_LOCK_DIR)
+    _cleanup_orphaned_agent_containers(CONTAINER_RUNTIME, _project_key(PROJECT_DIR))
+    if flow_export_enabled:
+        recover_dangling_flows(
+            exports_dir=pi_container_dir / "exports",
+            sessions_dir=agent_config_dir / "sessions",
+        )
+
     nested_cfg = read_nested_containers_config(pi_container_dir)
     nested_ports = nested_cfg["ports"]
     if nested_cfg["enabled"]:
@@ -1259,8 +1349,10 @@ def main() -> None:
         data = json.load(file)
         server_configs, llama_hostnames = _extract_server_configs(data)
 
-    signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, handle_signal)
+    if hasattr(signal, "SIGQUIT"):
+        signal.signal(signal.SIGQUIT, handle_signal)
 
     try:
         with ExitStack() as stack:
@@ -1456,6 +1548,14 @@ def main() -> None:
                     "--rm",
                     "--name",
                     agent_container_name,
+                    "--label",
+                    "pi-container.type=agent",
+                    "--label",
+                    f"pi-container.project.hash={_project_key(PROJECT_DIR)}",
+                    "--label",
+                    f"pi-container.launcher_pid={os.getpid()}",
+                    "--label",
+                    f"pi-container.run_id={run_id}",
                     "--interactive",
                     "--tty",
                     *RUNTIME.agent_network_args(network_name, proxy_isolated_ip),
@@ -1526,7 +1626,16 @@ def main() -> None:
                     ip_thread = threading.Thread(target=_discover_agent_ips, daemon=True)
                     ip_thread.start()
 
-                result = subprocess.run(pi_container_cmd)
+                try:
+                    result = subprocess.run(pi_container_cmd)
+                finally:
+                    # Best-effort explicit cleanup in case the terminal process or subprocess was interrupted
+                    run_quiet(
+                        [CONTAINER_RUNTIME, "rm", "-f", agent_container_name],
+                        check=False,
+                        label=f"cleanup agent container {agent_container_name}",
+                        logger=logger,
+                    )
 
                 # Export mitmweb flow history for this session. The flow_export
                 # addon appends per-client-IP files as flows complete; run.py reads

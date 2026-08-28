@@ -201,7 +201,7 @@ class TestExportMitmwebFlows:
         raw = exports / "flows-10.0.0.5.jsonl"
         raw.write_text('{"id": "a"}\n')
 
-        with patch("pathlib.Path.write_bytes", side_effect=OSError("disk full")):
+        with patch("flow_export._stream_concatenate_files", side_effect=OSError("disk full")):
             out = flow_export.export_mitmweb_flows(sessions_dir=sessions, exports_dir=exports, client_ips=["10.0.0.5"])
 
         assert out is None
@@ -372,3 +372,34 @@ class TestLoadFlowsFromMount:
             assert result is None
         finally:
             os.chmod(flows_file, 0o644)
+
+
+class TestRecoverDanglingFlows:
+    def test_no_raw_files_returns_none(self, tmp_path):
+        exports = tmp_path / "exports"
+        exports.mkdir()
+        assert flow_export.recover_dangling_flows(exports_dir=exports) is None
+
+    def test_recovers_dangling_flow_files(self, tmp_path):
+        sessions = tmp_path / "sessions"
+        exports = tmp_path / "exports"
+        exports.mkdir()
+        _make_session(sessions, "crashed-session-id")
+
+        (exports / "flows-10.0.0.5.jsonl").write_text('{"id": "flow1"}\n')
+        (exports / "flows-10.0.0.6.jsonl").write_text('{"id": "flow2"}\n')
+
+        recovered_file = flow_export.recover_dangling_flows(exports_dir=exports, sessions_dir=sessions)
+
+        assert recovered_file is not None
+        assert recovered_file.exists()
+        assert "crashed-session-id" in recovered_file.name
+        assert recovered_file.name.startswith("recovered_")
+
+        content = recovered_file.read_text()
+        assert '{"id": "flow1"}' in content
+        assert '{"id": "flow2"}' in content
+
+        # Consumed raw files should be deleted
+        assert not (exports / "flows-10.0.0.5.jsonl").exists()
+        assert not (exports / "flows-10.0.0.6.jsonl").exists()

@@ -94,7 +94,7 @@ class TestServerGetServerFlags:
 
 
 # ---------------------------------------------------------------------------
-# ServerRefCount
+# ServerRefCount & Client Manifest
 # ---------------------------------------------------------------------------
 
 
@@ -116,7 +116,16 @@ class TestServerRefCount:
         s = self._make_server(tmp_path)
         assert s._get_current_ref_count() == 0
 
-    def test_ref_count_reads_file(self, tmp_path):
+    def test_ref_count_reads_clients_file(self, tmp_path):
+        import os
+
+        from util import write_clients
+
+        s = self._make_server(tmp_path)
+        write_clients(s.paths["clients_file"], [{"pid": os.getpid(), "run_id": "r1"}])
+        assert s._get_current_ref_count() == 1
+
+    def test_ref_count_reads_legacy_file(self, tmp_path):
         s = self._make_server(tmp_path)
         s.paths["ref_count_file"].write_text("3\n")
         assert s._get_current_ref_count() == 3
@@ -294,8 +303,12 @@ class TestServerStop:
         return s
 
     def test_full_cleanup_on_refcount_zero(self, tmp_path):
+        import os
+
+        from util import write_clients
+
         s = self._make_server(tmp_path)
-        s.paths["ref_count_file"].write_text("1")
+        write_clients(s.paths["clients_file"], [{"pid": os.getpid(), "run_id": "me"}])
         s._cleanup = MagicMock()
         s._cleanup.return_value = None
 
@@ -304,11 +317,19 @@ class TestServerStop:
         s._cleanup.assert_called_once_with(full_cleanup=True)
 
     def test_no_cleanup_on_refcount_above_one(self, tmp_path):
+        import os
+
+        from util import write_clients
+
         s = self._make_server(tmp_path)
-        s.paths["ref_count_file"].write_text("3")
+        # Two live clients: current pid and another live pid
+        write_clients(
+            s.paths["clients_file"],
+            [{"pid": os.getpid(), "run_id": "me"}, {"pid": 987654, "run_id": "other"}],
+        )
         s._cleanup = MagicMock()
 
-        with patch("fcntl.flock"):
+        with patch("fcntl.flock"), patch("util.is_pid_alive", return_value=True):
             s.stop()
         s._cleanup.assert_not_called()
 
@@ -318,6 +339,52 @@ class TestServerStop:
 
         s.stop()  # should not raise
         s._cleanup.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# CleanupOrphanedServers
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupOrphanedServers:
+    def test_cleans_instance_with_dead_clients(self, tmp_path):
+        from util import write_clients
+
+        lock_dir = tmp_path / "locks"
+        instance_dir = lock_dir / "instance-1"
+        instance_dir.mkdir(parents=True)
+        (instance_dir / ".llama_server_refcount.lock").touch()
+        (instance_dir / ".llama_server.pid").write_text("99999\n18080\n")
+        write_clients(instance_dir / ".llama_server_clients.json", [{"pid": 88888}])
+
+        with (
+            patch("util.is_pid_alive", return_value=False),
+            patch("server.is_pid_alive", return_value=True),
+            patch("server.stop_process_group") as mock_stop,
+        ):
+            cleaned = Server.cleanup_orphaned_servers(lock_dir)
+
+        assert cleaned == ["instance-1"]
+        mock_stop.assert_called_once()
+        assert mock_stop.call_args[0] == (99999, "orphaned llama-server instance-1")
+
+    def test_keeps_instance_with_live_clients(self, tmp_path):
+        import os
+
+        from util import write_clients
+
+        lock_dir = tmp_path / "locks"
+        instance_dir = lock_dir / "instance-1"
+        instance_dir.mkdir(parents=True)
+        (instance_dir / ".llama_server_refcount.lock").touch()
+        (instance_dir / ".llama_server.pid").write_text("99999\n18080\n")
+        write_clients(instance_dir / ".llama_server_clients.json", [{"pid": os.getpid()}])
+
+        with patch("server.stop_process_group") as mock_stop:
+            cleaned = Server.cleanup_orphaned_servers(lock_dir)
+
+        assert cleaned == []
+        mock_stop.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

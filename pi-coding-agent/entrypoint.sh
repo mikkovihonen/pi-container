@@ -34,6 +34,10 @@ else
     printf 'Acquire::ForceIPv4 "true";\n' > /etc/apt/apt.conf.d/99force-ipv4
 fi
 
+# ─── Home directory ownership (/home/pi is mounted as tmpfs at runtime) ───
+chown pi:pi /home/pi
+chmod 755 /home/pi
+
 # ─── Nested container support (PI_CONTAINER_NESTED, injected by run.py) ───
 # Only the setup that genuinely needs root happens here, before `gosu pi`.
 # Rootless podman needs a private XDG_RUNTIME_DIR for its locks and pid files,

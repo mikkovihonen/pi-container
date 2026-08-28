@@ -164,7 +164,7 @@ class TestContainerNetworkManagerEnvFlags:
             proxy_image="proxy:latest",
         )
         flags = mgr._env_flags({"ZEBRA": "z", "ALPHA": "a", "MID": "m"})
-        expected = ["--env", "ALPHA=a", "--env", "MID=m", "--env", "ZEBRA=z"]
+        expected = ["--env", "ALPHA", "--env", "MID", "--env", "ZEBRA"]
         assert flags == expected
 
     def test_empty_secrets(self):
@@ -185,7 +185,7 @@ class TestContainerNetworkManagerEnvFlags:
 class TestContainerNetworkManagerRefCount:
     def _make_manager(self, tmp_path):
         lock_dir = tmp_path / ".locks"
-        lock_dir.mkdir()
+        lock_dir.mkdir(parents=True, exist_ok=True)
         mgr = ContainerNetworkManager(
             container_runtime="podman",
             network_name="test-net",
@@ -196,6 +196,7 @@ class TestContainerNetworkManagerRefCount:
             "lock_dir": lock_dir,
             "ref_count_lock": lock_dir / ".network_manager.lock",
             "ref_count_file": lock_dir / ".network_manager.refcount",
+            "clients_file": lock_dir / ".network_manager.clients.json",
         }
         return mgr
 
@@ -220,26 +221,38 @@ class TestContainerNetworkManagerRefCount:
         # Mock _actually_start and _actually_stop
         mgr._actually_start = MagicMock()
         mgr._actually_stop = MagicMock()
-        # Pretend the existing proxy is healthy so the second start only
-        # increments the refcount (does not call _actually_start again).
-        mgr._is_existing_proxy_healthy = MagicMock(return_value=True)
-
-        # First start
+        # First start: proxy not running yet (_is_existing_proxy_healthy=False)
+        mgr._is_existing_proxy_healthy = MagicMock(return_value=False)
         with patch("fcntl.flock"):
             mgr.start()
         assert mgr._actually_start.called
 
-        # Second start (increment only)
-        with patch("fcntl.flock"):
-            mgr.start()
-        assert mgr._actually_start.call_count == 1  # not called again
+        # Second start with another live client: proxy is now running and healthy
+        mgr2 = self._make_manager(tmp_path)
+        mgr2._actually_start = MagicMock()
+        mgr2._actually_stop = MagicMock()
+        mgr2._is_existing_proxy_healthy = MagicMock(return_value=True)
 
-        # First stop (decrement only)
-        with patch("fcntl.flock"):
-            mgr.stop()
-        assert mgr._actually_stop.call_count == 0
+        with (
+            patch("fcntl.flock"),
+            patch("network.os.getpid", return_value=999988),
+            patch("util.os.getpid", return_value=999988),
+            patch("util.is_pid_alive", return_value=True),
+        ):
+            mgr2.start()
+        assert mgr2._actually_start.call_count == 0  # not called again
 
-        # Second stop (actual cleanup)
+        # First stop (one client exits)
+        with (
+            patch("fcntl.flock"),
+            patch("network.os.getpid", return_value=999988),
+            patch("util.os.getpid", return_value=999988),
+            patch("util.is_pid_alive", return_value=True),
+        ):
+            mgr2.stop()
+        assert mgr2._actually_stop.call_count == 0
+
+        # Second stop (last client exits -> cleanup)
         with patch("fcntl.flock"):
             mgr.stop()
         assert mgr._actually_stop.call_count == 1
@@ -254,8 +267,9 @@ class TestContainerNetworkManagerRefCount:
         with patch("fcntl.flock"):
             mgr.stop()
 
-        # Ref count file should be removed
+        # Ref count file and clients file should be removed
         assert not mgr.paths["ref_count_file"].exists()
+        assert not mgr.paths["clients_file"].exists()
 
     def test_start_recovers_from_stale_refcount(self, tmp_path):
         """When refcount > 0 but the proxy is unreachable, start must restart it."""
@@ -279,7 +293,7 @@ class TestContainerNetworkManagerRefCount:
         mgr._actually_start.assert_called_once()
         # A fresh refcount file is written (the stale value was replaced).
         assert mgr.paths["ref_count_file"].exists()
-        assert int(mgr.paths["ref_count_file"].read_text().strip()) == 2
+        assert int(mgr.paths["ref_count_file"].read_text().strip()) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -978,3 +992,51 @@ class TestContainerNetworkManagerLlamaHostnames:
         )
 
         assert mgr._is_existing_proxy_healthy() is True
+
+
+class TestReadProxyConfig:
+    def test_default_values_when_no_config(self, tmp_path):
+        from network import read_proxy_config
+
+        cfg = read_proxy_config(tmp_path)
+        assert cfg["expose_ui"] == "localhost"
+        assert cfg["max_view_flows"] == 2000
+        assert cfg["stream_large_bodies"] == "10m"
+
+    def test_custom_values_parsed(self, tmp_path):
+        import yaml
+
+        from network import read_proxy_config
+
+        (tmp_path / "config.yaml").write_text(
+            yaml.dump(
+                {
+                    "proxy": {
+                        "expose_ui": "lan",
+                        "max_view_flows": 5000,
+                        "stream_large_bodies": "50m",
+                    }
+                }
+            )
+        )
+        cfg = read_proxy_config(tmp_path)
+        assert cfg["expose_ui"] == "lan"
+        assert cfg["max_view_flows"] == 5000
+        assert cfg["stream_large_bodies"] == "50m"
+
+    def test_disabled_stream_large_bodies(self, tmp_path):
+        import yaml
+
+        from network import read_proxy_config
+
+        (tmp_path / "config.yaml").write_text(
+            yaml.dump(
+                {
+                    "proxy": {
+                        "stream_large_bodies": "off",
+                    }
+                }
+            )
+        )
+        cfg = read_proxy_config(tmp_path)
+        assert cfg["stream_large_bodies"] is None

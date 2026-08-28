@@ -39,6 +39,7 @@ testpaths = [
     "src/tests",
     "pi-coding-agent-proxy/addons/allowlist/tests",
     "pi-coding-agent-proxy/addons/token_replacer/tests",
+    "pi-coding-agent-proxy/addons/flow_export/tests",
 ]
 
 [tool.coverage.run]
@@ -47,6 +48,7 @@ source = [
     "src",
     "pi-coding-agent-proxy/addons/allowlist",
     "pi-coding-agent-proxy/addons/token_replacer",
+    "pi-coding-agent-proxy/addons/flow_export",
 ]
 
 [tool.coverage.report]

@@ -39,6 +39,12 @@ proxy:
   #   localhost → 127.0.0.1 only (default; not reachable from other hosts)
   #   lan       → 0.0.0.0 (reachable across the network; UI still password-gated)
   expose_ui: localhost
+  # Max allowed flows to retain in mitmweb's in-memory view (prevents memory exhaustion on long sessions).
+  # Denied/blocked flows are ALWAYS retained in memory regardless of this limit.
+  # Set to null or 0 to keep all flows (unlimited).
+  max_view_flows: 2000
+  # Stream bodies larger than this threshold directly without full RAM buffering (e.g. "10m", "50m", or null/off).
+  stream_large_bodies: 10m
 
 # Extra agent-container options (rarely needed).
 agent:

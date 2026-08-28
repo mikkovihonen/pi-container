@@ -80,11 +80,12 @@ A synthetic response set by the allowlist during its `request` hook **does** fir
 
 ### Configuration
 
-The addon reads one environment variable at construction time:
+The addon reads environment variables at initialization time:
 
 | Variable | Default | Behavior |
 |----------|---------|----------|
 | `FLOW_EXPORT_DIR` | `/home/mitmproxy/exports` | Directory inside the container where per-client-IP files (`flows-<ip>.jsonl`) are written. Created if missing. Each per-IP file is truncated the first time that IP is seen in the session. |
+| `PROXY_MAX_VIEW_FLOWS` | `2000` | Maximum number of allowed flows retained in `mitmweb`'s in-memory view to prevent proxy memory exhaustion during high-volume sessions. **Denied/blocked flows are always preserved** in memory so operators can inspect rejections in the UI. Set to `0` or negative for unlimited in-memory retention. |
 
 IPv6 client IPs have their `:` replaced with `-` in the filename (e.g. `flows-fd00--2.jsonl`). `run.py` mirrors this transform to locate the file. Each line is written as compact JSON (no inter-token whitespace). The line-per-flow structure makes it readable without indentation. It also keeps the file small.
 

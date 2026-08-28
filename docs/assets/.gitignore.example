@@ -8,13 +8,12 @@
 # references, never resolved secrets.)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# REQUIRED — proxy flow capture. Sensitive and ephemeral: full request/response
-# bodies and headers (including any Authorization/cookie values the
-# token_replacer did not redact), as raw flows-<ip>.jsonl files and per-session
-# snapshots under exports/sessions/<session-id>/. Also where run.py shadows an
-# empty tmpfs, which can leave an empty exports/ dir even with no traffic.
-# Never commit.
+# REQUIRED — sensitive and ephemeral runtime state. Never commit.
 .pi-container/exports/
+.pi-container/agent/bin
+.pi-container/agent/sessions
+.pi-container/agent/trust.json
+.pi-container/agent/models-store.json
 
 # OPTIONAL — scratch directories you mount as tmpfs via config.yaml (tmpfs.paths).
 # Their contents live in RAM and never persist across runs, but the (empty)

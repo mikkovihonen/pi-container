@@ -13,6 +13,7 @@ This is the host counterpart of the container-side addon in
 ``pi-coding-agent-proxy/addons/flow_export/``.
 """
 
+import contextlib
 import json
 import logging
 import subprocess
@@ -266,26 +267,78 @@ def export_mitmweb_flows(
     timestamp = now.strftime("%H-%M-%S-") + f"{now.microsecond // 1000:03d}"
     export_path = date_dir / f"{timestamp}_{session_id}.jsonl"
 
+    return _write_and_cleanup_flows(raw_files, export_path, label="exported")
+
+
+def _stream_concatenate_files(src_paths: list[Path], dst_path: Path, chunk_size: int = 65536) -> None:
+    """Concatenate multiple source files into dst_path using streaming chunks (64 KB).
+
+    Ensures the final output file ends with a newline.
+    """
+    last_byte: bytes = b""
+    with dst_path.open("wb") as out_f:
+        for src in src_paths:
+            with src.open("rb") as in_f:
+                while True:
+                    chunk = in_f.read(chunk_size)
+                    if not chunk:
+                        break
+                    out_f.write(chunk)
+                    last_byte = chunk[-1:]
+        if last_byte and last_byte != b"\n":
+            out_f.write(b"\n")
+
+
+def _write_and_cleanup_flows(raw_files: list[Path], export_path: Path, label: str) -> Path | None:
+    """Stream-concatenate raw_files to export_path and remove raw_files on success."""
     try:
-        chunks = [raw_path.read_bytes() for raw_path in raw_files]
-        data = b"".join(chunks)
-        # Ensure the concatenated file ends with a newline so the last line
-        # is always complete.
-        if not data.endswith(b"\n"):
-            data += b"\n"
-        export_path.write_bytes(data)
+        _stream_concatenate_files(raw_files, export_path)
     except OSError as e:
-        logger.warning(f"Could not write mitmweb flow export to {export_path}: {e}")
+        logger.warning(f"Could not write {label} mitmweb flow export to {export_path}: {e}")
         return None
 
-    # 4. Remove the raw per-IP files we consumed so the same flows aren't
-    #    stored twice. Only after a successful write; a failed write above
-    #    returns early and keeps the raw files intact.
     for raw_path in raw_files:
         try:
             raw_path.unlink()
         except OSError as e:
-            logger.warning(f"Could not remove consumed flow file {raw_path}: {e}")
+            logger.warning(f"Could not remove {label} flow file {raw_path}: {e}")
 
-    logger.info(f"Exported {len(raw_files)} flow file(s) → {export_path}")
+    logger.info(f"{label.capitalize()} {len(raw_files)} flow file(s) → {export_path}")
     return export_path
+
+
+def recover_dangling_flows(
+    exports_dir: Path | None = None,
+    sessions_dir: Path | None = None,
+) -> Path | None:
+    """Recover and archive unexported flows-*.jsonl left behind by crashed runs.
+
+    Best-effort: scans exports_dir for any dangling flows-*.jsonl files,
+    concatenates and saves them under exports_dir/flows/<date>/recovered_<timestamp>_<session_id>.jsonl,
+    and removes the consumed raw files.
+    """
+    if exports_dir is None:
+        exports_dir = PROJECT_DIR / ".pi-container" / "exports"
+    if sessions_dir is None:
+        sessions_dir = PROJECT_DIR / ".pi-container" / "agent" / "sessions"
+
+    if not exports_dir.exists():
+        return None
+
+    raw_files = sorted(exports_dir.glob("flows-*.jsonl"))
+    if not raw_files:
+        return None
+
+    session_id = "unknown"
+    latest = _get_latest_session_file(sessions_dir)
+    if latest is not None:
+        with contextlib.suppress(Exception):
+            session_id = _extract_session_id(latest)
+
+    now = datetime.now(UTC)
+    date_dir = exports_dir / "flows" / now.strftime("%Y-%m-%d")
+    date_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = now.strftime("%H-%M-%S-") + f"{now.microsecond // 1000:03d}"
+    export_path = date_dir / f"recovered_{timestamp}_{session_id}.jsonl"
+
+    return _write_and_cleanup_flows(raw_files, export_path, label="recovered")

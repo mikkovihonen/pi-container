@@ -237,8 +237,9 @@ class TestGetFreePort:
 class TestHandleSignal:
     def test_raises_system_exit(self):
         mock_logger = MagicMock()
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as excinfo:
             handle_signal(signal.SIGINT, mock_logger)
+        assert excinfo.value.code == 128 + signal.SIGINT
 
     def test_log_contains_signal_name(self):
         mock_logger = MagicMock()
@@ -252,6 +253,89 @@ class TestHandleSignal:
         with pytest.raises(SystemExit):
             handle_signal(signal.SIGINT, mock_logger)
         assert "clean shutdown" in str(mock_logger.info.call_args)
+
+    def test_handles_signal_with_frame_object(self):
+        """When Python dispatches a signal, it passes (signum, frame)."""
+        fake_frame = object()  # not a logger
+        with patch("util._LOG") as mock_log:
+            with pytest.raises(SystemExit) as excinfo:
+                handle_signal(signal.SIGINT, fake_frame)
+            assert excinfo.value.code == 128 + signal.SIGINT
+            mock_log.info.assert_called_once()
+            assert "SIGINT" in str(mock_log.info.call_args)
+
+
+# ---------------------------------------------------------------------------
+# is_pid_alive and Client Manifest helpers
+# ---------------------------------------------------------------------------
+
+
+class TestIsPidAlive:
+    def test_negative_or_zero_pid(self):
+        from util import is_pid_alive
+
+        assert is_pid_alive(0) is False
+        assert is_pid_alive(-1) is False
+
+    def test_live_pid_returns_true(self):
+        from util import is_pid_alive
+
+        assert is_pid_alive(os.getpid()) is True
+
+    def test_dead_pid_returns_false(self):
+        from util import is_pid_alive
+
+        with patch("os.kill", side_effect=OSError(errno.ESRCH, "No such process")):
+            assert is_pid_alive(999999) is False
+
+    def test_eperm_returns_true(self):
+        """EPERM means process exists but we lack permission to signal it."""
+        from util import is_pid_alive
+
+        with patch("os.kill", side_effect=OSError(errno.EPERM, "Operation not permitted")):
+            assert is_pid_alive(1) is True
+
+
+class TestClientManifestHelpers:
+    def test_read_write_clients(self, tmp_path):
+        from util import read_live_clients, write_clients
+
+        clients_file = tmp_path / "clients.json"
+        assert read_live_clients(clients_file) == []
+
+        client = {"pid": os.getpid(), "run_id": "test1"}
+        write_clients(clients_file, [client])
+
+        live = read_live_clients(clients_file)
+        assert len(live) == 1
+        assert live[0]["pid"] == os.getpid()
+
+    def test_filters_dead_clients(self, tmp_path):
+        from util import read_live_clients, write_clients
+
+        clients_file = tmp_path / "clients.json"
+        dead_client = {"pid": 999999, "run_id": "dead"}
+        live_client = {"pid": os.getpid(), "run_id": "live"}
+        write_clients(clients_file, [dead_client, live_client])
+
+        with patch("util.is_pid_alive", side_effect=lambda pid: pid == os.getpid()):
+            live = read_live_clients(clients_file)
+            assert len(live) == 1
+            assert live[0]["run_id"] == "live"
+
+    def test_register_and_deregister_client(self, tmp_path):
+        from util import deregister_client, register_client
+
+        clients_file = tmp_path / "clients.json"
+        c1 = {"pid": os.getpid(), "run_id": "run1"}
+        register_client(clients_file, c1)
+
+        live = register_client(clients_file, c1)  # duplicate should not duplicate
+        assert len(live) == 1
+
+        remaining = deregister_client(clients_file, os.getpid(), "run1")
+        assert remaining == []
+        assert not clients_file.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -364,8 +448,8 @@ class TestStopProcessGroup:
 class TestGetSanitizedGitConfigJson:
     def test_sanitizes_url_credentials(self):
         mock_logger = MagicMock()
-        # Use a non-.git/config origin so the line is not skipped
-        output = "file:/home/user/project/.git/config\tremote.origin.url=https://user:pass@github.com/org/repo.git\n"
+        # Use global .gitconfig origin so the line is not skipped
+        output = "file:/home/user/.gitconfig\tremote.origin.url=https://user:pass@github.com/org/repo.git\n"
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
         assert "user" not in result["remote.origin.url"]
@@ -381,10 +465,16 @@ class TestGetSanitizedGitConfigJson:
 
     def test_skips_file_origin(self):
         mock_logger = MagicMock()
-        output = "file:.git/config\tuser.name\tTest User\n"
+        output = (
+            "file:.git/config\tuser.name=Test User\n"
+            "file:/home/user/project/.git/config\tuser.email=local@example.com\n"
+            "file:/home/user/.gitconfig\tuser.signingkey=GLOBALKEY\n"
+        )
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
         assert "user.name" not in result
+        assert "user.email" not in result
+        assert result.get("user.signingkey") == "GLOBALKEY"
 
     def test_skips_credential_dot_prefix(self):
         mock_logger = MagicMock()
@@ -409,8 +499,8 @@ class TestGetSanitizedGitConfigJson:
     def test_normal_config_works(self):
         mock_logger = MagicMock()
         output = (
-            "file:/home/user/project/.git/config\tremote.origin.url=https://github.com/org/repo.git\n"
-            "file:/home/user/project/.git/config\tuser.email=test@example.com\n"
+            "file:/home/user/.gitconfig\tremote.origin.url=https://github.com/org/repo.git\n"
+            "file:/home/user/.gitconfig\tuser.email=test@example.com\n"
         )
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
@@ -419,14 +509,14 @@ class TestGetSanitizedGitConfigJson:
 
     def test_strips_http_credentials(self):
         mock_logger = MagicMock()
-        output = "file:/home/user/project/.git/config\tremote.origin.url=http://admin:secret@github.com/org/repo.git\n"
+        output = "file:/home/user/.gitconfig\tremote.origin.url=http://admin:secret@github.com/org/repo.git\n"
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
         assert result["remote.origin.url"] == "http://github.com/org/repo.git"
 
     def test_strips_https_credentials(self):
         mock_logger = MagicMock()
-        output = "file:/home/user/project/.git/config\tremote.origin.url=https://admin:secret@github.com/org/repo.git\n"
+        output = "file:/home/user/.gitconfig\tremote.origin.url=https://admin:secret@github.com/org/repo.git\n"
         with patch("util.subprocess.check_output", return_value=output):
             result = json.loads(get_sanitized_git_config_json(mock_logger))
         assert result["remote.origin.url"] == "https://github.com/org/repo.git"
@@ -503,3 +593,78 @@ class TestRunQuiet:
         assert kwargs["timeout"] == 5
         assert kwargs["capture_output"] is True
         assert kwargs["text"] is True
+
+
+# ---------------------------------------------------------------------------
+# check_repo_gitignore and warn_missing_gitignore
+# ---------------------------------------------------------------------------
+
+
+class TestCheckRepoGitignore:
+    def test_non_git_repo_returns_empty(self, tmp_path):
+        from util import check_repo_gitignore
+
+        missing = check_repo_gitignore(tmp_path)
+        assert missing == []
+
+    def test_git_repo_with_all_entries(self, tmp_path):
+        from util import check_repo_gitignore
+
+        (tmp_path / ".git").mkdir()
+        # Initialize a basic .gitignore
+        (tmp_path / ".gitignore").write_text(
+            "\n".join(
+                [
+                    ".pi-container/agent/bin",
+                    ".pi-container/agent/sessions",
+                    ".pi-container/agent/trust.json",
+                    ".pi-container/agent/models-store.json",
+                    ".pi-container/exports/",
+                ]
+            )
+        )
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                # rev-parse --show-toplevel
+                subprocess.CompletedProcess(args=[], returncode=0, stdout=str(tmp_path) + "\n"),
+            ]
+            missing = check_repo_gitignore(tmp_path)
+            assert missing == []
+
+    def test_git_repo_missing_entries(self, tmp_path):
+        from util import check_repo_gitignore
+
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".gitignore").write_text(".pi-container/exports/\n")
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                subprocess.CompletedProcess(args=[], returncode=0, stdout=str(tmp_path) + "\n"),
+                # check-ignore failures
+                subprocess.CompletedProcess(args=[], returncode=1),
+                subprocess.CompletedProcess(args=[], returncode=1),
+                subprocess.CompletedProcess(args=[], returncode=1),
+                subprocess.CompletedProcess(args=[], returncode=1),
+            ]
+            missing = check_repo_gitignore(tmp_path)
+            assert ".pi-container/agent/bin" in missing
+            assert ".pi-container/agent/sessions" in missing
+            assert ".pi-container/agent/trust.json" in missing
+            assert ".pi-container/agent/models-store.json" in missing
+            assert ".pi-container/exports/" not in missing
+
+    def test_warn_missing_gitignore_logs_warning(self, tmp_path):
+        from util import warn_missing_gitignore
+
+        mock_logger = MagicMock()
+        with patch("util.check_repo_gitignore", return_value=[".pi-container/exports/"]):
+            warn_missing_gitignore(tmp_path, mock_logger)
+            mock_logger.warning.assert_called_once()
+            assert ".pi-container/exports/" in str(mock_logger.warning.call_args)
+
+    def test_warn_missing_gitignore_logs_nothing_when_clean(self, tmp_path):
+        from util import warn_missing_gitignore
+
+        mock_logger = MagicMock()
+        with patch("util.check_repo_gitignore", return_value=[]):
+            warn_missing_gitignore(tmp_path, mock_logger)
+            mock_logger.warning.assert_not_called()

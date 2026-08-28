@@ -94,6 +94,8 @@ SCHEMA: dict = {
         "type": dict,
         "keys": {
             "expose_ui": {"type": str},
+            "max_view_flows": {"type": (int, type(None)), "required": False},
+            "stream_large_bodies": {"type": (str, int, type(None)), "required": False},
         },
     },
     "agent": {

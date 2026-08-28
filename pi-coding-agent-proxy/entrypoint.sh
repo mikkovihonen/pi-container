@@ -159,8 +159,19 @@ export TOKEN_REPLACER_CONFIG_PATH="${TOKEN_REPLACER_CONFIG_PATH:-/home/mitmproxy
 # the traffic was uninspected. Exec'ing the venv's own entry point keeps the
 # runtime environment exactly the frozen one the build produced and verified,
 # with no network at startup.
+# ─── mitmweb performance & memory tuning ─────────────────────────────────
+# PROXY_STREAM_LARGE_BODIES (from project config.yaml proxy.stream_large_bodies)
+# streams payloads larger than threshold directly, preventing multi-hundred-MB
+# transfers from triggering container OOMs.
+STREAM_FLAGS=()
+if [ -n "$PROXY_STREAM_LARGE_BODIES" ] && [ "$PROXY_STREAM_LARGE_BODIES" != "0" ] && [ "$PROXY_STREAM_LARGE_BODIES" != "none" ] && [ "$PROXY_STREAM_LARGE_BODIES" != "off" ]; then
+    STREAM_FLAGS=(--set stream_large_bodies="$PROXY_STREAM_LARGE_BODIES" --set store_streamed_bodies=false)
+    echo "[mitmweb] stream_large_bodies=$PROXY_STREAM_LARGE_BODIES"
+fi
+
 exec gosu mitmproxy /home/mitmproxy/.venv/bin/mitmweb \
     --mode transparent@8080 --mode dns@5353 --web-host 0.0.0.0 \
+    "${STREAM_FLAGS[@]}" \
     -s /home/mitmproxy/scripts/allowlist.py \
     -s /home/mitmproxy/scripts/token_replacer.py \
     -s /home/mitmproxy/scripts/flow_export.py \

@@ -13,13 +13,20 @@ import os
 import subprocess
 import time
 import urllib.request
-from typing import TYPE_CHECKING, Any
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from models import Model, ServerConfig
-from util import get_free_port, stop_process_group
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from util import (
+    deregister_client,
+    get_free_port,
+    is_pid_alive,
+    read_live_clients,
+    register_client,
+    stop_process_group,
+    write_clients,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +101,7 @@ class Server:
             "lock_dir": server_lock_dir,
             "ref_count_lock": server_lock_dir / ".llama_server_refcount.lock",
             "ref_count_file": server_lock_dir / ".llama_server_refcount",
+            "clients_file": server_lock_dir / ".llama_server_clients.json",
             "pid_file": server_lock_dir / ".llama_server.pid",
             "log_file": self.repo_root / "llama-server" / "logs" / self.instance_key / "llama-server.log",
         }
@@ -116,7 +124,21 @@ class Server:
         if self.models.get("main") is None:
             raise ValueError(f"[{self.server_id}] No main model defined in config.")
 
-        flags: list[str] = [str(flag) for flag in self.config.flags]
+        raw_flags: list[str] = [str(flag) for flag in self.config.flags]
+        flags: list[str] = []
+        i = 0
+        while i < len(raw_flags):
+            flag = raw_flags[i]
+            if flag == "--chat-template-file" and i + 1 < len(raw_flags):
+                template_path = Path(raw_flags[i + 1])
+                if not template_path.is_absolute():
+                    template_path = (self.repo_root / template_path).resolve()
+                flags.extend([flag, str(template_path)])
+                i += 2
+                continue
+            flags.append(flag)
+            i += 1
+
         flags.extend(["--alias", self.server_id])
         for model in self.models.values():
             flags.extend([str(model.config.file_flag), str(model.path)])
@@ -140,15 +162,13 @@ class Server:
         finally:
             self.paths["pid_file"].unlink(missing_ok=True)
             self.paths["ref_count_file"].unlink(missing_ok=True)
+            self.paths["clients_file"].unlink(missing_ok=True)
 
             if full_cleanup:
-                self.paths["ref_count_lock"].unlink(missing_ok=True)
-                try:
+                with contextlib.suppress(OSError):
                     self.paths["lock_dir"].rmdir()
                     if self.lock_dir.exists() and not any(self.lock_dir.iterdir()):
                         self.lock_dir.rmdir()
-                except OSError:
-                    pass
 
     def wait_for_server(self, timeout: int | None = None) -> bool:
         timeout = self.startup_timeout if timeout is None else timeout
@@ -186,40 +206,54 @@ class Server:
 
         self.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
 
-        should_start_new = False
-        pid_to_cleanup = None
+        client_info = {
+            "pid": os.getpid(),
+            "server_id": self.server_id,
+            "registered_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
 
         with self.paths["ref_count_lock"].open("a") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-            ref_count = self._get_current_ref_count()
+            live_clients = read_live_clients(self.paths["clients_file"])
+            healthy, pid, port = self._is_existing_server_healthy()
 
-            if ref_count > 0:
-                healthy, pid, port = self._is_existing_server_healthy()
+            if live_clients:
                 if healthy and pid and port:
                     self.port = port
-                    ref_count += 1
-                    logger.info(f"[Server: {self.server_id}] Attaching to existing healthy server on port {port}")
-                    self.paths["ref_count_file"].write_text(str(ref_count))
+                    register_client(self.paths["clients_file"], client_info)
+                    logger.info(
+                        f"[Server: {self.server_id}] Attaching to existing healthy server on port {port} "
+                        f"({len(live_clients) + 1} live clients)"
+                    )
+                    self.paths["ref_count_file"].write_text(str(len(live_clients) + 1))
+                    return self.port
                 else:
                     logger.warning(
                         f"[Server: {self.server_id}] Existing server is not healthy or stale. Cleaning up and restarting..."
                     )
-                    pid_to_cleanup = pid
-                    should_start_new = True
-                    self.paths["ref_count_file"].write_text("1")
+                    self._cleanup(pid_to_kill=pid, full_cleanup=False)
             else:
-                ref_count = 1
-                should_start_new = True
-                self.paths["ref_count_file"].write_text("1")
+                # No live clients. Check if an existing server process was left running by a crashed run.
+                if healthy and pid and port:
+                    self.port = port
+                    write_clients(self.paths["clients_file"], [client_info])
+                    logger.info(f"[Server: {self.server_id}] Adopting existing healthy server on port {port}")
+                    self.paths["ref_count_file"].write_text("1")
+                    return self.port
+                else:
+                    self._cleanup(pid_to_kill=pid, full_cleanup=False)
 
-        if should_start_new:
-            self._cleanup(pid_to_kill=pid_to_cleanup, full_cleanup=True)
             self._start_new_server_process()
+            register_client(self.paths["clients_file"], client_info)
+            self.paths["ref_count_file"].write_text("1")
 
         return self.port if self.port is not None else -1
 
     def _get_current_ref_count(self) -> int:
+        live = read_live_clients(self.paths["clients_file"])
+        if live:
+            return len(live)
         if self.paths["ref_count_file"].exists():
             try:
                 return int(self.paths["ref_count_file"].read_text().strip())
@@ -301,23 +335,61 @@ class Server:
 
     def stop(self) -> None:
         should_full_cleanup = False
-        if self.paths["ref_count_file"].exists():
-            with self.paths["ref_count_lock"].open("a") as lock_file:
-                fcntl.flock(lock_file, fcntl.LOCK_EX)
+        if not self.paths["clients_file"].exists() and not self.paths["ref_count_file"].exists():
+            return
 
-                ref_count: int = 0
-                if self.paths["ref_count_file"].exists():
-                    try:
-                        ref_count = int(self.paths["ref_count_file"].read_text().strip())
-                    except ValueError:
-                        ref_count = 0
+        with self.paths["ref_count_lock"].open("a") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-                ref_count -= 1
-
-                if ref_count <= 0:
-                    should_full_cleanup = True
-                else:
-                    self.paths["ref_count_file"].write_text(str(ref_count))
+            remaining = deregister_client(self.paths["clients_file"], os.getpid())
+            if not remaining:
+                should_full_cleanup = True
+            else:
+                self.paths["ref_count_file"].write_text(str(len(remaining)))
 
         if should_full_cleanup:
             self._cleanup(full_cleanup=True)
+
+    @classmethod
+    def cleanup_orphaned_servers(cls, lock_dir: Path) -> list[str]:
+        """Scan lock_dir for server instances whose clients are all dead, and stop them."""
+        if not lock_dir.exists():
+            return []
+        cleaned = []
+        for instance_dir in lock_dir.iterdir():
+            if not instance_dir.is_dir():
+                continue
+            lock_file_path = instance_dir / ".llama_server_refcount.lock"
+            clients_file = instance_dir / ".llama_server_clients.json"
+            pid_file = instance_dir / ".llama_server.pid"
+            refcount_file = instance_dir / ".llama_server_refcount"
+            if not lock_file_path.exists() and not pid_file.exists():
+                continue
+            try:
+                with lock_file_path.open("a") as lf:
+                    try:
+                        fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError, OSError:
+                        continue
+                    live_clients = read_live_clients(clients_file)
+                    if not live_clients:
+                        pid = None
+                        if pid_file.exists():
+                            try:
+                                lines = pid_file.read_text().splitlines()
+                                if lines:
+                                    pid = int(lines[0])
+                            except ValueError, IndexError:
+                                pass
+                        if pid and is_pid_alive(pid):
+                            logger.info(f"Stopping orphaned llama-server instance {instance_dir.name} (pid {pid})...")
+                            stop_process_group(pid, f"orphaned llama-server {instance_dir.name}", logger=logger)
+                        pid_file.unlink(missing_ok=True)
+                        clients_file.unlink(missing_ok=True)
+                        refcount_file.unlink(missing_ok=True)
+                        with contextlib.suppress(OSError):
+                            instance_dir.rmdir()
+                        cleaned.append(instance_dir.name)
+            except Exception as e:
+                logger.debug(f"Could not check/clean server lock dir {instance_dir}: {e}")
+        return cleaned

@@ -4,6 +4,7 @@ sys.dont_write_bytecode = True
 
 """Container network + proxy lifecycle management."""
 
+import contextlib
 import fcntl
 import logging
 import os
@@ -12,11 +13,19 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from config import ADMIN_PASSWORD, CONFIG_DIR, REPO_ROOT
 from runtimes import ContainerRuntime
-from util import get_free_port, run_quiet
+from util import (
+    deregister_client,
+    get_free_port,
+    read_live_clients,
+    register_client,
+    run_quiet,
+    write_clients,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -192,6 +201,46 @@ def read_network_config(config_dir: Path | None = None) -> dict:
     }
 
 
+_DEFAULT_PROXY = {
+    "expose_ui": "localhost",
+    "max_view_flows": 2000,
+    "stream_large_bodies": "10m",
+}
+
+
+def read_proxy_config(config_dir: Path | None = None) -> dict:
+    """Proxy settings from config.yaml ``proxy``.
+
+    Returns a dict with:
+    - ``expose_ui``: "localhost" | "lan"
+    - ``max_view_flows``: int | None (default 2000)
+    - ``stream_large_bodies``: str | None (default "10m")
+    """
+    section = load_project_config(config_dir).get("proxy") or {}
+    expose = str(section.get("expose_ui", _DEFAULT_PROXY["expose_ui"])).strip().lower()
+    if expose not in ("localhost", "lan"):
+        expose = "localhost"
+
+    max_flows = section.get("max_view_flows", _DEFAULT_PROXY["max_view_flows"])
+    if max_flows is not None:
+        try:
+            max_flows = int(max_flows)
+        except ValueError, TypeError:
+            max_flows = _DEFAULT_PROXY["max_view_flows"]
+
+    stream_bodies = section.get("stream_large_bodies", _DEFAULT_PROXY["stream_large_bodies"])
+    if stream_bodies is not None:
+        stream_bodies = str(stream_bodies).strip()
+        if stream_bodies.lower() in ("null", "none", "off", "0", ""):
+            stream_bodies = None
+
+    return {
+        "expose_ui": expose,
+        "max_view_flows": max_flows,
+        "stream_large_bodies": stream_bodies,
+    }
+
+
 def read_proxy_ui_expose(config_dir: Path | None = None) -> str:
     """Where the proxy's mitmweb UI is published, from config.yaml ``proxy.expose_ui``.
 
@@ -199,9 +248,7 @@ def read_proxy_ui_expose(config_dir: Path | None = None) -> str:
     ``"lan"`` binds 0.0.0.0 (reachable from other hosts). Unknown values fall back
     to ``"localhost"``.
     """
-    section = load_project_config(config_dir).get("proxy") or {}
-    value = str(section.get("expose_ui", "localhost")).strip().lower()
-    return value if value in ("localhost", "lan") else "localhost"
+    return read_proxy_config(config_dir)["expose_ui"]
 
 
 _DEFAULT_NESTED_CONTAINERS = {"enabled": False, "storage": "volume", "security": "disable"}
@@ -405,6 +452,7 @@ class ContainerNetworkManager:
             "lock_dir": self.lock_dir,
             "ref_count_lock": self.lock_dir / f".{self.proxy_name}.lock",
             "ref_count_file": self.lock_dir / f".{self.proxy_name}.refcount",
+            "clients_file": self.lock_dir / f".{self.proxy_name}.clients.json",
         }
 
     def _pull_secrets_from_config(self) -> dict[str, str]:
@@ -448,10 +496,15 @@ class ContainerNetworkManager:
         return secrets
 
     def _env_flags(self, secrets: dict[str, str]) -> list[str]:
-        """Convert a secrets dict into ``--env KEY=VALUE`` flag pairs."""
+        """Convert a secrets dict into ``--env KEY`` flag pairs.
+
+        Emits ``--env KEY`` without ``=VALUE`` so secret values are not exposed in
+        CLI process listings (ps aux / argv). The actual values are supplied via the
+        parent process environment dict.
+        """
         flags: list[str] = []
-        for k, v in sorted(secrets.items()):
-            flags.extend(["--env", f"{k}={v}"])
+        for k in sorted(secrets.keys()):
+            flags.extend(["--env", k])
         return flags
 
     def _preflight_ipv6_egress(self) -> None:
@@ -538,56 +591,72 @@ class ContainerNetworkManager:
     def start(self) -> None:
         self.paths["lock_dir"].mkdir(exist_ok=True, parents=True)
 
+        client_info = {
+            "pid": os.getpid(),
+            "proxy_name": self.proxy_name,
+            "registered_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
         with self.paths["ref_count_lock"].open("a") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-            ref_count = self._get_ref_count()
-            if ref_count == 0:
-                self._actually_start()
-            else:
-                # Attach to an existing proxy — but only if it is still alive.
-                # A stale .refcount file (e.g. after OOM, reboot, or manual
-                # ``podman stop``) must not silently skip startup.
-                if not self._is_existing_proxy_healthy():
+            live_clients = read_live_clients(self.paths["clients_file"])
+            is_healthy = self._is_existing_proxy_healthy()
+
+            if live_clients:
+                if is_healthy:
+                    register_client(self.paths["clients_file"], client_info)
+                    self.paths["ref_count_file"].write_text(str(len(live_clients) + 1))
+                else:
                     logger.warning(
                         "Existing proxy refcount > 0 but proxy container is "
-                        "unreachable; cleaning up stale state and restarting."
+                        "unreachable or stale; cleaning up stale state and restarting."
                     )
-                    # Stop/remove any zombie container (best-effort — the
-                    # container may already be gone, and _actually_stop uses
-                    # check=False so that is harmless). Then clear the stale
-                    # refcount file and bring the proxy up fresh.
                     self._actually_stop()
                     self._cleanup_stale_refcount()
                     self._actually_start()
-                    ref_count = 1
-
-            ref_count += 1
-            self.paths["ref_count_file"].write_text(str(ref_count))
+                    write_clients(self.paths["clients_file"], [client_info])
+                    self.paths["ref_count_file"].write_text("1")
+            else:
+                # No live clients
+                if is_healthy:
+                    logger.info(f"Adopting existing healthy proxy {self.proxy_name}")
+                    write_clients(self.paths["clients_file"], [client_info])
+                    self.paths["ref_count_file"].write_text("1")
+                else:
+                    if self.paths["ref_count_file"].exists() or self.paths["clients_file"].exists():
+                        self._actually_stop()
+                        self._cleanup_stale_refcount()
+                    self._actually_start()
+                    write_clients(self.paths["clients_file"], [client_info])
+                    self.paths["ref_count_file"].write_text("1")
 
     def stop(self) -> None:
+        if not self.paths["clients_file"].exists() and not self.paths["ref_count_file"].exists():
+            return
+
         should_full_cleanup = False
         with self.paths["ref_count_lock"].open("a") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-            ref_count = self._get_ref_count()
-            if ref_count <= 1:
+            remaining = deregister_client(self.paths["clients_file"], os.getpid())
+            if not remaining:
                 self._actually_stop()
                 should_full_cleanup = True
             else:
-                ref_count -= 1
-                self.paths["ref_count_file"].write_text(str(ref_count))
+                self.paths["ref_count_file"].write_text(str(len(remaining)))
 
         if should_full_cleanup:
             self.paths["ref_count_file"].unlink(missing_ok=True)
-            try:
-                self.paths["ref_count_lock"].unlink(missing_ok=True)
+            self.paths["clients_file"].unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
                 if self.paths["lock_dir"].exists() and not any(self.paths["lock_dir"].iterdir()):
                     self.paths["lock_dir"].rmdir()
-            except OSError:
-                pass
 
     def _get_ref_count(self) -> int:
+        live = read_live_clients(self.paths["clients_file"])
+        if live:
+            return len(live)
         if self.paths["ref_count_file"].exists():
             try:
                 return int(self.paths["ref_count_file"].read_text().strip())
@@ -598,6 +667,7 @@ class ContainerNetworkManager:
     def _actually_start(self) -> None:
         # Pull secrets required by the mounted token_replacer config
         secrets = self._pull_secrets_from_config()
+        proxy_cfg = read_proxy_config(self.config_dir)
 
         # IPv6 can be plumbed on the isolated side, but it only works end-to-end
         # if the runtime also provides IPv6 egress on the upstream network.
@@ -708,12 +778,25 @@ class ContainerNetworkManager:
             # capture entirely when the user has disabled it in config.yaml.
             "--env",
             f"FLOW_EXPORT_ENABLED={str(flow_export_enabled).lower()}",
+            *(
+                ["--env", f"PROXY_MAX_VIEW_FLOWS={proxy_cfg['max_view_flows']}"]
+                if proxy_cfg["max_view_flows"] is not None
+                else []
+            ),
+            *(
+                ["--env", f"PROXY_STREAM_LARGE_BODIES={proxy_cfg['stream_large_bodies']}"]
+                if proxy_cfg["stream_large_bodies"] is not None
+                else []
+            ),
             *self._env_flags(secrets),
             self.proxy_image,
         ]
         # Label (not the argv) is what surfaces on failure — cmd carries
         # ADMIN_PASSWORD and must never reach logs/tracebacks.
-        run_quiet(cmd, label=f"start proxy container {self.proxy_name}", logger=logger)
+        proxy_env = os.environ.copy()
+        if secrets:
+            proxy_env.update(secrets)
+        run_quiet(cmd, env=proxy_env, label=f"start proxy container {self.proxy_name}", logger=logger)
 
         # Wait for proxy to be ready via health probe
         self._wait_for_proxy_health(timeout=30)
@@ -816,6 +899,7 @@ class ContainerNetworkManager:
     def _cleanup_stale_refcount(self) -> None:
         """Remove the stale refcount artifact so the next start() begins fresh."""
         self.paths["ref_count_file"].unlink(missing_ok=True)
+        self.paths["clients_file"].unlink(missing_ok=True)
 
     def _wait_for_proxy_health(self, timeout: int = 30) -> None:
         """Wait for the proxy container's mitmweb UI to become healthy.
