@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.5.5] - 2026-08-28
+
 ### Added
 - **Multi-provider support and dynamic hostname resolution.** Multiple local `llama-server` providers and external cloud providers can now be configured in `.pi-container/agent/models.json`. Each local provider launches its own host server instance and routes via a unique container port.
 - **Provider `baseUrl` validation in `models.json`.** `validate_models()` now validates `baseUrl` for all local providers (`serverCustomParameters`), enforcing `http://` or `https://` URLs, requiring explicit ports, rejecting loopback addresses (`localhost`/`127.0.0.1`/`::1`) with actionable guidance, and rejecting duplicate container ports across local providers before containers start.
