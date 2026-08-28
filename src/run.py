@@ -1773,6 +1773,8 @@ def main() -> None:
                     # Transient tmpfs mounts for build artifacts, caches, etc.
                     *[flag for path in tmpfs_paths for flag in RUNTIME.tmpfs_args(path)],
                     "--env",
+                    f"CONTAINER_CHOWN_PATHS={':'.join(sorted(set(tmpfs_paths + list(active_volume_map.keys()) + ['/home/pi/.pi/agent/bin', '/workspace/.pi-container/exports'])))}",
+                    "--env",
                     f"LLAMA_PORTS={portconfig}",
                     "--env",
                     f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",

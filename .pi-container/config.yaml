@@ -69,7 +69,6 @@ nested_containers:
 # clean, empty dirs rather than the host's caches/locks/models.
 tmpfs:
   paths:
-    - /workspace/.venv
     - /workspace/.pytest_cache
     - /workspace/.ruff_cache
     - /workspace/src/__pycache__
@@ -87,7 +86,9 @@ tmpfs:
 # Named persistent volume mounts that shadow host paths under /workspace.
 # Persisted across runs in container storage, keeping build caches warm.
 volumes:
-  paths: []
+  paths:
+    - /workspace/.venv
+
 
 # mitmweb flow export — capture this repo's own HTTP/HTTPS history for auditing.
 flow_export:

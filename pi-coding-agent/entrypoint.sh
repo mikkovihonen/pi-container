@@ -38,6 +38,19 @@ fi
 chown pi:pi /home/pi
 chmod 755 /home/pi
 
+# ─── Shadow directories ownership (tmpfs / named volume mounts) ───────────
+# Mount roots (tmpfs, named volumes) are created owned by root:root (0755).
+# Chown them to pi:pi so non-root agent processes can write files and directories.
+if [ -n "$CONTAINER_CHOWN_PATHS" ]; then
+    IFS=':' read -ra _paths <<< "$CONTAINER_CHOWN_PATHS"
+    for _path in "${_paths[@]}"; do
+        if [ -d "$_path" ]; then
+            chown pi:pi "$_path" 2>/dev/null || true
+            chmod 755 "$_path" 2>/dev/null || true
+        fi
+    done
+fi
+
 # ─── Nested container support (PI_CONTAINER_NESTED, injected by run.py) ───
 # Only the setup that genuinely needs root happens here, before `gosu pi`.
 # Rootless podman needs a private XDG_RUNTIME_DIR for its locks and pid files,
