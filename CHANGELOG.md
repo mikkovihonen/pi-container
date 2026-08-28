@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.5.6] - 2026-08-28
+
 ### Added
 - **Named persistent shadow volume mounts.** Added `volumes.paths` support in `config.yaml` to shadow subdirectories of `/workspace` with project-scoped persistent named volumes. Build and dependency caches (e.g. `node_modules`, `.venv`, `target`) persist in container runtime volume storage across sessions without RAM overhead, and stale or orphaned volumes are automatically pruned on startup when configuration changes or projects are removed.
 
