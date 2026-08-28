@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+- **Global CA bundle environment variables in agent container.** Exported `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, and `GIT_SSL_CAINFO` pointing to `/etc/ssl/certs/ca-certificates.crt` in `pi-coding-agent/Containerfile`, ensuring third-party Python libraries (`requests`, `httpx`, `pip`, `boto3`), Node tools, git, and curl seamlessly trust the mitmproxy CA certificate without manual configuration.
+
 ## [0.5.6] - 2026-08-28
 
 ### Added
