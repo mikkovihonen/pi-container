@@ -84,6 +84,11 @@ tmpfs:
     - /workspace/pi-coding-agent-proxy/addons/token_replacer/.pytest_cache
     - /workspace/pi-coding-agent-proxy/addons/token_replacer/__pycache__
 
+# Named persistent volume mounts that shadow host paths under /workspace.
+# Persisted across runs in container storage, keeping build caches warm.
+volumes:
+  paths: []
+
 # mitmweb flow export — capture this repo's own HTTP/HTTPS history for auditing.
 flow_export:
   enabled: false

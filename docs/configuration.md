@@ -272,7 +272,9 @@ nested_containers:
     expose: localhost         # host bind for published ports: localhost | lan
     publish: []               # host ports for nested-container UIs, e.g. [3000]
 tmpfs:
-  paths: []
+  paths: []                   # volatile RAM mounts under /workspace
+volumes:
+  paths: []                   # persistent named volume mounts (shadowing host paths)
 flow_export:
   enabled: false
 egress:
@@ -356,6 +358,37 @@ agent:
 ```
 
 Device entries support the optional `mode` suffix (`r` for read-only, `w` for write-only, `rw` for read-write). The default is `rw` if omitted.
+
+### Transient `tmpfs` mounts
+
+`tmpfs.paths` mounts volatile RAM disks over specific paths under `/workspace`. Data written to these paths lives purely in RAM and is completely wiped when the container stops. Useful for ephemeral directories, temporary scratch spaces, or build locks:
+
+```yaml
+tmpfs:
+  paths:
+    - /workspace/.pytest_cache
+    - /workspace/__pycache__
+```
+
+### Named shadow volumes
+
+`volumes.paths` mounts project-scoped named persistent volumes over subdirectories of `/workspace` (e.g. package stores or build caches).
+
+Unlike `tmpfs`, named shadow volumes persist across container runs in the container runtime's volume store, keeping build caches warm while isolating them from the host filesystem:
+
+```yaml
+volumes:
+  paths:
+    - /workspace/node_modules
+    - /workspace/.venv
+    - /workspace/target
+```
+
+**Lifecycle & Automatic Cleanup**:
+- Named shadow volumes are automatically created with project metadata labels (`pi-container.type=project-volume`, `pi-container.project.hash`, `pi-container.project.path`, `pi-container.volume.dest`).
+- **Configuration changes**: When a path is removed from `volumes.paths` in `config.yaml` (or if `config.yaml` is deleted/reseeded), obsolete volumes for that workspace are automatically detected and pruned on next startup.
+- **Orphaned projects**: If a project folder is deleted from the host filesystem, its associated shadow volumes are cleaned up automatically during subsequent `pi-container` runs.
+- **Concurrent safety**: Volumes currently held open by active container sessions are never deleted while in use.
 
 <a name="upgrading-a-workspace"></a>
 ### Upgrading an existing workspace

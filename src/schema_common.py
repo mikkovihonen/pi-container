@@ -126,6 +126,13 @@ SCHEMA: dict = {
             "paths": {"type": list},
         },
     },
+    "volumes": {
+        "type": dict,
+        "required": False,
+        "keys": {
+            "paths": {"type": list, "required": False},
+        },
+    },
     "flow_export": {
         "type": dict,
         "keys": {

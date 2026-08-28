@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from network import ContainerNetworkManager, scan_config_env_refs, scan_tmpfs_paths
+from network import ContainerNetworkManager, scan_config_env_refs, scan_tmpfs_paths, scan_volume_paths
 
 # ---------------------------------------------------------------------------
 # ScanConfigEnvRefs
@@ -1040,3 +1040,47 @@ class TestReadProxyConfig:
         )
         cfg = read_proxy_config(tmp_path)
         assert cfg["stream_large_bodies"] is None
+
+
+class TestScanVolumePaths:
+    def test_empty_when_no_config(self, tmp_path):
+        paths = scan_volume_paths(tmp_path)
+        assert paths == []
+
+    def test_parses_paths(self, tmp_path):
+        import yaml
+
+        (tmp_path / "config.yaml").write_text(
+            yaml.dump(
+                {
+                    "volumes": {
+                        "paths": [
+                            "/workspace/node_modules",
+                            "/workspace/.venv",
+                            "/workspace/target",
+                        ]
+                    }
+                }
+            )
+        )
+        paths = scan_volume_paths(tmp_path)
+        assert paths == ["/workspace/.venv", "/workspace/node_modules", "/workspace/target"]
+
+    def test_deduplicates_and_sorts(self, tmp_path):
+        import yaml
+
+        (tmp_path / "config.yaml").write_text(
+            yaml.dump(
+                {
+                    "volumes": {
+                        "paths": [
+                            "/workspace/b",
+                            "/workspace/a",
+                            "/workspace/b",
+                        ]
+                    }
+                }
+            )
+        )
+        paths = scan_volume_paths(tmp_path)
+        assert paths == ["/workspace/a", "/workspace/b"]

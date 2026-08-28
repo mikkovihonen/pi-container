@@ -96,6 +96,17 @@ def scan_tmpfs_paths(config_dir: Path | None = None) -> list[str]:
     return sorted({str(p) for p in paths})
 
 
+def scan_volume_paths(config_dir: Path | None = None) -> list[str]:
+    """Named persistent volume mount paths from config.yaml ``volumes.paths``.
+
+    Returns a deduplicated, sorted list of absolute container paths to mount as
+    named persistent volumes (shadowing host paths). Empty when the section is absent.
+    """
+    volumes = load_project_config(config_dir).get("volumes") or {}
+    paths = volumes.get("paths", []) or []
+    return sorted({str(p) for p in paths})
+
+
 def read_flow_export_enabled(config_dir: Path | None = None, default: bool = False) -> bool:
     """The mitmweb flow-export toggle from config.yaml ``flow_export.enabled``.
 

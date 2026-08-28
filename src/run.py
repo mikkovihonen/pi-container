@@ -42,6 +42,7 @@ from network import (
     read_resource_limits,
     resource_limit_args,
     scan_tmpfs_paths,
+    scan_volume_paths,
 )
 from runtimes import ContainerRuntime
 from server import Server
@@ -990,7 +991,7 @@ def _cleanup_orphaned_nested_volumes(runtime: str) -> list[str]:
     return removed
 
 
-def _remove_volume(runtime: str, volume_name: str) -> bool:
+def _remove_volume(runtime: str, volume_name: str, label_type: str = "volume") -> bool:
     """Remove a named volume. Returns True on success."""
     try:
         result = subprocess.run(
@@ -1001,13 +1002,160 @@ def _remove_volume(runtime: str, volume_name: str) -> bool:
             timeout=30,
         )
         if result.returncode == 0:
-            logger.info(f"Removed nested-storage volume: {volume_name}")
+            logger.info(f"Removed {label_type}: {volume_name}")
             return True
-        logger.warning(f"Could not remove volume {volume_name}: {result.stderr.strip()}")
+        logger.warning(f"Could not remove {label_type} {volume_name}: {result.stderr.strip()}")
         return False
     except Exception as e:
-        logger.warning(f"Could not remove volume {volume_name}: {e}")
+        logger.warning(f"Could not remove {label_type} {volume_name}: {e}")
         return False
+
+
+# ─── Project shadow volumes (config.yaml volumes.paths) ────────────────────
+
+
+def _project_volume_name(project_key: str, dest_path: str) -> str:
+    """Derive a deterministic named volume name for a project's shadow mount path."""
+    dest_hash = hashlib.sha256(dest_path.strip().encode()).hexdigest()[:8]
+    return f"pi-vol-{project_key}-{dest_hash}"
+
+
+def _ensure_project_volume(
+    runtime: str,
+    volume_name: str,
+    dest_path: str,
+    project_hash: str,
+    project_path: str,
+) -> bool:
+    """Create a project shadow volume if it does not exist yet."""
+    if _volume_exists(runtime, volume_name):
+        return True
+
+    logger.info(f"Creating project shadow volume: {volume_name} for {dest_path}")
+    result = subprocess.run(
+        [
+            runtime,
+            "volume",
+            "create",
+            "--label",
+            "pi-container.type=project-volume",
+            "--label",
+            f"pi-container.project.hash={project_hash}",
+            "--label",
+            f"pi-container.project.path={project_path}",
+            "--label",
+            f"pi-container.volume.dest={dest_path}",
+            volume_name,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        logger.error(f"Could not create project volume {volume_name}: {result.stderr.strip()}")
+        return False
+    return True
+
+
+def _cleanup_stale_project_volumes(
+    runtime: str,
+    project_hash: str,
+    active_volume_names: set[str],
+) -> list[str]:
+    """Find and remove shadow volumes that are no longer in this project's config.yaml.
+
+    Volumes belonging to active concurrent sessions (in-use) are skipped.
+    """
+    removed: list[str] = []
+    try:
+        result = subprocess.run(
+            [
+                runtime,
+                "volume",
+                "ls",
+                "--format",
+                "{{.Name}}",
+                "--filter",
+                "label=pi-container.type=project-volume",
+                "--filter",
+                f"label=pi-container.project.hash={project_hash}",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        logger.warning(f"Could not list project volumes for stale cleanup: {e}")
+        return removed
+
+    unused = _unused_volumes(runtime)
+    for name in result.stdout.strip().splitlines():
+        name = name.strip()
+        if not name or name in active_volume_names:
+            continue
+
+        dest = _get_volume_label(runtime, name, "pi-container.volume.dest") or "unknown dest"
+
+        if unused is not None and name not in unused:
+            logger.info(f"Stale project volume still in use by a container, keeping for now: {name} ({dest})")
+            continue
+
+        logger.info(f"Stale project volume (no longer in config.yaml): {name} ({dest})")
+        if _remove_volume(runtime, name, label_type="project volume"):
+            removed.append(name)
+
+    return removed
+
+
+def _cleanup_orphaned_project_volumes(runtime: str) -> list[str]:
+    """Remove project shadow volumes whose source project directory no longer exists on the host."""
+    removed: list[str] = []
+    try:
+        result = subprocess.run(
+            [
+                runtime,
+                "volume",
+                "ls",
+                "--format",
+                "{{.Name}}",
+                "--filter",
+                "label=pi-container.type=project-volume",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        logger.warning(f"Could not list project volumes for orphan cleanup: {e}")
+        return removed
+
+    unused = _unused_volumes(runtime)
+    for name in result.stdout.strip().splitlines():
+        name = name.strip()
+        if not name:
+            continue
+
+        stored_path = _get_volume_label(runtime, name, "pi-container.project.path")
+
+        if stored_path is None or not stored_path.strip():
+            reason = "no path label"
+        elif not Path(stored_path).exists():
+            reason = f"path gone: {stored_path}"
+        else:
+            continue  # Live project
+
+        if unused is not None and name not in unused:
+            logger.info(f"Orphaned project volume still in use by a container, keeping for now: {name} ({reason})")
+            continue
+
+        logger.info(f"Orphaned project volume ({reason}): {name}")
+        if _remove_volume(runtime, name, label_type="orphaned project volume"):
+            removed.append(name)
+
+    return removed
 
 
 # ─── Registry allowlist preflight ──────────────────────────────────────────
@@ -1542,6 +1690,41 @@ def main() -> None:
                 # pi-coding-agent-proxy/*) inside that workspace.
                 tmpfs_paths = scan_tmpfs_paths(pi_container_dir)
 
+                # Persistent named shadow volumes (config.yaml volumes.paths)
+                volume_paths = scan_volume_paths(pi_container_dir)
+                active_volume_map = {
+                    path: _project_volume_name(_project_key(PROJECT_DIR), path) for path in volume_paths
+                }
+                orphaned_project_vols = _cleanup_orphaned_project_volumes(CONTAINER_RUNTIME)
+                if orphaned_project_vols:
+                    logger.info(
+                        f"Removed {len(orphaned_project_vols)} orphaned project volume(s): "
+                        f"{', '.join(orphaned_project_vols)}"
+                    )
+                stale_project_vols = _cleanup_stale_project_volumes(
+                    CONTAINER_RUNTIME,
+                    project_hash=proxy_name,
+                    active_volume_names=set(active_volume_map.values()),
+                )
+                if stale_project_vols:
+                    logger.info(
+                        f"Removed {len(stale_project_vols)} stale project volume(s): {', '.join(stale_project_vols)}"
+                    )
+                project_path_str = str(PROJECT_DIR.resolve())
+                for dest_path, vol_name in active_volume_map.items():
+                    _ensure_project_volume(
+                        CONTAINER_RUNTIME,
+                        vol_name,
+                        dest_path=dest_path,
+                        project_hash=proxy_name,
+                        project_path=project_path_str,
+                    )
+                volume_args = [
+                    arg
+                    for dest_path, vol_name in active_volume_map.items()
+                    for arg in ("--volume", f"{vol_name}:{dest_path}")
+                ]
+
                 pi_container_cmd = [
                     CONTAINER_RUNTIME,
                     "run",
@@ -1573,6 +1756,8 @@ def main() -> None:
                     f"{PROJECT_DIR}:/workspace",
                     *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
                     *RUNTIME.tmpfs_args("/workspace/.pi-container/exports"),
+                    # Persistent named shadow volumes for dependency/build caches
+                    *volume_args,
                     # Nested-container support (config.yaml nested_containers):
                     # devices, SELinux label, image store, XDG_RUNTIME_DIR. Empty
                     # when disabled. Placed after the /home/pi tmpfs because the

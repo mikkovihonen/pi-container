@@ -132,6 +132,19 @@ nested_containers:
 tmpfs:
   paths: []
 
+# Named persistent volume mounts that shadow host paths under /workspace.
+# Stored in container storage and persisted across runs for fast caching,
+# keeping build/dependency caches warm while isolating them from the host.
+# Stale volumes are automatically pruned on startup when removed from this list.
+#   Example:
+#     volumes:
+#       paths:
+#         - /workspace/node_modules
+#         - /workspace/.venv
+#         - /workspace/target
+volumes:
+  paths: []
+
 # mitmweb flow export. When enabled, the proxy's captured HTTP/HTTPS flow history
 # is exported (bucketed by UTC date) under .pi-container/exports/ after the agent
 # shuts down. The export contains full request/response bodies — treat exports/ as

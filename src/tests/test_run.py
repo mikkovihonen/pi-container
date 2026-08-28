@@ -1599,6 +1599,141 @@ class TestCleanupOrphanedNestedVolumes:
         assert run._cleanup_orphaned_nested_volumes("podman") == []
 
 
+class TestProjectVolumeName:
+    def test_deterministic_and_unique(self):
+        name1 = run._project_volume_name("abc1234567", "/workspace/node_modules")
+        name2 = run._project_volume_name("abc1234567", "/workspace/node_modules")
+        name3 = run._project_volume_name("abc1234567", "/workspace/.venv")
+        name4 = run._project_volume_name("otherproj", "/workspace/node_modules")
+
+        assert name1 == name2
+        assert name1.startswith("pi-vol-abc1234567-")
+        assert name1 != name3
+        assert name1 != name4
+
+
+class TestEnsureProjectVolume:
+    def test_existing_volume_returns_true(self, monkeypatch):
+        monkeypatch.setattr(run, "_volume_exists", lambda rt, name: True)
+        assert (
+            run._ensure_project_volume(
+                "podman",
+                "pi-vol-test",
+                "/workspace/node_modules",
+                "pi-proxy-test",
+                "/host/path",
+            )
+            is True
+        )
+
+    def test_creates_volume_with_labels(self, monkeypatch):
+        monkeypatch.setattr(run, "_volume_exists", lambda rt, name: False)
+        recorded = []
+
+        def _run(cmd, **kw):
+            recorded.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(run.subprocess, "run", _run)
+        success = run._ensure_project_volume(
+            "podman",
+            "pi-vol-test",
+            "/workspace/node_modules",
+            "pi-proxy-test",
+            "/host/path",
+        )
+        assert success is True
+        assert len(recorded) == 1
+        cmd = recorded[0]
+        assert "volume" in cmd and "create" in cmd
+        assert "pi-container.type=project-volume" in cmd
+        assert "pi-container.project.hash=pi-proxy-test" in cmd
+        assert "pi-container.project.path=/host/path" in cmd
+        assert "pi-container.volume.dest=/workspace/node_modules" in cmd
+        assert "pi-vol-test" in cmd
+
+    def test_handles_creation_failure(self, monkeypatch):
+        monkeypatch.setattr(run, "_volume_exists", lambda rt, name: False)
+        monkeypatch.setattr(
+            run.subprocess,
+            "run",
+            lambda *a, **kw: MagicMock(returncode=1, stdout="", stderr="failed"),
+        )
+        assert (
+            run._ensure_project_volume(
+                "podman",
+                "pi-vol-test",
+                "/workspace/node_modules",
+                "pi-proxy-test",
+                "/host/path",
+            )
+            is False
+        )
+
+
+class TestCleanupStaleProjectVolumes:
+    def _mock_ls(self, monkeypatch, names: str, dangling: str | None = None):
+        def _run(cmd, **kw):
+            stdout = (names if dangling is None else dangling) if "dangling=true" in cmd else names
+            return MagicMock(returncode=0, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(run.subprocess, "run", _run)
+
+    def test_removes_stale_volume(self, monkeypatch):
+        self._mock_ls(monkeypatch, "pi-vol-proj-11111111\npi-vol-proj-22222222\n")
+        monkeypatch.setattr(run, "_get_volume_label", lambda rt, name, label: "/workspace/old")
+        removed = []
+        monkeypatch.setattr(run, "_remove_volume", lambda rt, name, **kw: removed.append(name) or True)
+
+        active = {"pi-vol-proj-11111111"}
+        result = run._cleanup_stale_project_volumes("podman", "pi-proxy-proj", active)
+        assert result == ["pi-vol-proj-22222222"]
+        assert removed == ["pi-vol-proj-22222222"]
+
+    def test_keeps_stale_volume_if_in_use(self, monkeypatch):
+        self._mock_ls(monkeypatch, "pi-vol-proj-22222222\n", dangling="")
+        monkeypatch.setattr(run, "_get_volume_label", lambda rt, name, label: "/workspace/old")
+        monkeypatch.setattr(
+            run,
+            "_remove_volume",
+            lambda *a, **kw: pytest.fail("should not remove in-use volume"),
+        )
+
+        result = run._cleanup_stale_project_volumes("podman", "pi-proxy-proj", set())
+        assert result == []
+
+
+class TestCleanupOrphanedProjectVolumes:
+    def _mock_ls(self, monkeypatch, names: str, dangling: str | None = None):
+        def _run(cmd, **kw):
+            stdout = (names if dangling is None else dangling) if "dangling=true" in cmd else names
+            return MagicMock(returncode=0, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(run.subprocess, "run", _run)
+
+    def test_removes_orphaned_volume(self, monkeypatch):
+        self._mock_ls(monkeypatch, "pi-vol-proj-11111111\n")
+        monkeypatch.setattr(run, "_get_volume_label", lambda rt, name, label: "/nonexistent/path")
+        removed = []
+        monkeypatch.setattr(run, "_remove_volume", lambda rt, name, **kw: removed.append(name) or True)
+
+        result = run._cleanup_orphaned_project_volumes("podman")
+        assert result == ["pi-vol-proj-11111111"]
+        assert removed == ["pi-vol-proj-11111111"]
+
+    def test_keeps_active_project_volume(self, monkeypatch):
+        self._mock_ls(monkeypatch, "pi-vol-proj-11111111\n")
+        monkeypatch.setattr(run, "_get_volume_label", lambda rt, name, label: str(Path(__file__).parent))
+        monkeypatch.setattr(
+            run,
+            "_remove_volume",
+            lambda *a, **kw: pytest.fail("should not remove live project volume"),
+        )
+
+        result = run._cleanup_orphaned_project_volumes("podman")
+        assert result == []
+
+
 class TestVolumeHelpers:
     def test_volume_exists_true_on_success(self, monkeypatch):
         monkeypatch.setattr(run.subprocess, "run", lambda cmd, **kw: MagicMock(returncode=0, stdout="[{}]"))

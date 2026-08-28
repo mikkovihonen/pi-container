@@ -1009,3 +1009,31 @@ class TestSchemaCommonDirect:
         assert len(errors) == 1
         assert "Duplicate container port 9999" in errors[0]
         assert "local-ornith" in errors[0] and "local-gemma" in errors[0]
+
+
+class TestVolumesSchema:
+    def test_valid_volumes_config(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["volumes"] = {"paths": ["/workspace/node_modules", "/workspace/.venv"]}
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is True
+        assert errors == []
+
+    def test_invalid_volumes_type(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["volumes"] = "invalid_string"
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is False
+        assert any("volumes" in e for e in errors)
