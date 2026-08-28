@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+- **Named persistent shadow volume mounts.** Added `volumes.paths` support in `config.yaml` to shadow subdirectories of `/workspace` with project-scoped persistent named volumes. Build and dependency caches (e.g. `node_modules`, `.venv`, `target`) persist in container runtime volume storage across sessions without RAM overhead, and stale or orphaned volumes are automatically pruned on startup when configuration changes or projects are removed.
+
+### Fixed
+- **Shadow mount and tmpfs directory ownership permissions.** Added `CONTAINER_CHOWN_PATHS` handling in `entrypoint.sh` and `run.py` to ensure mount roots for all `volumes.paths` and `tmpfs.paths` under `/workspace` are owned by `pi:pi` (0755), preventing permission denied errors when creating files and virtual environments (e.g. `.venv/CACHEDIR.TAG`).
+
 ## [0.5.5] - 2026-08-28
 
 ### Added
@@ -16,13 +22,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Large payload streaming in `mitmweb`.** Added `--set stream_large_bodies` and `--set store_streamed_bodies=false` flags to the proxy entrypoint, streaming payloads exceeding the threshold directly to prevent memory exhaustion and container OOM kills during heavy file transfers.
 - **Streaming flow export concatenation on host.** `src/flow_export.py` now uses 64 KB chunked streaming (`_stream_concatenate_files`) when combining per-IP flow captures into session snapshots, keeping host RAM usage constant regardless of capture file size.
 - **Repository `.gitignore` preflight validation.** When running `pi-container` in a workspace located within a git repository, `run.py` checks that sensitive and ephemeral runtime paths (`.pi-container/agent/bin`, `.pi-container/agent/sessions`, `.pi-container/agent/trust.json`, `.pi-container/agent/models-store.json`, `.pi-container/exports/`) are properly ignored by the repository's `.gitignore`, logging an actionable warning if any are missing.
-- **Named persistent shadow volume mounts.** Added `volumes.paths` support in `config.yaml` to shadow subdirectories of `/workspace` with project-scoped persistent named volumes. Build and dependency caches (e.g. `node_modules`, `.venv`, `target`) persist in container runtime volume storage across sessions without RAM overhead, and stale or orphaned volumes are automatically pruned on startup when configuration changes or projects are removed.
 
 ### Fixed
 - **Multi-provider `baseUrl`s unreachable from within container.** Previously, the proxy only resolved the literal hostname `llama`, causing custom hostnames and provider names to fail DNS lookup, while multiple providers sharing port 9999 suffered iptables DNAT collisions.
 - **Stale proxy port routing detection.** `ContainerNetworkManager._is_existing_proxy_healthy()` now validates that an already-running proxy container's `LLAMA_PORTS` and `LLAMA_HOSTNAMES` match the current run. When `llama-server` restarts on newly allocated host ports, stale proxy containers holding obsolete DNAT rules are automatically cleaned up and restarted with fresh port mappings.
 - **Agent container `/home/pi` tmpfs permission denied errors on startup.** When `/home/pi/` is mounted as runtime `tmpfs`, the entrypoint now explicitly enforces `chown pi:pi /home/pi && chmod 755 /home/pi` before running non-root operations, fixing permission errors when `gosu pi` creates `~/.gitconfig` or accesses `~/.config`.
-- **Shadow mount and tmpfs directory ownership permissions.** Added `CONTAINER_CHOWN_PATHS` handling in `entrypoint.sh` and `run.py` to ensure mount roots for all `volumes.paths` and `tmpfs.paths` under `/workspace` are owned by `pi:pi` (0755), preventing permission denied errors when creating files and virtual environments (e.g. `.venv/CACHEDIR.TAG`).
 - **Git configuration origin sanitization.** Fixed `get_sanitized_git_config_json` in `src/util.py` to accurately filter out local `.git/config` paths (`origin.endswith("/.git/config") or origin == "file:.git/config"`).
 - **Server startup TOCTOU lock scope race condition.** In `src/server.py`, extended the `ref_count_lock` critical section across `_start_new_server_process()` and client registration so concurrent starters block until the server is ready, preventing mutual kill races.
 - **Lock file inode split prevention.** Removed unneeded `.unlink()` calls on `.lock` files in `src/server.py` and `src/network.py` upon cleanup, ensuring concurrent file locks always reference the same POSIX inode.
