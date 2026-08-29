@@ -9,6 +9,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - **Global CA bundle environment variables in agent container.** Exported `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, and `GIT_SSL_CAINFO` pointing to `/etc/ssl/certs/ca-certificates.crt` in `pi-coding-agent/Containerfile`, ensuring third-party Python libraries (`requests`, `httpx`, `pip`, `boto3`), Node tools, git, and curl seamlessly trust the mitmproxy CA certificate without manual configuration.
 
+### Changed
+- **Modularized `src/run.py` into dedicated subsystems.** Extracted workspace project scoping and template seeding into `src/project.py`, image hashing, caching, and pruning into `src/images.py`, shadow and nested container volumes into `src/volumes.py`, and container orphan cleanup, port probing, and registry allowlist checks into `src/containers.py`. `src/run.py` now serves as a clean, lightweight application entrypoint, and unit test suites have been partitioned into dedicated per-module test files.
+- **Concise purpose-focused docstrings across codebase.** Refactored module, class, and function docstrings across `src/` to be concise and focused on function purpose, inputs, outputs, and usage rather than historical implementation essays.
+- **Code deduplication and unused argument cleanup.** Unified client refcount calculation into `get_ref_count()` in `src/util.py` across `network.py` and `server.py`, deduplicated `_validate_models_schema` in `src/schema_common.py`, removed unused `pi_commands_path` parameter from `build_project_image()` in `src/build.py`, and removed unused `project_dir` parameter from `_cleanup_stale_project_images()` in `src/run.py`.
+
 ## [0.5.6] - 2026-08-28
 
 ### Added

@@ -2,7 +2,7 @@ import sys
 
 sys.dont_write_bytecode = True
 
-"""Container network + proxy lifecycle management."""
+"""Container network and proxy container lifecycle management."""
 
 import contextlib
 import fcntl
@@ -21,6 +21,7 @@ from runtimes import ContainerRuntime
 from util import (
     deregister_client,
     get_free_port,
+    get_ref_count,
     read_live_clients,
     register_client,
     run_quiet,
@@ -34,11 +35,6 @@ logger = logging.getLogger(__name__)
 
 
 # ─── Project config (.pi-container/config.yaml) ───────────────────────────
-#
-# The per-project orchestration config: container resource limits, transient
-# tmpfs paths, flow-export toggle, and proxy egress policy — all in one file.
-# (The proxy addon configs allowlist.yaml / token_replacer.yaml stay separate:
-# they have their own schema and are bind-mounted into the proxy container.)
 
 # Container resource limits applied when values are present (a falsy/null value
 # omits the flag → unlimited). Defaults preserve the agent's historical 16g/8.
@@ -62,13 +58,7 @@ _PROXY_FORWARD_PORTS = {
 
 
 def load_project_config(config_dir: Path | None = None) -> dict:
-    """Load ``.pi-container/config.yaml``. Returns ``{}`` if absent or malformed.
-
-    The single source of truth for per-project orchestration settings. Individual
-    accessors (``scan_tmpfs_paths``, ``read_flow_export_enabled``,
-    ``read_proxy_forward_env``, ``read_resource_limits``) read their section from
-    the returned mapping.
-    """
+    """Load and parse `.pi-container/config.yaml`, returning an empty dict if missing or invalid."""
     import yaml as _yaml
 
     from yaml_strict import load_yaml_file
@@ -86,62 +76,32 @@ def load_project_config(config_dir: Path | None = None) -> dict:
 
 
 def scan_tmpfs_paths(config_dir: Path | None = None) -> list[str]:
-    """Transient tmpfs mount paths from config.yaml ``tmpfs.paths``.
-
-    Returns a deduplicated, sorted list of absolute container paths to mount as
-    tmpfs (volatile RAM disks). Empty when the section is absent.
-    """
+    """Extract sorted list of container tmpfs mount paths from config.yaml `tmpfs.paths`."""
     tmpfs = load_project_config(config_dir).get("tmpfs") or {}
     paths = tmpfs.get("paths", []) or []
     return sorted({str(p) for p in paths})
 
 
 def scan_volume_paths(config_dir: Path | None = None) -> list[str]:
-    """Named persistent volume mount paths from config.yaml ``volumes.paths``.
-
-    Returns a deduplicated, sorted list of absolute container paths to mount as
-    named persistent volumes (shadowing host paths). Empty when the section is absent.
-    """
+    """Extract sorted list of container volume paths from config.yaml `volumes.paths`."""
     volumes = load_project_config(config_dir).get("volumes") or {}
     paths = volumes.get("paths", []) or []
     return sorted({str(p) for p in paths})
 
 
 def read_flow_export_enabled(config_dir: Path | None = None, default: bool = False) -> bool:
-    """The mitmweb flow-export toggle from config.yaml ``flow_export.enabled``.
-
-    When enabled, the proxy's captured HTTP/HTTPS flow history is exported
-    (bucketed by UTC date) under ``.pi-container/exports/`` after the agent shuts
-    down. Returns ``default`` when the section is absent (fail-safe: no capture
-    unless a workspace opts in).
-    """
+    """Read the proxy flow export toggle from config.yaml `flow_export.enabled`."""
     flow_export = load_project_config(config_dir).get("flow_export") or {}
     return bool(flow_export.get("enabled", default))
 
 
 def _egress_truthy(value: object) -> bool:
-    """Match the proxy entrypoint's truthiness (true/1/yes/on), YAML bools included."""
+    """Check if a configuration value represents boolean True."""
     return str(value).strip().lower() in ("true", "1", "yes", "on")
 
 
 def read_proxy_forward_env(config_dir: Path | None = None) -> dict[str, str]:
-    """The proxy egress policy from config.yaml ``egress.allow`` → ``PROXY_ALLOW_*``.
-
-    Returns the env dict passed to the proxy container, whose entrypoint opens the
-    corresponding (UNINSPECTED) FORWARD rules. Only HTTP/HTTPS/DNS are intercepted
-    by mitmproxy; every other protocol is denied by default, so an absent section
-    yields ``{}`` (deny-all).
-
-    Expected shape::
-
-        egress:
-          allow:
-            ssh: true            # → PROXY_ALLOW_SSH=true
-            tcp_ports: [2222]    # → PROXY_ALLOW_TCP_PORTS=2222
-
-    Ports accept a list or a comma-separated string. Only truthy flags and
-    non-empty port lists are emitted.
-    """
+    """Generate `PROXY_ALLOW_*` environment variables for non-HTTP egress from config.yaml `egress.allow`."""
     allow = (load_project_config(config_dir).get("egress") or {}).get("allow") or {}
     env: dict[str, str] = {}
     for key, var in _PROXY_FORWARD_FLAGS.items():
@@ -665,15 +625,7 @@ class ContainerNetworkManager:
                     self.paths["lock_dir"].rmdir()
 
     def _get_ref_count(self) -> int:
-        live = read_live_clients(self.paths["clients_file"])
-        if live:
-            return len(live)
-        if self.paths["ref_count_file"].exists():
-            try:
-                return int(self.paths["ref_count_file"].read_text().strip())
-            except ValueError:
-                return 0
-        return 0
+        return get_ref_count(self.paths["clients_file"], self.paths["ref_count_file"])
 
     def _actually_start(self) -> None:
         # Pull secrets required by the mounted token_replacer config
@@ -944,34 +896,18 @@ class ContainerNetworkManager:
         )
 
     def _mitmweb_publish_args(self) -> list[str]:
-        """``-p`` flag publishing the mitmweb UI, scoped per config.yaml proxy.expose_ui.
-
-        ``localhost`` (default) binds 127.0.0.1 only; ``lan`` binds all interfaces.
-        Either way the port is reachable on host loopback, so the health probe and
-        :meth:`mitmweb_url` keep working.
-        """
+        """Generate `-p` flags publishing the mitmweb web interface on the host."""
         host = "127.0.0.1:" if read_proxy_ui_expose(self.config_dir) == "localhost" else ""
         return ["-p", f"{host}{self.mitmweb_port}:8081"]
 
     def mitmweb_url(self) -> str | None:
-        """Return the ``http://127.0.0.1:<port>`` URL of this project's mitmweb UI.
-
-        When this process started the proxy, the port is already known. When it
-        merely attached to an already-running proxy (refcount > 0), the port is
-        discovered from the running container. Best-effort: returns None if the
-        port can't be determined.
-        """
+        """Return the published host URL for this project's mitmweb web interface."""
         if self.mitmweb_port is None:
             self.mitmweb_port = self._query_published_port()
         return f"http://127.0.0.1:{self.mitmweb_port}" if self.mitmweb_port else None
 
     def _query_published_port(self) -> int | None:
-        """Resolve the host port the running proxy publishes container port 8081 on.
-
-        Parses ``<runtime> port <proxy_name> 8081/tcp`` (e.g. ``127.0.0.1:49732``
-        or ``0.0.0.0:49732``). Best-effort — returns None on any error or if the
-        runtime does not support the ``port`` subcommand.
-        """
+        """Query the container runtime for the host port mapped to proxy port 8081."""
         try:
             out = subprocess.run(
                 [self.container_runtime, "port", self.proxy_name, "8081/tcp"],

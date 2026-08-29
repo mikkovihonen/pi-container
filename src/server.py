@@ -2,7 +2,7 @@ import sys
 
 sys.dont_write_bytecode = True
 
-"""llama-server process lifecycle (start, share via refcount, socat bridge)."""
+"""llama-server process lifecycle and multi-client reference counting."""
 
 import contextlib
 import fcntl
@@ -21,6 +21,7 @@ from models import Model, ServerConfig
 from util import (
     deregister_client,
     get_free_port,
+    get_ref_count,
     is_pid_alive,
     read_live_clients,
     register_client,
@@ -32,16 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 def _config_fingerprint(config: ServerConfig) -> str:
-    """Stable short hash of a server's ``serverCustomParameters``.
-
-    A llama-server is a host resource shared across projects, keyed by provider
-    name. But two projects can define the *same* provider name with *different*
-    ``serverCustomParameters`` (model files, flags). Folding this fingerprint into
-    the sharing identity means identical configs share one process (RAM-efficient)
-    while divergent ones get their own — so a project never silently attaches to a
-    server running a different model. ``flags`` order is preserved (it is
-    significant to llama-server); model labels are sorted for determinism.
-    """
+    """Generate a stable short sha256 hash of server flags and model configurations."""
     payload = {
         "flags": [str(f) for f in config.flags],
         "models": {
@@ -251,15 +243,7 @@ class Server:
         return self.port if self.port is not None else -1
 
     def _get_current_ref_count(self) -> int:
-        live = read_live_clients(self.paths["clients_file"])
-        if live:
-            return len(live)
-        if self.paths["ref_count_file"].exists():
-            try:
-                return int(self.paths["ref_count_file"].read_text().strip())
-            except ValueError:
-                return 0
-        return 0
+        return get_ref_count(self.paths["clients_file"], self.paths["ref_count_file"])
 
     def _is_existing_server_healthy(self) -> tuple[bool, int | None, int | None]:
         if not self.paths["pid_file"].exists():

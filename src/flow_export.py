@@ -2,16 +2,7 @@ import sys
 
 sys.dont_write_bytecode = True
 
-"""Host-side mitmweb flow export.
-
-Reads the HTTP/HTTPS flows the proxy's ``flow_export`` addon staged (per client
-IP, as JSON Lines) for a session and writes a merged, date-bucketed snapshot
-under the project's ``.pi-container/exports/``. Also discovers the agent
-container's isolated-net IPs so those raw files can be attributed to it.
-
-This is the host counterpart of the container-side addon in
-``pi-coding-agent-proxy/addons/flow_export/``.
-"""
+"""Host-side management and export of mitmproxy HTTP/HTTPS flow logs."""
 
 import contextlib
 import json
@@ -29,24 +20,12 @@ logger = logging.getLogger(__name__)
 
 
 def _sanitize_ip(ip: str) -> str:
-    """Make an IP safe as a filename component (mirrors the flow_export addon).
-
-    IPv4 is unchanged; IPv6 colons become ``-`` and surrounding brackets are
-    stripped. Must stay in sync with ``_sanitize_ip`` in flow_export.py.
-    """
+    """Format an IP address for safe inclusion in filenames."""
     return ip.strip("[]").replace(":", "-")
 
 
 def _get_agent_container_ips(runtime_bin: str, container_name: str) -> list[str]:
-    """Return the agent container's global isolated-net IPs (IPv4 and/or IPv6).
-
-    The agent joins only the isolated network. The proxy sees whichever family a
-    given connection used as the client source address, so a dual-stack agent
-    can produce both a ``flows-<v4>.jsonl`` and a ``flows-<v6>.jsonl``. This
-    collects every global-scope (non-loopback, non-link-local) address across
-    its interfaces. Best-effort: returns [] on any error (container not up yet,
-    no `ip`, etc.).
-    """
+    """Query the container runtime for global-scope network IP addresses of the agent container."""
     try:
         out = subprocess.run(
             [runtime_bin, "exec", container_name, "ip", "-j", "addr"],

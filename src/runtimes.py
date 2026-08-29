@@ -2,35 +2,12 @@ import sys
 
 sys.dont_write_bytecode = True
 
-"""Container-runtime abstraction layer.
+"""Container runtime abstraction layer.
 
-``run.py`` orchestrates four moving parts — the host ``llama-server``, the
-``pi-coding-agent`` container, the ``pi-coding-agent-proxy`` container and the
-container network that isolates them. Every runtime-specific CLI flag and
-networking decision is encapsulated in a :class:`ContainerRuntime` subclass so
-``run.py`` stays runtime-agnostic.
-
-``podman`` is the only supported runtime. :class:`ContainerRuntime` is kept as
-the seam a future runtime would attach to; :class:`PodmanRuntime` is currently
-its single subclass. Docker was dropped deliberately — see
-``docs/design/nested-containers.md`` ("Dropping Docker"): stock Docker gives the
-agent container no user namespace, so container uid 0 *is* host uid 0, and the
-flag set nested containers need (``/dev/fuse``, ``/dev/net/tun``, relaxed
-SELinux, a nested container engine) is only well-contained under a userns.
-
-Network model
--------------
-* The isolated network is created ``--internal`` (no external gateway). A
-  container attached only to it therefore has **no default route** — verified.
-* The **proxy** attaches to two networks: the upstream network (``eth0`` →
-  internet, NAT/MASQUERADE) and the isolated network (``eth1`` → agent).
-* The **agent** attaches only to the isolated network and has its default route
-  and DNS pointed at the proxy's ``eth1`` IP. Because the isolated network has
-  no gateway of its own, the default route is injected via the ``DEFAULT_ROUTE``
-  env var + ``NET_ADMIN`` (the entrypoint runs ``ip route replace default``).
-* The proxy reaches the host ``llama-server`` (``LLAMA_HOST_ADDR``) through
-  ``host.containers.internal``: podman runs inside a Linux VM on macOS and
-  gvproxy forwards that name to the host loopback, so no socat is needed.
+Encapsulates container-engine CLI flags and networking operations
+(isolated bridge network, proxy routing, IPv6 policy, volume mounts,
+nested containers) behind :class:`ContainerRuntime` subclasses so ``run.py``
+and ``network.py`` remain runtime-agnostic.
 """
 
 import json
@@ -43,17 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def _vm_ipv6_run_args(enabled: bool, forwarding: bool) -> list[str]:
-    """``--sysctl`` flags enforcing the IPv6 policy for a VM runtime.
-
-    Rootless podman namespaces forbid writing ``net.*`` sysctls from inside the
-    container, so the policy is pinned at ``run`` time:
-
-    * disabled → ``net.ipv6.conf.all.disable_ipv6=1`` tears down IPv6 entirely.
-    * enabled + forwarding → ``net.ipv6.conf.all.forwarding=1`` lets the proxy
-      route v6 traffic (mirrors the v4 ``ip_forward`` flag). An enabled endpoint
-      container (the agent) needs no flag — the default (IPv6 on, no forwarding)
-      is exactly right.
-    """
+    """Generate ``--sysctl`` flags configuring IPv6 routing for VM-based container runtimes."""
     if not enabled:
         return ["--sysctl", "net.ipv6.conf.all.disable_ipv6=1"]
     if forwarding:
@@ -62,10 +29,10 @@ def _vm_ipv6_run_args(enabled: bool, forwarding: bool) -> list[str]:
 
 
 class ContainerRuntime(ABC):
-    """Base class encapsulating the differences between container runtimes.
+    """Abstract base class defining the container runtime interface.
 
-    Subclasses set the class-level attributes and override the handful of
-    methods where the runtimes genuinely diverge.
+    Subclasses implement engine-specific CLI arguments for networking, mounts,
+    nested containers, and host address resolution.
     """
 
     #: The CLI binary name (``podman``).
@@ -225,52 +192,11 @@ class ContainerRuntime(ABC):
     # These are plain OCI ``run`` flags, so they live on the base class; a future
     # runtime whose nesting story differs overrides them.
     def nested_container_args(self, cfg: dict, project_hash: str) -> list[str]:
-        """``run`` flags letting the agent run its own rootless podman inside itself.
+        """Return ``run`` flags enabling rootless podman inside the agent container.
 
-        Returns ``[]`` when ``nested_containers.enabled`` is false (the default),
-        so nesting costs nothing but the toolchain's disk footprint in the image.
-
-        When enabled, containers the agent starts are **children** — in its mount
-        and network namespaces — so they inherit its routing (hence the proxy) and
-        can bind-mount its view of ``/workspace`` directly. The flags are:
-
-        * ``--device /dev/fuse`` — ``fuse-overlayfs`` fallback when native
-          rootless overlay is unavailable.
-        * ``--device /dev/net/tun`` — ``pasta`` needs it to create
-          the inner tap device. This grants no egress: the only route off the
-          isolated network is still the proxy, whose FORWARD policy is DROP.
-        * ``--security-opt label=...`` — see :meth:`_nested_security_opt`.
-        * ``--security-opt unmask=ALL`` + ``--cap-add SYS_ADMIN`` — the two
-          requirements that were *measured*, not predicted (see below).
-        * the nested image store at ``/home/pi/.local/share/containers``, either a
-          persistent per-project named volume (``storage: volume``) or a tmpfs
-          (``storage: tmpfs``). It cannot live on the agent's default paths:
-          ``/home/pi`` is tmpfs, and the container rootfs is overlayfs (podman
-          would degrade to the full-copy ``vfs`` driver on overlay-on-overlay).
-        * ``XDG_RUNTIME_DIR`` — rootless podman's lock/pid directory, created by
-          the entrypoint (which is gated on ``PI_CONTAINER_NESTED``).
-
-        Why ``unmask=ALL`` and ``SYS_ADMIN`` are both needed — each was isolated
-        by starting an inner ``alpine`` container from the agent image:
-
-        * without ``unmask=ALL`` → ``crun: open /proc/sys/net/ipv4/ping_group_range:
-          Read-only file system``. Podman bind-mounts parts of ``/proc`` read-only
-          (and masks others) in the agent container; those mounts are *locked* in
-          the nested user namespace, so the inner runtime cannot set its sysctls.
-        * without ``SYS_ADMIN`` → ``crun: sethostname: Operation not permitted``.
-          Podman's default seccomp profile allows ``mount``/``sethostname``/
-          ``umount2``/``pivot_root`` only when ``CAP_SYS_ADMIN`` is in the
-          container's capability set, and a seccomp filter cannot be relaxed from
-          inside a nested user namespace — even though the nested namespace's own
-          capability set is full (measured: ``CapEff: 000001ffffffffff``).
-
-        ``CAP_SYS_ADMIN`` here is **namespaced**: the agent container's user
-        namespace maps container uid 0 to an unprivileged host user, so the
-        capability confers power only over what that namespace owns — not over the
-        host. Still absent: ``--privileged``, ``seccomp=unconfined``, ``--userns``
-        overrides, and any host socket. Egress interception is unaffected —
-        verified: with the agent on the ``--internal`` network, an inner container
-        cannot reach even a raw IP.
+        Configures required devices (`/dev/fuse`, `/dev/net/tun`), security options,
+        capabilities (`SYS_ADMIN`), and storage mounts for nested container execution.
+        Returns an empty list when nested containers are disabled.
         """
         if not cfg.get("enabled"):
             return []
@@ -299,34 +225,7 @@ class ContainerRuntime(ABC):
         ]
 
     def nested_port_args(self, cfg: dict) -> list[str]:
-        """``-p`` flags publishing nested-container UI ports to the host.
-
-        A nested container's own ``-p 3000:3000`` binds inside the **agent's**
-        network namespace, which the host cannot reach — the agent container has
-        to publish the same port onward, and a container's published ports are
-        fixed at start. Hence the explicit ``nested_containers.ports.publish``
-        list rather than anything discovered at runtime.
-
-        Two things had to be true for this to work, and both were measured with
-        the agent on the ``--internal`` network:
-
-        * The nested container must be on a **netavark bridge**, not podman 6's
-          rootless default of ``pasta``. Under pasta the outer port forward
-          reaches the agent netns and the handshake even completes, then the flow
-          stalls: the connection arrives carrying the agent's own address as its
-          source, which is also the address pasta hands the nested guest. Under
-          bridge, ``rootlessport`` binds a real socket in the agent netns and the
-          outer ``-p`` publishes it. That default is set image-side, in the
-          ``containers.conf`` drop-in (``[containers] netns = "bridge"``).
-        * Publishing works at all on an ``--internal`` network — it has no
-          gateway, but ``-p`` forwards within the runtime's own namespace and
-          never needed one.
-
-        This is **inbound only** and creates no egress: the proxy is still the
-        agent's only route out, verified unchanged with a nested container on a
-        bridge. It does widen what can reach the agent, which is why ``expose``
-        defaults to ``localhost`` and ``publish`` ships empty.
-        """
+        """Return ``-p`` flags publishing nested-container service ports to the host."""
         if not cfg.get("enabled"):
             return []
         ports = cfg.get("ports") or {}
@@ -335,27 +234,12 @@ class ContainerRuntime(ABC):
 
     @staticmethod
     def nested_volume_name(project_hash: str) -> str:
-        """Name of this workspace's persistent nested-image-store volume."""
+        """Return the deterministic volume name for a project's nested image store."""
         return f"pi-nested-{project_hash}"
 
     @staticmethod
     def _nested_security_opt(security: str) -> str:
-        """The agent container's SELinux label for nesting.
-
-        On an SELinux-enforcing host ``/dev/net/tun`` is inaccessible under the
-        default ``container_t`` label, so one of two labels is needed:
-
-        * ``disable`` (default) → ``label=disable``. Nested containers need no
-          special flags. The agent loses SELinux *type* confinement but keeps the
-          user namespace, rootlessness, seccomp, the capability bounding set, the
-          routing dead end, and the absence of any host socket.
-        * ``engine_t`` → ``label=type:container_engine_t``. The agent stays
-          confined, but **every** nested container must then be run with
-          ``--security-opt unmask=all`` or it fails in ``crun`` (``mount tmpfs to
-          proc/acpi: Permission denied``). That cannot be made transparent —
-          ``unmask`` is not a ``containers.conf`` key — so it breaks the
-          API-socket workflows this feature exists for.
-        """
+        """Translate the nesting security configuration into runtime SELinux flags."""
         return "label=type:container_engine_t" if security == "engine_t" else "label=disable"
 
     # ── Host llama-server reachability ──────────────────────────────────
@@ -365,14 +249,7 @@ class ContainerRuntime(ABC):
 
 
 class PodmanRuntime(ContainerRuntime):
-    """Podman (netavark). On macOS it runs inside a Linux VM.
-
-    Multiple networks attach at ``run`` time and interface names are pinned via
-    ``<net>:interface_name=<if>`` so the isolated network is deterministically
-    ``eth1`` (matching the proxy entrypoint). The mac host loopback — where
-    ``llama-server`` listens — is reachable via ``host.containers.internal``
-    (gvproxy forwards to it), so no host socat is needed.
-    """
+    """Podman container runtime implementation with netavark networking and gvproxy DNS support."""
 
     name = "podman"
     default_bridge_interface = "podman0"
@@ -438,14 +315,7 @@ class PodmanRuntime(ContainerRuntime):
         return self.HOST_INTERNAL_HOSTNAME
 
     def resolve_llama_host_addr(self, probe_image: str | None = None) -> str | None:
-        """Resolve ``host.containers.internal`` to a numeric IP.
-
-        Podman drops the ``host.containers.internal`` /etc/hosts entry when a
-        container is attached to multiple networks (as the proxy is), so the
-        entrypoint cannot resolve the hostname itself. We resolve it here — from
-        a throwaway single-network probe container where the entry is present —
-        and inject the numeric IP, falling back to gvproxy's fixed address.
-        """
+        """Resolve the host machine address (``host.containers.internal``) to a numeric IP."""
         if probe_image:
             try:
                 result = subprocess.run(

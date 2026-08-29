@@ -9,16 +9,7 @@ def _resolve_chat_template_path(
     models_path: Path,
     seed_dir: Path | None = None,
 ) -> Path:
-    """Resolve a ``--chat-template-file`` path to an absolute path on disk.
-
-    Handles three cases:
-
-    1. ``.pi-container/...`` — resolves relative to the seed directory (if
-       provided) or the project's ``.pi-container`` (for seeded configs),
-       or the repo's ``pi-coding-agent/default/`` (for seed templates).
-    2. ``pi-coding-agent/default/...`` — resolves relative to the seed directory.
-    3. Any other path — resolves relative to the models.json parent directory.
-    """
+    """Resolve a `--chat-template-file` flag path to an absolute path on disk."""
     if template_path.startswith(".pi-container/"):
         suffix = template_path[len(".pi-container/") :]
         if seed_dir is not None:
@@ -41,11 +32,7 @@ def _check_chat_template_paths(
     errors: list[str],
     seed_dir: Path | None = None,
 ) -> None:
-    """Check that ``--chat-template-file`` paths exist on disk.
-
-    For seed templates, resolves ``.pi-container`` → ``pi-coding-agent/default/``.
-    For seeded configs, resolves ``.pi-container`` from the project root.
-    """
+    """Validate that `--chat-template-file` paths specified in server flags exist on disk."""
     providers = data.get("providers", {})
     for provider_name, provider_cfg in providers.items():
         server_params = provider_cfg.get("serverCustomParameters", {})

@@ -8,11 +8,10 @@ from schema_common import (
     SCHEMA,
     _validate_hf_models,
     _validate_models_flags,
-    _validate_models_schema,
     _validate_provider_base_urls,
     _validate_schema,
 )
-from template_paths import _check_chat_template_paths as _shared_check_chat_template_paths
+from template_paths import _check_chat_template_paths
 from version import get_git_tag_version
 from yaml_strict import DuplicateKeyError, check_duplicate_keys, load_yaml_strict
 
@@ -21,47 +20,20 @@ if TYPE_CHECKING:
 
 sys.dont_write_bytecode = True
 
-"""Per-project configuration schema validation.
-
-Reads the pi-container version from the latest git tag and validates that the
-seeded ``.pi-container/config.yaml`` schema_version matches. Also validates that
-required configuration fields are present with the correct types.
-
-Importing this module has no gating side effects — it does NOT validate the
-environment or call ``sys.exit``.
-
-All helper functions and schema definitions are shared with
-``.github/workflows/scripts/validate_versions.py`` via ``schema_common.py``.
-"""
+"""Configuration schema validation for `config.yaml` and `models.json`."""
 
 
 # ─── Version from git tags ──────────────────────────────────────────────────
 
 
 def get_app_version() -> str | None:
-    """Return the pi-container version from the latest git tag on the current branch.
-
-    Returns ``None`` if no tags exist (pre-release state — validation is skipped).
-    The version is authoritative from git, not from ``pyproject.toml``.
-    """
+    """Retrieve the current pi-container version from git tags on the repository."""
     from config import REPO_ROOT
 
     return get_git_tag_version(REPO_ROOT)
 
 
-# ─── Schema definition ─────────────────────────────────────────────────────
-#
-# Schema definitions live in ``schema_common.py``. Local aliases keep the
-# existing ``_SCHEMA`` / ``_MODELS_SCHEMA`` names stable for callers and tests.
-
-_SCHEMA = SCHEMA
-_MODELS_SCHEMA = MODELS_SCHEMA
-
-#: Marker text in the stale-version error. Callers match on it to tell the two
-#: failure kinds apart, because they have different remedies: a stale version with
-#: an otherwise-valid shape can be fixed by editing the string (lossless, keeps the
-#: user's settings), while a missing or mistyped field means the template changed
-#: shape and only a re-seed will produce it.
+#: Marker text in the stale-version error.
 SCHEMA_VERSION_MISMATCH = "schema_version mismatch"
 
 
@@ -70,16 +42,10 @@ SCHEMA_VERSION_MISMATCH = "schema_version mismatch"
 
 
 def validate_config(config_path: Path) -> tuple[bool, list[str], str | None]:
-    """Validate the config at ``config_path``.
+    """Validate `config.yaml` structure, required fields, and schema version against git release tag.
 
-    Returns ``(is_valid, errors, schema_version)``:
-    - ``is_valid``: True if the config passes all checks.
-    - ``errors``: List of human-readable error messages (empty if valid).
-    - ``schema_version``: The schema_version from the config (or None if absent).
-
-    Checks performed:
-    1. ``schema_version`` matches the app version from the latest git tag.
-    2. All required fields are present with correct types.
+    Returns:
+        tuple of (is_valid, error_list, schema_version_string).
     """
     errors: list[str] = []
 
@@ -134,12 +100,7 @@ PROJECT_YAML_FILES = ("config.yaml", "allowlist.yaml", "token_replacer.yaml")
 
 
 def validate_project_yaml(config_dir: Path) -> list[str]:
-    """Duplicate-key check across every per-project YAML file.
-
-    Returns a list of human-readable error messages (empty = all clean).
-    Missing files are not an error here: only ``config.yaml`` is required, and
-    ``validate_config`` reports that one.
-    """
+    """Scan all project YAML files (`config.yaml`, `allowlist.yaml`, `token_replacer.yaml`) for duplicate mapping keys."""
     errors: list[str] = []
     for name in PROJECT_YAML_FILES:
         errors.extend(check_duplicate_keys(config_dir / name))
@@ -154,18 +115,7 @@ def validate_models(
     models_path: Path,
     check_chat_template_paths: bool = True,
 ) -> tuple[bool, list[str]]:
-    """Validate a models.json file against the schema.
-
-    Returns ``(is_valid, errors)``:
-    - ``is_valid``: True if the models file passes all checks.
-    - ``errors``: List of human-readable error messages (empty if valid).
-
-    Checks performed:
-    1. ``providers`` dict is present and has the correct structure.
-    2. Each provider's ``serverCustomParameters.flags`` items are valid.
-    3. If ``check_chat_template_paths`` is True, validates that
-       ``--chat-template-file`` paths resolve correctly.
-    """
+    """Validate `.pi-container/agent/models.json` structure, provider custom parameters, flags, and base URLs."""
     errors: list[str] = []
 
     if not models_path.exists():
@@ -182,7 +132,7 @@ def validate_models(
         return False, errors
 
     # Validate top-level structure
-    schema_errors = _validate_models_schema(data, MODELS_SCHEMA)
+    schema_errors = _validate_schema(data, MODELS_SCHEMA)
     if schema_errors:
         errors.extend(schema_errors)
         return False, errors
@@ -218,7 +168,7 @@ def validate_models(
 
     # Validate --chat-template-file paths if requested
     if check_chat_template_paths:
-        _shared_check_chat_template_paths(data, models_path, errors)
+        _check_chat_template_paths(data, models_path, errors)
 
     is_valid = len(errors) == 0
     return is_valid, errors

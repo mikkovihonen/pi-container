@@ -25,29 +25,17 @@ def run_quiet(
     logger: logging.Logger | None = None,
     **kwargs,
 ) -> subprocess.CompletedProcess:
-    """Run a command quietly on success but surface the reason on failure.
-
-    Drop-in replacement for the ``subprocess.run(cmd, stdout=DEVNULL,
-    stderr=DEVNULL)`` fire-and-forget pattern, which hides *why* a command
-    failed. Output is captured instead of discarded; on a non-zero exit the
-    captured stderr (or stdout) is logged, and — unless ``check=False`` — a
-    ``CalledProcessError`` is raised so the failure cannot pass silently.
+    """Execute a subprocess command, capturing output and logging failures.
 
     Args:
-        cmd: The command argv.
-        check: If True (default), log the failure and raise
-            ``CalledProcessError`` on non-zero exit. If False, log a warning
-            and return anyway — for teardown/cleanup where a failed command
-            should not abort the caller.
-        label: Human-readable name for the command in messages. Defaults to the
-            executable (``cmd[0]``). Also used in place of the raw argv in the
-            raised exception, so secrets passed on the command line (e.g.
-            ``ADMIN_PASSWORD``) never leak into tracebacks/logs.
-        logger: Logger to emit failure messages to (defaults to this module's).
-        **kwargs: Passed through to ``subprocess.run`` (e.g. ``timeout``).
+        cmd: Command argv to execute.
+        check: If True (default), log failure and raise CalledProcessError on non-zero exit.
+        label: Display name for the command in error logs (hides raw command secrets).
+        logger: Logger to receive failure messages (defaults to module logger).
+        **kwargs: Additional keyword arguments passed to subprocess.run.
 
     Returns:
-        The ``CompletedProcess`` (with captured ``stdout``/``stderr``).
+        CompletedProcess instance with captured stdout and stderr.
     """
     log = logger if logger is not None else _LOG
     name = label or (cmd[0] if cmd else "command")
@@ -67,6 +55,7 @@ def run_quiet(
 
 
 def load_dotenv(dotenv_path: Path):
+    """Load environment variables from a .env file into os.environ."""
     if not dotenv_path.exists():
         return
     with open(dotenv_path) as f:
@@ -82,17 +71,9 @@ def load_dotenv(dotenv_path: Path):
 class EnvironmentError(Exception):
     """Raised when the environment does not meet requirements."""
 
-    pass
-
 
 def validate_environment(llama_bin: str | None) -> str:
-    """Check the host prerequisites and return the container runtime to use.
-
-    ``podman`` is the only supported runtime: the whole isolation model — and
-    especially nested containers — rests on the agent container running inside a
-    user namespace where container uid 0 maps to an unprivileged host user, which
-    stock Docker does not provide. See ``docs/design/nested-containers.md``.
-    """
+    """Validate host prerequisites (llama-server, hf CLI, podman) and return the runtime name."""
     if llama_bin is None or not Path(llama_bin).exists():
         raise EnvironmentError("llama-server not found. Please install it or set LLAMA_BIN.")
 
@@ -111,6 +92,7 @@ def validate_environment(llama_bin: str | None) -> str:
 
 
 def get_free_port() -> int:
+    """Bind to an ephemeral port on 127.0.0.1, close the socket, and return the free port number."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
@@ -184,6 +166,19 @@ def deregister_client(clients_file: Path, pid: int, run_id: str | None = None) -
     return remaining
 
 
+def get_ref_count(clients_file: Path, ref_count_file: Path) -> int:
+    """Return the number of active clients or fall back to ref_count_file."""
+    live = read_live_clients(clients_file)
+    if live:
+        return len(live)
+    if ref_count_file.exists():
+        try:
+            return int(ref_count_file.read_text().strip())
+        except ValueError:
+            return 0
+    return 0
+
+
 def handle_signal(signum: int, frame: object | None = None, logger: logging.Logger | None = None) -> None:
     """Handle termination signals (SIGINT, SIGTERM, SIGHUP, SIGQUIT).
 
@@ -238,9 +233,7 @@ def extract_ipv4_from_ip_addr(output: str) -> str | None:
 
 
 def get_sanitized_git_config_json(logger):
-    """
-    Generates a JSON-serialized dictionary of 'key': 'value' pairs.
-    """
+    """Extract global host git configuration as JSON, stripping repository-local settings and credentials."""
     sanitized_dict = {}
     # Regex to strip 'user:pass@' from URLs
     url_credential_regex = re.compile(r"(https?://)[^/]+:[^/@]+@")
@@ -261,7 +254,7 @@ def get_sanitized_git_config_json(logger):
             if m:
                 origin, key, value = m.group(1), m.group(2), m.group(3)
 
-                if origin.endswith("/.git/config") or origin == "file:.git/config" or origin.endswith(".git/config"):
+                if origin.endswith(("/.git/config", ".git/config")) or origin == "file:.git/config":
                     continue
 
                 key = key.strip()

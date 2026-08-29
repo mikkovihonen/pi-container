@@ -338,6 +338,38 @@ class TestClientManifestHelpers:
         assert not clients_file.exists()
 
 
+class TestGetRefCount:
+    def test_get_ref_count_from_live_clients(self, tmp_path):
+        from util import get_ref_count, write_clients
+
+        clients_file = tmp_path / "clients.json"
+        ref_count_file = tmp_path / "ref_count"
+        write_clients(clients_file, [{"pid": os.getpid(), "run_id": "r1"}])
+        ref_count_file.write_text("5")
+
+        # Live clients take priority
+        assert get_ref_count(clients_file, ref_count_file) == 1
+
+    def test_get_ref_count_fallback_to_file(self, tmp_path):
+        from util import get_ref_count
+
+        clients_file = tmp_path / "clients.json"
+        ref_count_file = tmp_path / "ref_count"
+        ref_count_file.write_text("3")
+
+        assert get_ref_count(clients_file, ref_count_file) == 3
+
+    def test_get_ref_count_corrupted_or_missing_file(self, tmp_path):
+        from util import get_ref_count
+
+        clients_file = tmp_path / "clients.json"
+        ref_count_file = tmp_path / "ref_count"
+        assert get_ref_count(clients_file, ref_count_file) == 0
+
+        ref_count_file.write_text("not_a_number")
+        assert get_ref_count(clients_file, ref_count_file) == 0
+
+
 # ---------------------------------------------------------------------------
 # stop_process_group
 # ---------------------------------------------------------------------------

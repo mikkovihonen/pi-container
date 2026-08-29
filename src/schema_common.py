@@ -1,19 +1,14 @@
 from typing import Any
 from urllib.parse import urlparse
 
-"""Shared schema definitions and validators.
-
-Used by ``config_schema.py`` (per-project config validation) and
-``.github/workflows/scripts/validate_versions.py`` (CI version consistency
-checks). Importing this module has no gating side effects.
-"""
+"""Shared schema definitions and validation logic for configuration files."""
 
 
 # ─── Field validation ───────────────────────────────────────────────────────
 
 
 def _validate_field(value: Any, expected: type | tuple[type, ...], path: str) -> list[str]:
-    """Validate a single field's type. Returns a list of error messages (empty = OK)."""
+    """Validate a single field's type, returning any error messages."""
     errors: list[str] = []
     if not isinstance(value, expected):
         errors.append(f"  {path}: expected {expected}, got {type(value).__name__} (value: {value!r})")
@@ -24,10 +19,7 @@ def _validate_field(value: Any, expected: type | tuple[type, ...], path: str) ->
 
 
 def _validate_schema(data: dict, schema: dict, path: str = "") -> list[str]:
-    """Recursively validate a dict against a schema definition.
-
-    Returns a list of error messages (empty = valid).
-    """
+    """Recursively validate a dictionary structure against a schema specification."""
     errors: list[str] = []
     for key, spec in schema.items():
         current_path = f"{path}.{key}" if path else key
@@ -191,36 +183,6 @@ MODELS_SCHEMA: dict = {
 
 
 # ─── Models schema validation ──────────────────────────────────────────────
-
-
-def _validate_models_schema(
-    data: dict,
-    schema: dict,
-    path: str = "",
-) -> list[str]:
-    """Recursively validate a models.json dict against the schema.
-
-    Returns a list of error messages (empty = valid).
-    """
-    errors: list[str] = []
-    for key, spec in schema.items():
-        current_path = f"{path}.{key}" if path else key
-        value = data.get(key)
-
-        if value is None:
-            if spec.get("required", True):
-                errors.append(f"  {current_path}: required field missing")
-            continue
-
-        errors.extend(_validate_field(value, spec["type"], current_path))
-        if not isinstance(value, dict):
-            continue
-
-        sub_schema = spec.get("keys", {})
-        if sub_schema:
-            errors.extend(_validate_models_schema(value, sub_schema, current_path))
-
-    return errors
 
 
 def _validate_models_flags(flags: list, path: str) -> list[str]:

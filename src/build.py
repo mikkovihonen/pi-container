@@ -92,21 +92,12 @@ _MIB_PER_JOB_PLAIN = 400
 
 
 def _python_optimize_enabled() -> bool:
-    """Whether the PGO CPython build is on (``PYTHON_OPTIMIZE``, default yes)."""
+    """Check if Python PGO profile optimization is enabled via PYTHON_OPTIMIZE."""
     return os.environ.get("PYTHON_OPTIMIZE", "1").strip() not in ("0", "false", "no", "off")
 
 
 def read_available_memory_mib(runtime: str) -> int | None:
-    """Available memory (MiB) where the image is actually built, or None if unknown.
-
-    Reads ``MemAvailable`` rather than ``MemFree``: reclaimable page cache counts,
-    and the two differ by an order of magnitude on a warm builder (measured on
-    this host: free 43 MiB vs available 295 MiB).
-
-    Native Linux builds in this kernel, so ``/proc/meminfo`` is the right source.
-    On macOS/Windows podman builds inside its VM, so the VM is asked instead —
-    the host's own free memory is irrelevant there.
-    """
+    """Read available system memory in MiB on the host or inside the Podman VM."""
     local_meminfo = Path("/proc/meminfo")
     if local_meminfo.exists():
         return _parse_mem_available_mib(local_meminfo.read_text())
@@ -134,16 +125,7 @@ def _parse_mem_available_mib(meminfo: str) -> int | None:
 
 
 def check_build_memory(runtime: str, fatal: bool = True) -> bool:
-    """Report whether the builder has room to compile CPython.
-
-    Returns True when the build should go ahead. When there is not enough memory,
-    logs what to do about it and — if ``fatal`` — returns False so the caller can
-    stop before launching a build that cannot finish.
-
-    Skipped entirely by ``PI_MEMORY_PREFLIGHT=0``, which is the escape hatch when
-    the Python layer is already in the build cache (no compile, so no memory
-    needed) and this check would only get in the way.
-    """
+    """Verify that sufficient memory is available to compile CPython in the builder container."""
     if os.environ.get("PI_MEMORY_PREFLIGHT", "1").strip() in ("0", "false", "no", "off"):
         logger.debug("Build-memory preflight disabled (PI_MEMORY_PREFLIGHT=0).")
         return True
@@ -175,11 +157,7 @@ def check_build_memory(runtime: str, fatal: bool = True) -> bool:
 
 
 def _python_build_args() -> list[str]:
-    """``--build-arg`` pair forwarding ``PYTHON_OPTIMIZE`` to the builder image.
-
-    Only emitted when the env var is set, so the Containerfile's own default (PGO
-    on) stays the single source of truth otherwise.
-    """
+    """Generate ``--build-arg`` flags passing ``PYTHON_OPTIMIZE`` settings to container build."""
     value = os.environ.get("PYTHON_OPTIMIZE", "").strip()
     return ["--build-arg", f"PYTHON_OPTIMIZE={'1' if _python_optimize_enabled() else '0'}"] if value else []
 
@@ -188,15 +166,7 @@ _NODE_SOURCES = ("prebuilt", "build")
 
 
 def _node_build_args() -> list[str]:
-    """``--build-arg`` pair forwarding ``NODE_SOURCE`` to the builder image.
-
-    ``prebuilt`` (the Containerfile's default) stages the official nodejs.org tarball;
-    ``build`` compiles Node from source, which costs about an hour. Only emitted when
-    the env var is set, so the Containerfile stays the single source of truth otherwise.
-
-    An unrecognised value is rejected here rather than passed through: the build script
-    would fail on it anyway, but only after the proxy image had already been rebuilt.
-    """
+    """Generate ``--build-arg`` flags specifying the Node.js installation source."""
     value = os.environ.get("NODE_SOURCE", "").strip().lower()
     if not value:
         return []
@@ -206,20 +176,7 @@ def _node_build_args() -> list[str]:
 
 
 def build_builder(runtime: str) -> None:
-    """Build the toolchain image the other images copy their toolchain from.
-
-    The slow one: it compiles CPython, podman and the netavark/aardvark-dns pair from
-    source, and Node too when ``NODE_SOURCE=build`` (see
-    pi-coding-agent-builder/Containerfile for why each is not simply apt-installed). It
-    is built only by build.sh — a project-specific image rebuild reuses the tag as-is.
-
-    Built first, because both other images COPY --from it: the agent takes all four
-    staged trees, the proxy takes the Python one.
-
-    Carries the same ``pi-container.build.time`` label as the proxy image, because
-    run.py compares project-image timestamps against both: a project image built
-    before this one holds an older toolchain.
-    """
+    """Build the base builder image containing CPython, Node.js, and container tools."""
     from datetime import UTC, datetime
 
     build_ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -252,11 +209,7 @@ def build_builder(runtime: str) -> None:
 
 
 def build_proxy(runtime: str) -> None:
-    """Build the mitmproxy image.
-
-    Requires the toolchain image to exist: the proxy COPYs its CPython and uv from it,
-    so that the interpreter and the package manager are the same ones the agent runs.
-    """
+    """Build the mitmproxy container image for network egress inspection and rewriting."""
     from datetime import UTC, datetime
 
     build_ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -279,12 +232,7 @@ def build_proxy(runtime: str) -> None:
 
 
 def build_agent(runtime: str) -> None:
-    """Build the shared base agent image.
-
-    Labelled ``pi-container.type=shared``, not ``project``: this image belongs to no
-    project, so it must stay out of run.py's project-image cleanup passes. Nothing
-    reclaims ``type=shared`` images — they are rebuilt only by build.sh.
-    """
+    """Build the shared default agent container image."""
     logger.info(f"Building agent image ({runtime}): {PI_IMAGE_TAG}")
     _run_command_with_logging(
         [
@@ -308,7 +256,6 @@ def build_agent(runtime: str) -> None:
 def build_project_image(
     runtime: str,
     root_commands_path: str,
-    pi_commands_path: str,
     image_tag: str,
     label_hash: str,
     project_hash: str = "",
@@ -320,7 +267,6 @@ def build_project_image(
     Args:
         runtime: Container runtime (docker or podman).
         root_commands_path: Absolute path to root/commands.sh on the host.
-        pi_commands_path: Absolute path to pi/commands.sh on the host.
         image_tag: Image tag for the project-specific image
             (e.g., "pi-container-project-<hash>-<hash>.local").
         label_hash: Content hash to store in the image label for cache invalidation.

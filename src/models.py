@@ -2,7 +2,7 @@ import sys
 
 sys.dont_write_bytecode = True
 
-"""Model configuration dataclasses and the downloadable Model."""
+"""Model configuration dataclasses and HuggingFace model downloader."""
 
 import fcntl
 import hashlib
@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ModelConfig:
+    """Configuration for a single HuggingFace model asset."""
+
     file_flag: str
     repo: str
     file: str
@@ -44,6 +46,8 @@ class ModelConfig:
 
 @dataclass(frozen=True)
 class ServerConfig:
+    """Configuration parameters for a llama-server instance."""
+
     hf_models: dict[str, ModelConfig]
     flags: list[Any]
 
@@ -58,6 +62,8 @@ class ServerConfig:
 
 @dataclass(frozen=True)
 class Model:
+    """Manage local disk cache, file locking, and download integrity for a model."""
+
     label: str
     config: ModelConfig
     models_dir: Path

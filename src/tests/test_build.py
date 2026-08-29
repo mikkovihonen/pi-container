@@ -351,7 +351,6 @@ class TestBuildProjectImage:
             build_project_image(
                 "podman",
                 "/path/to/root/commands.sh",
-                "/path/to/pi/commands.sh",
                 "pi-coding-agent-test.local",
                 "abc123",
             )
@@ -371,7 +370,6 @@ class TestBuildProjectImage:
             build_project_image(
                 "podman",
                 "/path/to/root/commands.sh",
-                "/path/to/pi/commands.sh",
                 "pi-container-project-a1b2c-d4e5f.local",
                 "abc123",
                 project_hash="a1b2c",
@@ -391,7 +389,6 @@ class TestBuildProjectImage:
             build_project_image(
                 "podman",
                 "/path/to/root/commands.sh",
-                "/path/to/pi/commands.sh",
                 "pi-container-project-a1b2c-d4e5f.local",
                 "abc123",
                 project_hash="a1b2c",
@@ -406,7 +403,6 @@ class TestBuildProjectImage:
             build_project_image(
                 "podman",
                 "/path/to/root/commands.sh",
-                "/path/to/pi/commands.sh",
                 "test.local",
                 "abc123",
             )
@@ -421,7 +417,6 @@ class TestBuildProjectImage:
             build_project_image(
                 "podman",
                 "/path/to/root/commands.sh",
-                "/path/to/pi/commands.sh",
                 "test.local",
                 "abc123",
             )

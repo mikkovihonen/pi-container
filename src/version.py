@@ -6,10 +6,7 @@ if TYPE_CHECKING:
 
 
 def get_git_tag_version(repo_root: Path) -> str | None:
-    """Return the version from the latest ``v*`` git tag on the current branch.
-
-    Returns ``None`` if no tags exist (pre-release — validation is skipped).
-    """
+    """Return the version string from the latest ``v*`` git tag on the current branch."""
     try:
         result = subprocess.run(
             ["git", "tag", "--sort=-v:refname"],
