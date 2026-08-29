@@ -51,6 +51,7 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Architecture: architecture.md
+  - Sandboxing Technologies: sandboxing.md
   - Configuration: configuration.md
   - Development: development.md
   - Releases: releases.md

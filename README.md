@@ -42,6 +42,7 @@ See **[Getting Started](docs/getting-started.md)** for prerequisites, hardware r
 |------|---------------|
 | [Getting Started](docs/getting-started.md) | Prerequisites, hardware, platform notes, build & run |
 | [Architecture](docs/architecture.md) | Components, network topology, egress policy, project structure |
+| [Sandboxing Technologies](docs/sandboxing.md) | Cloud vs. local sandbox paradigms, microVMs, host kernel isolation, and container tradeoffs |
 | [Configuration](docs/configuration.md) | Environment variables and per-workspace configuration (allowlist, token replacer, temporary file system, apt dependencies, `.gitignore`) |
 | [Development](docs/development.md) | Local dev setup, tests, lint, coverage |
 | [Releases](docs/releases.md) | Branch strategy, versioning, and release process |
