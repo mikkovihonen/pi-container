@@ -344,6 +344,19 @@ def read_agent_extras(config_dir: Path | None = None) -> dict:
     }
 
 
+def read_read_only_pi_container(config_dir: Path | None = None) -> bool:
+    """Check whether the agent container's /workspace/.pi-container directory is read-only.
+
+    Defaults to True (read-only) when absent or unrecognized, preventing untrusted
+    agent processes from modifying orchestration files, allowlists, or scripts.
+    """
+    section = load_project_config(config_dir).get("agent") or {}
+    val = section.get("read_only_pi_container")
+    if val is None:
+        return True
+    return _egress_truthy(val)
+
+
 # ─── Token Replacer Config Scanner (duplicated from pi-coding-agent-proxy/addons/token_replacer)
 #
 # run.py lives outside pi-coding-agent-proxy and must not import from it.

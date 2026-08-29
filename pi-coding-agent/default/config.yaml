@@ -75,6 +75,11 @@ agent:
   #     - /dev/video0:/dev/video0
   #     - /dev/bus/usb:/dev/bus/usb
   devices: []
+  # Lock the project's .pi-container directory inside /workspace as read-only.
+  # When enabled, the agent cannot modify config.yaml, allowlist.yaml,
+  # token_replacer.yaml, dependency scripts, or chat templates from inside the container.
+  # Subdirectories mounted under separate paths (e.g. ~/.pi/agent for sessions) remain writable.
+  read_only_pi_container: true
 
 # Nested containers. When enabled, the agent can run its own containers (podman /
 # docker compose / testcontainers) inside the agent container, as rootless podman.

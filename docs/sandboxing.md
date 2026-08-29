@@ -109,15 +109,102 @@ While cloud systems trend toward MicroVMs and lightweight CLI agents trend towar
 
 1. **Ease of Orchestrating the Traffic-Intercepting Auditing Proxy**:
    Transparent network auditing and domain allowlisting require isolating the agent's network stack so that traffic cannot escape uninspected. OCI container networks provide this out-of-the-box:
-   - The agent runs inside an isolated, gateway-less container network (`--internal`).
-   - L3/L4 routing rules redirect all HTTP, HTTPS, and DNS traffic transparently through a companion `mitmproxy` proxy container.
-   - Domain allowlists, secret redaction, and flow logging operate reliably without needing complex host-level packet filters, root-level firewall rules, or host OS-specific network hooks.
+      - The agent runs inside an isolated, gateway-less container network (`--internal`).
+      - L3/L4 routing rules redirect all HTTP, HTTPS, and DNS traffic transparently through a companion `mitmproxy` proxy container.
+      - Domain allowlists, secret redaction, and flow logging operate reliably without needing complex host-level packet filters, root-level firewall rules, or host OS-specific network hooks.
 
 2. **Standardized and Reproducible Project Workspaces**:
    Rather than relying on whatever tools happen to be installed on the host machine, containerization provides a hermetic, predictable environment:
    - Packages an audited base toolchain (Node, Python, `uv`, rootless Podman, netavark) compiled from source.
    - Protects the developer's host machine from accidental global package installs, state drift, or configuration pollution.
    - Allows each project workspace to define its own persistent volume mounts and project-specific dependencies without impacting other workspaces or the host system.
+
+3. **The macOS & Windows VM Reality: Implicit Hardware Isolation**:
+   macOS is the platform of choice for many AI developers due to Apple Silicon's unified memory architecture. On macOS (and Windows), Linux containers **do not run directly on the host kernel**; they execute inside a lightweight Linux virtual machine managed by the container runtime (e.g., Apple's `Virtualization.framework` / `applehv` or WSL2/Hyper-V).
+   
+   This introduces a critical security advantage:
+   - **Hypervisor Boundary**: Even if a malicious exploit achieved a Linux container breakout, the attacker would still be trapped inside the guest Linux VM, unable to compromise the host macOS Darwin or Windows kernel.
+   - **Hybrid Host/Container Topology for Local LLMs**: Heavy LLM inference (`llama-server`) runs natively as a host process to leverage Apple Metal GPU acceleration and high-bandwidth unified memory at native speed. Meanwhile, the untrusted agent and auditing proxy run securely inside the container runtime, with the proxy routing authenticated inference requests to the host over `host.containers.internal`.
+
+```mermaid
+flowchart TB
+    subgraph Host["Host Machine (macOS / Windows)"]
+        direction TB
+        metal["Native Hardware Acceleration<br/>(Apple Metal / CUDA / ROCm)"]
+        llama["llama-server (Host Process)<br/>Zero-virtualization overhead"]
+        llama --- metal
+
+        subgraph VM["Linux Container VM (applehv / Hyper-V / WSL2)"]
+            direction TB
+            subgraph Isolated["Isolated Container Network"]
+                agent["pi-coding-agent<br/>(Sandboxed Code Execution)"]
+                proxy["pi-coding-agent-proxy<br/>(mitmproxy Traffic Auditing)"]
+                agent -->|L3 Routed| proxy
+            end
+        end
+
+        proxy -.->|host.containers.internal / gvproxy| llama
+    end
+```
+
+---
+
+## 5. The Human Factor: Attack Vectors and the Limits of Sandboxing
+
+Ultimately, **no sandbox is more secure than the vigilance of the operator configuring and overseeing it.** 
+
+A sandbox confines runtime execution while the container is running. However, the primary goal of an AI coding agent is to produce artifacts—source code, build scripts, dependencies, configuration files, and git commits—that are intended to be reviewed, built, deployed, and executed on host machines and production infrastructure.
+
+Understanding where the sandbox boundary ends and where the human operator becomes the primary line of defense is essential.
+
+```mermaid
+flowchart LR
+    subgraph Sandbox["pi-container Sandbox (Isolated)"]
+        agent["AI Agent<br/>(Prompt Injection / Malicious Code)"]
+        proxy["Transparent Proxy<br/>(mitmproxy)"]
+        agent -->|Intercepted & Filtered| proxy
+        agent -->|Writes files| ws["Workspace<br/>(Poisoned Code / Build Hooks)"]
+    end
+
+    subgraph Host["Host Developer Machine (Full Privileges)"]
+        user["Developer / Operator"]
+        host_exec["Native Host Execution<br/>(npm test, make, git push, deployment)"]
+        ws -.->|Checked out / Run natively| host_exec
+        user -->|Blindly approves allowlist / diffs| host_exec
+    end
+```
+
+### The Primary Attack Vectors
+
+From a threat-modeling perspective, the most realistic attack vectors against `pi-container`, the host computer, and the developer include:
+
+#### 1. The "Delayed Execution" Trojan Workspace (Host Infiltration)
+* **The Attack**: Malicious instructions (introduced via prompt injection in a repository issue, a poisoned web page scraped by the agent, or a malicious dependency) instruct the agent to plant obfuscated payloads into local project files. These might take the form of malicious `Makefile` targets, `package.json` `postinstall` scripts, Python `setup.py` / `pyproject.toml` entry points, or hidden pre-commit git hooks.
+* **The Danger**: While inside `pi-container`, the malicious code is confined by user namespaces and network proxying. However, once the developer exits the sandbox and runs `npm test`, `make build`, or pushes the code to CI/CD on their native host, the payload executes with **full host privileges**, completely bypassing the container sandbox.
+
+#### 2. Allowlist Dilution & Confirmation Fatigue (Social Engineering the User)
+* **The Attack**: When the proxy blocks unauthorized network requests with a `403 Forbidden`, the agent is halted from fetching remote resources. A compromised or misbehaving agent can prompt the operator: *"Please add `*.jsdelivr.net`, `raw.githubusercontent.com`, or `api.third-party-service.com` to `allowlist.yaml` to continue."*
+* **The Danger**: Developers experiencing confirmation fatigue may blindly approve broad wildcard domain patterns. This punches an egress tunnel through the proxy allowlist, enabling secondary payload downloads or command-and-control (C2) communication.
+
+#### 3. Covert Data Exfiltration over Legitimate Channels
+* **The Attack**: The agent is legitimately permitted to communicate with LLM providers (e.g., Anthropic, OpenAI, OpenRouter) or remote Git repositories. Prompt injection can instruct the agent to stealthily encode private source code, internal system information, or unredacted credentials into prompt queries, telemetry headers, or commit metadata.
+* **The Danger**: While `pi-container`'s `token_replacer` addon automatically redacts known secrets registered in `token_replacer.yaml`, it cannot detect arbitrary proprietary text or unconfigured credentials. If sensitive data is embedded within normal natural-language prompt flows, it passes through the proxy to allowed endpoints.
+
+#### 4. Persistent Cache & Shadow Volume Poisoning
+* **The Attack**: `pi-container` supports persistent shadow volumes (`.venv`, `node_modules`, `target/`) to accelerate build and dependency resolution across sessions without RAM overhead.
+* **The Danger**: If malicious code installs a poisoned package or compromises a shared binary within a shadow volume, that artifact persists across subsequent container runs. Future sessions in the same workspace remain compromised until the shadow volume is explicitly pruned or deleted.
+
+---
+
+### Operator Best Practices: Defense-in-Depth
+
+To maintain security, operators should treat the sandbox as one layer in a defense-in-depth model:
+
+1. **Relentlessly Review Diffs**: Never execute, test, or commit agent-generated code natively on the host without thoroughly reviewing `git diff`.
+2. **Lock Project Configuration**: Keep `agent.read_only_pi_container: true` (the default) enabled to prevent the agent from modifying `config.yaml`, `allowlist.yaml`, `token_replacer.yaml`, or dependency installation scripts.
+3. **Scrutinize Allowlist Additions**: Never add broad domain wildcards (`*`) to `allowlist.yaml`. Whitelist only the minimal, exact domains required for the specific task.
+4. **Register All Secrets in `token_replacer.yaml`**: Ensure any sensitive API tokens, database passwords, or private keys used in the workspace are explicitly defined so the proxy can redact them before traffic leaves the container.
+5. **Audit Flow Exports**: Use the `mitmweb` UI or inspect export flow logs (`.pi-container/proxy/flows-*.jsonl`) to periodically verify the volume and destination of outbound agent traffic.
 
 ---
 
@@ -127,5 +214,5 @@ The architecture of AI coding sandboxes is defined by the trust model and operat
 
 * **Cloud multi-tenant platforms** require **MicroVMs** (Firecracker, Kata) for hardware-level kernel isolation against untrusted tenant workloads.
 * **Local CLI coding assistants** often use **host-level kernel filtering** (Landlock, bubblewrap, Seatbelt) for lightweight, zero-latency execution against existing host tools.
-* **Auditable, isolated development sandboxes** (like `pi-container`) use **rootless OCI containers and network proxying** because they provide the ideal foundation for **effortless proxy interception and traffic auditing** while delivering **standardized, reproducible workspaces**.
-
+* **Auditable, isolated development sandboxes** (like `pi-container`) use **rootless OCI containers and network proxying**. On macOS and Windows, this architecture naturally benefits from **underlying hypervisor VM boundaries** while providing **seamless proxy auditing**, **standardized workspaces**, and **native host GPU inference**.
+* **Human Vigilance is the Final Boundary**: Sandboxes isolate active processes, but human code review and strict egress management remain indispensable for protecting the host and supply chain from poisoned workspace artifacts.

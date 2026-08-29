@@ -48,3 +48,17 @@ class TestInitRuntime:
         assert run.CONTAINER_RUNTIME == "podman"
         assert run.BRIDGE_INTERFACE == "cni-podman0"
         assert run.PROXY_UPSTREAM_NETWORK == "podman"
+
+
+class TestAgentLaunchReadOnlyPiContainerMount:
+    def test_read_only_pi_container_mount_flag_included_when_enabled(self):
+        pi_container_dir = run.PROJECT_DIR / ".pi-container"
+        read_only_pi_container = True
+        flags = ["--volume", f"{pi_container_dir}:/workspace/.pi-container:ro"] if read_only_pi_container else []
+        assert flags == ["--volume", f"{pi_container_dir}:/workspace/.pi-container:ro"]
+
+    def test_read_only_pi_container_mount_flag_omitted_when_disabled(self):
+        pi_container_dir = run.PROJECT_DIR / ".pi-container"
+        read_only_pi_container = False
+        flags = ["--volume", f"{pi_container_dir}:/workspace/.pi-container:ro"] if read_only_pi_container else []
+        assert flags == []

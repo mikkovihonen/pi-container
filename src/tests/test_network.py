@@ -634,6 +634,37 @@ class TestReadAgentExtras:
         assert extras["devices"] == ["/dev/video0:/dev/video0", "/dev/bus/usb:/dev/bus/usb:rw"]
 
 
+class TestReadReadOnlyPiContainer:
+    def _write(self, tmp_path, body):
+        (tmp_path / "config.yaml").write_text(body)
+
+    def test_default_is_true(self, tmp_path):
+        from network import read_read_only_pi_container
+
+        assert read_read_only_pi_container(tmp_path) is True
+
+    def test_explicit_true(self, tmp_path):
+        from network import read_read_only_pi_container
+
+        self._write(tmp_path, "agent:\n  read_only_pi_container: true\n")
+        assert read_read_only_pi_container(tmp_path) is True
+
+    def test_explicit_false(self, tmp_path):
+        from network import read_read_only_pi_container
+
+        self._write(tmp_path, "agent:\n  read_only_pi_container: false\n")
+        assert read_read_only_pi_container(tmp_path) is False
+
+    def test_truthy_strings_and_ints(self, tmp_path):
+        from network import read_read_only_pi_container
+
+        self._write(tmp_path, "agent:\n  read_only_pi_container: 'yes'\n")
+        assert read_read_only_pi_container(tmp_path) is True
+
+        self._write(tmp_path, "agent:\n  read_only_pi_container: '0'\n")
+        assert read_read_only_pi_container(tmp_path) is False
+
+
 # ---------------------------------------------------------------------------
 # ReadNestedContainersConfig (config.yaml nested_containers)
 # ---------------------------------------------------------------------------

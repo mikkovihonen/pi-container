@@ -95,6 +95,9 @@ SCHEMA: dict = {
         "keys": {
             "env": {"type": dict},
             "mounts": {"type": list},
+            "capabilities": {"type": list, "required": False},
+            "devices": {"type": list, "required": False},
+            "read_only_pi_container": {"type": (bool, str, int), "required": False},
         },
     },
     "nested_containers": {

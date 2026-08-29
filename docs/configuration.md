@@ -264,6 +264,7 @@ agent:
   mounts: []                  # extra bind mounts (absolute host paths)
   capabilities: []            # Linux capabilities to add (e.g., SYS_PTRACE)
   devices: []                 # device passthroughs (e.g., /dev/video0:/dev/video0)
+  read_only_pi_container: true # lock .pi-container inside /workspace as read-only
 nested_containers:
   enabled: false              # let the agent run its own containers (off by default)
   storage: volume             # nested image store: volume | tmpfs
@@ -358,6 +359,24 @@ agent:
 ```
 
 Device entries support the optional `mode` suffix (`r` for read-only, `w` for write-only, `rw` for read-write). The default is `rw` if omitted.
+
+### Read-only `.pi-container` workspace lock
+
+`agent.read_only_pi_container` (boolean, default `true`) mounts `/workspace/.pi-container` as a read-only (`:ro`) bind mount inside the agent container.
+
+This provides protection against prompt injection and untrusted scripts by preventing the agent from modifying:
+- `config.yaml` (resource limits, network settings, security policies)
+- `allowlist.yaml` (punching unauthorized egress holes)
+- `token_replacer.yaml` (disabling secret redaction rules)
+- `dependencies/root/commands.sh` and `dependencies/pi/commands.sh` (poisoning future container builds)
+- `chat-templates/` and `agent/models.json`
+
+```yaml
+agent:
+  read_only_pi_container: true   # default: true (secure)
+```
+
+Subdirectories mounted under separate container paths (such as `/home/pi/.pi/agent` for storing session logs and transcripts) remain fully functional and writable. Set to `false` only if you explicitly want the agent to edit project configuration files directly.
 
 ### Transient `tmpfs` mounts
 

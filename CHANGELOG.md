@@ -7,6 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## Unreleased
 
 ### Added
+- **Configurable read-only `.pi-container` workspace lock.** Added `agent.read_only_pi_container` (default: `true`) to `config.yaml` and `schema_common.py`. When enabled, `/workspace/.pi-container` is mounted as a read-only bind mount inside the agent container, preventing prompt-injected or untrusted agent processes from tampering with orchestration settings (`config.yaml`), proxy security policies (`allowlist.yaml`, `token_replacer.yaml`), dependency installation scripts, or model configurations while preserving full read/write access to separate container mounts like session logs in `/home/pi/.pi/agent` and flow exports in `/workspace/.pi-container/exports` tmpfs.
 - **Global CA bundle environment variables in agent container.** Exported `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, and `GIT_SSL_CAINFO` pointing to `/etc/ssl/certs/ca-certificates.crt` in `pi-coding-agent/Containerfile`, ensuring third-party Python libraries (`requests`, `httpx`, `pip`, `boto3`), Node tools, git, and curl seamlessly trust the mitmproxy CA certificate without manual configuration.
 
 ### Changed

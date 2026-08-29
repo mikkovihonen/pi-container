@@ -41,6 +41,7 @@ from network import (
     read_llama_config,
     read_nested_containers_config,
     read_network_config,
+    read_read_only_pi_container,
     read_resource_limits,
     resource_limit_args,
     scan_tmpfs_paths,
@@ -142,6 +143,7 @@ def main() -> None:
     ipv6_enabled = read_network_config(pi_container_dir)["ipv6"]
     llama_cfg = read_llama_config(pi_container_dir)
     agent_extras = read_agent_extras(pi_container_dir)
+    read_only_pi_container = read_read_only_pi_container(pi_container_dir)
 
     # Crash recovery: reap orphaned servers and agent containers from prior crashed runs
     containers.sweep_orphaned_servers(LLAMA_SERVER_LOCK_DIR)
@@ -406,6 +408,11 @@ def main() -> None:
                     f"{agent_config_dir}:/home/pi/.pi/agent",
                     "--volume",
                     f"{PROJECT_DIR}:/workspace",
+                    *(
+                        ["--volume", f"{pi_container_dir}:/workspace/.pi-container:ro"]
+                        if read_only_pi_container
+                        else []
+                    ),
                     *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
                     *RUNTIME.tmpfs_args("/workspace/.pi-container/exports"),
                     *volume_args,
