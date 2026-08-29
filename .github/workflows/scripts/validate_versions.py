@@ -38,10 +38,6 @@ import yaml  # noqa: E402  (must import after sys.path insertion)
 from schema_common import (
     MODELS_SCHEMA,
     SCHEMA,
-    _validate_field,
-    _validate_hf_models,
-    _validate_models_flags,
-    _validate_models_schema,
     _validate_schema,
 )
 from template_paths import _check_chat_template_paths, _resolve_chat_template_path
@@ -352,7 +348,7 @@ def main() -> int:
     if models_data is not None:
         print()
         print("Validating seed models.json schema...")
-        models_schema_errors = _validate_models_schema(models_data, MODELS_SCHEMA)
+        models_schema_errors = _validate_schema(models_data, MODELS_SCHEMA)
         if models_schema_errors:
             _error(f"Seed models.json has {len(models_schema_errors)} error(s):")
             for err in models_schema_errors:
