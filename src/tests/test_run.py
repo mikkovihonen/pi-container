@@ -29,7 +29,7 @@ class TestInitRuntime:
         monkeypatch.setattr(run.sys, "exit", lambda code: exited.append(code))
 
         def mock_validate(bin_path):
-            raise run.EnvironmentError("Docker/Podman not found")
+            raise run.EnvironmentError("Podman not found")
 
         monkeypatch.setattr(run, "validate_environment", mock_validate)
         run._init_runtime()

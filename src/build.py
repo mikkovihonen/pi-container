@@ -265,7 +265,7 @@ def build_project_image(
     """Build a project-specific agent image with baked-in command scripts.
 
     Args:
-        runtime: Container runtime (docker or podman).
+        runtime: Container runtime (podman).
         root_commands_path: Absolute path to root/commands.sh on the host.
         image_tag: Image tag for the project-specific image
             (e.g., "pi-container-project-<hash>-<hash>.local").

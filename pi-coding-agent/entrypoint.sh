@@ -20,11 +20,11 @@ if [ "${IPV6_ENABLED}" = "true" ]; then
     rm -f /etc/apt/apt.conf.d/99force-ipv4
 else
     # Disable IPv6 so no tool silently tries an AAAA record and dead-ends (the
-    # proxy stack is IPv4-only). podman/docker already set this at run time via
+    # proxy stack is IPv4-only). podman already sets this at run time via
     # --sysctl — rootless namespaces mount /proc/sys/net read-only, so the write
     # below fails there (harmlessly);
     # Only warn if IPv6 is STILL enabled afterwards, so the redundant failed
-    # write on podman/docker isn't misreported as a problem.
+    # write on podman isn't misreported as a problem.
     sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
     sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
     _v6_all=/proc/sys/net/ipv6/conf/all/disable_ipv6
