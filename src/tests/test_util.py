@@ -553,6 +553,37 @@ class TestGetSanitizedGitConfigJson:
             result = json.loads(get_sanitized_git_config_json(mock_logger))
         assert result["remote.origin.url"] == "https://github.com/org/repo.git"
 
+    def test_filters_by_allowlist(self):
+        mock_logger = MagicMock()
+        output = (
+            "file:/home/user/.gitconfig\tuser.name=Alice\n"
+            "file:/home/user/.gitconfig\tuser.email=alice@example.com\n"
+            "file:/home/user/.gitconfig\tcustom.setting=foobar\n"
+        )
+        allowlist = ["user.name", "user.email"]
+        with patch("util.subprocess.check_output", return_value=output):
+            result = json.loads(get_sanitized_git_config_json(mock_logger, allowlist=allowlist))
+        assert result == {"user.name": "Alice", "user.email": "alice@example.com"}
+
+    def test_strips_dangerous_hooks_and_extra_headers(self):
+        mock_logger = MagicMock()
+        output = (
+            "file:/home/user/.gitconfig\tcore.sshCommand=ssh -i /root/key\n"
+            "file:/home/user/.gitconfig\tcore.fsmonitor=run_hook.sh\n"
+            "file:/home/user/.gitconfig\tcore.editor=vim\n"
+            "file:/home/user/.gitconfig\thttp.extraHeader=Authorization: Bearer secret\n"
+            "file:/home/user/.gitconfig\tfilter.lfs.clean=git-lfs clean\n"
+            "file:/home/user/.gitconfig\tuser.name=Alice\n"
+        )
+        with patch("util.subprocess.check_output", return_value=output):
+            result = json.loads(get_sanitized_git_config_json(mock_logger))
+        assert "core.sshCommand" not in result
+        assert "core.fsmonitor" not in result
+        assert "core.editor" not in result
+        assert "http.extraHeader" not in result
+        assert "filter.lfs.clean" not in result
+        assert result.get("user.name") == "Alice"
+
 
 # ---------------------------------------------------------------------------
 # run_quiet

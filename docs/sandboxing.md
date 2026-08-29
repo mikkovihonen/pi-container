@@ -201,10 +201,12 @@ From a threat-modeling perspective, the most realistic attack vectors against `p
 To maintain security, operators should treat the sandbox as one layer in a defense-in-depth model:
 
 1. **Relentlessly Review Diffs**: Never execute, test, or commit agent-generated code natively on the host without thoroughly reviewing `git diff`.
-2. **Lock Project Configuration**: Keep `agent.read_only_pi_container: true` (the default) enabled to prevent the agent from modifying `config.yaml`, `allowlist.yaml`, `token_replacer.yaml`, or dependency installation scripts.
-3. **Scrutinize Allowlist Additions**: Never add broad domain wildcards (`*`) to `allowlist.yaml`. Whitelist only the minimal, exact domains required for the specific task.
-4. **Register All Secrets in `token_replacer.yaml`**: Ensure any sensitive API tokens, database passwords, or private keys used in the workspace are explicitly defined so the proxy can redact them before traffic leaves the container.
-5. **Audit Flow Exports**: Use the `mitmweb` UI or inspect export flow logs (`.pi-container/proxy/flows-*.jsonl`) to periodically verify the volume and destination of outbound agent traffic.
+2. **Lock Project Configuration & Git Hooks**: Keep `agent.read_only_pi_container: true` and `security.read_only_git_hooks: true` enabled (both defaults). This locks configuration, dependency scripts, and `/workspace/.git/hooks` as read-only inside the container so the agent cannot plant backdoor hooks that trigger on the host.
+3. **Guard Host Mounts & Git Config**: Rely on `security.blocked_mount_paths` to prevent sensitive credentials (`~/.ssh`, `~/.aws`, Docker sockets) from being mounted, and `security.git_config_allowlist` to ensure only safe Git identity keys are shared into the container without execution hooks (`core.sshCommand`, `core.fsmonitor`).
+4. **Scrutinize Allowlist Additions & SSRF Protections**: Never add broad domain wildcards (`*`) to `allowlist.yaml`. `security.blocked_ip_ranges` strictly blocks connections to internal RFC 1918 subnets, loopback interfaces, and cloud metadata services (`169.254.169.254`).
+5. **Register All Secrets in `token_replacer.yaml`**: Ensure any sensitive API tokens, database passwords, or private keys used in the workspace are explicitly defined so the proxy can redact them before traffic leaves the container.
+6. **Audit Flow Exports**: Use the `mitmweb` UI or inspect export flow logs (`.pi-container/exports/flows-*.jsonl`) to periodically verify the volume and destination of outbound agent traffic.
+7. **Privilege Hardening**: `pi-container` automatically enforces `--security-opt no-new-privileges` and mounts persistent shadow volumes and `tmpfs` RAM disks with `nodev,nosuid` to prevent setuid privilege escalation.
 
 ---
 

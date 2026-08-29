@@ -6,6 +6,7 @@ sys.dont_write_bytecode = True
 
 import contextlib
 import fcntl
+import json
 import logging
 import os
 import re
@@ -716,6 +717,10 @@ class ContainerNetworkManager:
         else:
             exports_mounts = []
 
+        from security import read_security_config
+
+        security_cfg = read_security_config(self.config_dir)
+
         cmd = [
             self.container_runtime,
             "run",
@@ -723,6 +728,8 @@ class ContainerNetworkManager:
             "--rm",
             "--name",
             self.proxy_name,
+            "--security-opt",
+            "no-new-privileges",
             *self.runtime.proxy_network_args(self.network_name),
             *self.runtime.proxy_extra_run_args(),
             "--cap-add",
@@ -745,6 +752,11 @@ class ContainerNetworkManager:
             *(["--env", f"LLAMA_PORTS={self.llama_ports}"] if self.llama_ports else []),
             *(["--env", f"LLAMA_HOSTNAMES={self.llama_hostnames}"] if self.llama_hostnames else []),
             *(["--env", f"LLAMA_HOST_ADDR={llama_host_addr}"] if llama_host_addr else []),
+            *(
+                ["--env", f"PROXY_BLOCKED_IP_RANGES={json.dumps(security_cfg['blocked_ip_ranges'])}"]
+                if security_cfg.get("blocked_ip_ranges")
+                else []
+            ),
             # Per-protocol forwarding opt-ins (uninspected protocols), read from
             # this project's config.yaml (egress.allow).
             *[flag for k, v in read_proxy_forward_env(self.config_dir).items() for flag in ("--env", f"{k}={v}")],

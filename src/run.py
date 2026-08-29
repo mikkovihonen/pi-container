@@ -48,6 +48,7 @@ from network import (
     scan_volume_paths,
 )
 from runtimes import ContainerRuntime
+from security import read_security_config, validate_mount_paths
 from server import Server
 from util import (
     EnvironmentError,
@@ -144,6 +145,15 @@ def main() -> None:
     llama_cfg = read_llama_config(pi_container_dir)
     agent_extras = read_agent_extras(pi_container_dir)
     read_only_pi_container = read_read_only_pi_container(pi_container_dir)
+    security_cfg = read_security_config(pi_container_dir)
+
+    mount_errors = validate_mount_paths(agent_extras["mounts"], security_cfg["blocked_mount_paths"])
+    if mount_errors:
+        logger.error("Security policy violation in agent.mounts:")
+        for err in mount_errors:
+            logger.error(f"  ✗ {err}")
+        logger.error("\nFix: remove the forbidden host mount paths from config.yaml under agent.mounts.")
+        sys.exit(1)
 
     # Crash recovery: reap orphaned servers and agent containers from prior crashed runs
     containers.sweep_orphaned_servers(LLAMA_SERVER_LOCK_DIR)
@@ -379,8 +389,14 @@ def main() -> None:
                 volume_args = [
                     arg
                     for dest_path, vol_name in active_volume_map.items()
-                    for arg in ("--volume", f"{vol_name}:{dest_path}")
+                    for arg in ("--volume", f"{vol_name}:{dest_path}:nodev,nosuid")
                 ]
+
+                git_hooks_dir = PROJECT_DIR / ".git" / "hooks"
+                git_hooks_mount: list[str] = []
+                if security_cfg.get("read_only_git_hooks", True) and (PROJECT_DIR / ".git").is_dir():
+                    git_hooks_dir.mkdir(parents=True, exist_ok=True)
+                    git_hooks_mount = ["--volume", f"{git_hooks_dir}:/workspace/.git/hooks:ro"]
 
                 pi_container_cmd = [
                     CONTAINER_RUNTIME,
@@ -388,6 +404,7 @@ def main() -> None:
                     "--rm",
                     "--name",
                     agent_container_name,
+                    *(["--security-opt", "no-new-privileges"] if not nested_cfg["enabled"] else []),
                     "--label",
                     "pi-container.type=agent",
                     "--label",
@@ -413,6 +430,7 @@ def main() -> None:
                         if read_only_pi_container
                         else []
                     ),
+                    *git_hooks_mount,
                     *RUNTIME.tmpfs_args("/home/pi/.pi/agent/bin"),
                     *RUNTIME.tmpfs_args("/workspace/.pi-container/exports"),
                     *volume_args,
@@ -426,7 +444,7 @@ def main() -> None:
                     "--env",
                     f"LLAMA_PORTS={portconfig}",
                     "--env",
-                    f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger)}",
+                    f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger, allowlist=security_cfg.get('git_config_allowlist'))}",
                     *(["--env", f"PI_CONTAINER_VERSION={schema_version}"] if schema_version else []),
                     *[flag for k, v in agent_extras["env"].items() for flag in ("--env", f"{k}={v}")],
                     *[flag for m in agent_extras["mounts"] for flag in ("--volume", m)],

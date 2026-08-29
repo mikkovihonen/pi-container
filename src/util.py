@@ -232,11 +232,23 @@ def extract_ipv4_from_ip_addr(output: str) -> str | None:
     return match.group(1) if match else None
 
 
-def get_sanitized_git_config_json(logger):
-    """Extract global host git configuration as JSON, stripping repository-local settings and credentials."""
+def get_sanitized_git_config_json(logger, allowlist: list[str] | None = None):
+    """Extract global host git configuration as JSON, strictly filtering against safe allowlist keys."""
     sanitized_dict = {}
     # Regex to strip 'user:pass@' from URLs
     url_credential_regex = re.compile(r"(https?://)[^/]+:[^/@]+@")
+    allowset = {k.strip().lower() for k in allowlist} if allowlist is not None else None
+
+    # Keys that execute binaries or inject arbitrary headers are always blocked
+    dangerous_prefixes = (
+        "credential.",
+        "core.sshcommand",
+        "core.fsmonitor",
+        "core.editor",
+        "filter.",
+        "diff.",
+        "http.extraheader",
+    )
 
     try:
         result = subprocess.check_output(["git", "config", "--list", "--show-origin"], text=True)
@@ -258,9 +270,13 @@ def get_sanitized_git_config_json(logger):
                     continue
 
                 key = key.strip()
+                key_lower = key.lower()
                 value = value.strip()
 
-                if key.startswith("credential."):
+                if any(key_lower.startswith(dp) or key_lower == dp for dp in dangerous_prefixes):
+                    continue
+
+                if allowset is not None and key_lower not in allowset:
                     continue
 
                 value = url_credential_regex.sub(r"\1", value)

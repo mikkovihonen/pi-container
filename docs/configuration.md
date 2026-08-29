@@ -403,11 +403,72 @@ volumes:
     - /workspace/target
 ```
 
-**Lifecycle & Automatic Cleanup**:
-- Named shadow volumes are automatically created with project metadata labels (`pi-container.type=project-volume`, `pi-container.project.hash`, `pi-container.project.path`, `pi-container.volume.dest`).
-- **Configuration changes**: When a path is removed from `volumes.paths` in `config.yaml` (or if `config.yaml` is deleted/reseeded), obsolete volumes for that workspace are automatically detected and pruned on next startup.
-- **Orphaned projects**: If a project folder is deleted from the host filesystem, its associated shadow volumes are cleaned up automatically during subsequent `pi-container` runs.
-- **Concurrent safety**: Volumes currently held open by active container sessions are never deleted while in use.
+### Security hardening
+
+The `security` section in `config.yaml` provides defense-in-depth safeguards against malicious code execution, credential exfiltration, and host infiltration:
+
+```yaml
+security:
+  # Automatically lock .git/hooks inside /workspace as read-only.
+  # Prevents untrusted agent code from planting malicious git hooks that execute
+  # on the host machine when the developer runs git commands outside the container.
+  read_only_git_hooks: true
+
+  # Dangerous host directories that should NEVER be mounted into the agent container.
+  # If any of these paths (or their subdirectories) appear in agent.mounts,
+  # pi-container will reject launching the container to prevent host credential theft.
+  blocked_mount_paths:
+    - "~/.ssh"
+    - "~/.gnupg"
+    - "~/.aws"
+    - "~/.azure"
+    - "~/.config/gcloud"
+    - "~/.kube"
+    - "~/.docker"
+    - "/var/run/docker.sock"
+    - "/var/run/podman/podman.sock"
+    - "/etc/shadow"
+    - "/etc/passwd"
+    - "/etc/sudoers"
+    - "/root"
+
+  # Private network CIDRs blocked from egress to protect internal infrastructure,
+  # local router web UIs, and cloud metadata services (e.g. AWS 169.254.169.254)
+  # against SSRF and DNS rebinding attacks.
+  blocked_ip_ranges:
+    - "127.0.0.0/8"          # IPv4 loopback
+    - "10.0.0.0/8"           # Private RFC 1918 Class A
+    - "172.16.0.0/12"        # Private RFC 1918 Class B
+    - "192.168.0.0/16"       # Private RFC 1918 Class C
+    - "169.254.0.0/16"       # IPv4 link-local / Cloud metadata (IMDS)
+    - "::1/128"              # IPv6 loopback
+    - "fc00::/7"             # IPv6 unique local address (ULA)
+    - "fe80::/10"            # IPv6 link-local
+
+  # Allowlist of safe Git configuration keys forwarded from the host into the container.
+  # All other host git configuration keys (including execution hooks, filters, and http.extraHeader)
+  # are stripped to prevent host environment leaks or arbitrary code execution.
+  git_config_allowlist:
+    - "user.name"
+    - "user.email"
+    - "init.defaultBranch"
+    - "pull.rebase"
+    - "core.autocrlf"
+    - "core.filemode"
+    - "core.eol"
+    - "commit.gpgSign"
+    - "user.signingKey"
+    - "gpg.format"
+    - "gpg.ssh.program"
+    - "tag.gpgSign"
+```
+
+Key security protections:
+- **Read-Only Git Hooks**: When `read_only_git_hooks: true` (default), `/workspace/.git/hooks` is mounted read-only, preventing the agent from modifying or writing malicious Git hooks that would execute on your host machine.
+- **Dangerous Mount Guardrails**: Any attempt to mount sensitive host directories (SSH keys, AWS/cloud credentials, container sockets) in `agent.mounts` is blocked at startup.
+- **SSRF & Metadata Protection**: Blocked IP ranges prevent the container from connecting to private subnets, localhost ports on other interfaces, and cloud instance metadata services (`169.254.169.254`) unless explicitly allowlisted. Local model endpoints (`llama`) and container network interfaces remain securely reachable.
+- **Git Config Sanitization**: Only keys explicitly listed in `git_config_allowlist` are passed from the host Git configuration into the container. Dangerous keys like `core.sshCommand`, `core.fsmonitor`, `core.editor`, `filter.*`, and `http.extraHeader` are unconditionally stripped.
+- **Privilege Escalation Prevention**: Containers run with `--security-opt no-new-privileges` (when nested containers are disabled), and shadow volumes and `tmpfs` mounts are mounted with `nodev,nosuid`.
 
 <a name="upgrading-a-workspace"></a>
 ### Upgrading an existing workspace
@@ -708,7 +769,7 @@ This enables:
 - **Disk-space management**: Stale project-specific images are cleaned up automatically.
 - **Orphan detection**: When a project directory is deleted, its images are automatically removed on the next run of any project (not just the deleted one). See [Orphan Detection](#orphan-detection).
 
-**Orphan detection:**
+#### Orphan detection
 
 Each project-specific image stores the absolute path of its source project directory in the `pi-container.project.path` label. On every run, pi-container scans all project images and removes any that don't have a verifiable source project. An image is removed if:
 

@@ -290,7 +290,8 @@ class PodmanRuntime(ContainerRuntime):
         # bind volume beneath it). The tmpfs always
         # starts empty, so a mount like /workspace/.venv is a clean scratch dir
         # on both runtimes instead of a copy of the host's (macOS) .venv.
-        return ["--mount", f"type=tmpfs,tmpfs-mode=1777,notmpcopyup,destination={destination}"]
+        # nodev,nosuid: prevent device creation and setuid escalation in RAM disks.
+        return ["--mount", f"type=tmpfs,tmpfs-mode=1777,notmpcopyup,nodev,nosuid,destination={destination}"]
 
     def _network_entry_has_ipv6(self, entry: dict[str, Any]) -> bool | None:
         # netavark inspect: `ipv6_enabled` bool, plus `subnets[].subnet`.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate docs/index.md from README.md for MkDocs site."""
+"""Generate docs/index.md from README.md for Zensical documentation site."""
 
 import re
 from pathlib import Path
@@ -18,11 +18,11 @@ keywords: sandbox, isolation, mitmproxy, containerization, audit-trail, podman, 
 
 
 def fix_links(content: str) -> str:
-    """Convert README.md links to work within MkDocs docs/ directory."""
+    """Convert README.md links to work within Zensical docs/ directory."""
     # Convert docs/assets/... to assets/...
     content = re.sub(r"docs/assets/", "assets/", content)
 
-    # Convert docs/XXX.md to XXX.md (MkDocs will resolve to XXX/index.html)
+    # Convert docs/XXX.md to XXX.md (Zensical will resolve to XXX/index.html)
     # Handles anchors like docs/development.md#coverage
     content = re.sub(r"\(docs/([^)]+\.md)(#[^)]*)?\)", r"(\1\2)", content)
     content = re.sub(r"!\([^)]*\(docs/([^)]+)", r"!\1", content)

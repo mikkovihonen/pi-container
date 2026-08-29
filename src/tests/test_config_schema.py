@@ -1086,3 +1086,40 @@ class TestAgentReadOnlyPiContainerSchema:
             is_valid, errors, _ = validate_config(valid_config)
         assert is_valid is False
         assert any("read_only_pi_container" in e for e in errors)
+
+
+class TestSecuritySchema:
+    def test_valid_security_section(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["security"] = {
+            "read_only_git_hooks": True,
+            "blocked_mount_paths": ["~/.ssh", "~/.aws"],
+            "blocked_ip_ranges": ["127.0.0.0/8", "10.0.0.0/8"],
+            "git_config_allowlist": ["user.name", "user.email"],
+        }
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is True
+        assert errors == []
+
+    def test_invalid_security_types(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["security"] = {
+            "read_only_git_hooks": ["not_a_bool"],
+            "blocked_mount_paths": "not_a_list",
+        }
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is False
+        assert any("read_only_git_hooks" in e for e in errors)
+        assert any("blocked_mount_paths" in e for e in errors)

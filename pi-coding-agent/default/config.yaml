@@ -169,3 +169,59 @@ egress:
     ntp: false            # UDP 123 (time sync)
     tcp_ports: []         # arbitrary extra TCP ports, e.g. [2222, 8443]
     udp_ports: []         # arbitrary extra UDP ports, e.g. [51820]
+
+# Security hardening configuration.
+security:
+  # Automatically lock .git/hooks inside /workspace as read-only.
+  # Prevents untrusted agent code from planting malicious git hooks that execute
+  # on the host machine when the developer runs git commands outside the container.
+  read_only_git_hooks: true
+
+  # Dangerous host directories that should NEVER be mounted into the agent container.
+  # If any of these paths (or their subdirectories) appear in agent.mounts,
+  # pi-container will reject launching the container to prevent host credential theft.
+  blocked_mount_paths:
+    - "~/.ssh"
+    - "~/.gnupg"
+    - "~/.aws"
+    - "~/.azure"
+    - "~/.config/gcloud"
+    - "~/.kube"
+    - "~/.docker"
+    - "/var/run/docker.sock"
+    - "/var/run/podman/podman.sock"
+    - "/etc/shadow"
+    - "/etc/passwd"
+    - "/etc/sudoers"
+    - "/root"
+
+  # Private network CIDRs blocked from egress to protect internal infrastructure,
+  # local router web UIs, and cloud metadata services (e.g. AWS 169.254.169.254)
+  # against SSRF and DNS rebinding attacks.
+  blocked_ip_ranges:
+    - "127.0.0.0/8"          # IPv4 loopback
+    - "10.0.0.0/8"           # Private RFC 1918 Class A
+    - "172.16.0.0/12"        # Private RFC 1918 Class B
+    - "192.168.0.0/16"       # Private RFC 1918 Class C
+    - "169.254.0.0/16"       # IPv4 link-local / Cloud metadata (IMDS)
+    - "::1/128"              # IPv6 loopback
+    - "fc00::/7"             # IPv6 unique local address (ULA)
+    - "fe80::/10"            # IPv6 link-local
+
+  # Allowlist of safe Git configuration keys forwarded from the host into the container.
+  # All other host git configuration keys (including execution hooks, filters, and http.extraHeader)
+  # are stripped to prevent host environment leaks or arbitrary code execution.
+  git_config_allowlist:
+    - "user.name"
+    - "user.email"
+    - "init.defaultBranch"
+    - "pull.rebase"
+    - "core.autocrlf"
+    - "core.filemode"
+    - "core.eol"
+    - "commit.gpgSign"
+    - "user.signingKey"
+    - "gpg.format"
+    - "gpg.ssh.program"
+    - "tag.gpgSign"
+

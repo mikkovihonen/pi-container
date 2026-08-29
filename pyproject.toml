@@ -15,7 +15,7 @@ src = [
     "huggingface_hub>=1.26.0",
 ]
 docs = [
-    "mkdocs-material>=9.7.7",
+    "zensical>=0.0.57",
 ]
 dev = [
     "pre-commit>=4.6.1",

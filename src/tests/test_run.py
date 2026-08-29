@@ -62,3 +62,37 @@ class TestAgentLaunchReadOnlyPiContainerMount:
         read_only_pi_container = False
         flags = ["--volume", f"{pi_container_dir}:/workspace/.pi-container:ro"] if read_only_pi_container else []
         assert flags == []
+
+
+class TestAgentLaunchReadOnlyGitHooksMount:
+    def test_read_only_git_hooks_flag_included(self, tmp_path):
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        hooks_dir = git_dir / "hooks"
+        read_only_git_hooks = True
+        flags = []
+        if read_only_git_hooks and git_dir.is_dir():
+            hooks_dir.mkdir(parents=True, exist_ok=True)
+            flags = ["--volume", f"{hooks_dir}:/workspace/.git/hooks:ro"]
+        assert flags == ["--volume", f"{hooks_dir}:/workspace/.git/hooks:ro"]
+        assert hooks_dir.is_dir()
+
+
+class TestAgentLaunchSecurityOpts:
+    def test_no_new_privileges_included_when_nested_disabled(self):
+        nested_enabled = False
+        opts = ["--security-opt", "no-new-privileges"] if not nested_enabled else []
+        assert opts == ["--security-opt", "no-new-privileges"]
+
+    def test_no_new_privileges_omitted_when_nested_enabled(self):
+        nested_enabled = True
+        opts = ["--security-opt", "no-new-privileges"] if not nested_enabled else []
+        assert opts == []
+
+
+class TestVolumeMountOptions:
+    def test_shadow_volumes_have_nodev_nosuid(self):
+        vol_name = "pi-vol-12345-venv"
+        dest_path = "/workspace/.venv"
+        arg = ("--volume", f"{vol_name}:{dest_path}:nodev,nosuid")
+        assert arg == ("--volume", "pi-vol-12345-venv:/workspace/.venv:nodev,nosuid")

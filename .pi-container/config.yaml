@@ -104,3 +104,44 @@ egress:
     ntp: false
     tcp_ports: []
     udp_ports: []
+
+# Security hardening configuration.
+security:
+  read_only_git_hooks: true
+  blocked_mount_paths:
+    - "~/.ssh"
+    - "~/.gnupg"
+    - "~/.aws"
+    - "~/.azure"
+    - "~/.config/gcloud"
+    - "~/.kube"
+    - "~/.docker"
+    - "/var/run/docker.sock"
+    - "/var/run/podman/podman.sock"
+    - "/etc/shadow"
+    - "/etc/passwd"
+    - "/etc/sudoers"
+    - "/root"
+  blocked_ip_ranges:
+    - "127.0.0.0/8"
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "169.254.0.0/16"
+    - "::1/128"
+    - "fc00::/7"
+    - "fe80::/10"
+  git_config_allowlist:
+    - "user.name"
+    - "user.email"
+    - "init.defaultBranch"
+    - "pull.rebase"
+    - "core.autocrlf"
+    - "core.filemode"
+    - "core.eol"
+    - "commit.gpgSign"
+    - "user.signingKey"
+    - "gpg.format"
+    - "gpg.ssh.program"
+    - "tag.gpgSign"
+

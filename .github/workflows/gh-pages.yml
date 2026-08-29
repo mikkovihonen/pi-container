@@ -31,11 +31,11 @@ jobs:
       - name: Generate index from README
         run: python .github/scripts/generate_index.py
 
-      - name: Install MkDocs Material
-        run: pip install mkdocs-material
+      - name: Install Zensical
+        run: pip install zensical
 
       - name: Build site
-        run: mkdocs build --site-dir site
+        run: zensical build --clean
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5

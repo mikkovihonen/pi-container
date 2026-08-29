@@ -94,6 +94,15 @@ def _matches_hostname(hostname: str, patterns: list[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _is_ip_address(hostname: str) -> bool:
+    """Check if a string is a valid IPv4 or IPv6 address."""
+    try:
+        ipaddress.ip_address(hostname.strip("[]"))
+        return True
+    except ValueError:
+        return False
+
+
 def _parse_ip_patterns(patterns: list[str]) -> list:
     """Parse IP address / CIDR patterns into ``ipaddress`` objects.
 
@@ -436,9 +445,11 @@ class AllowlistAddon:
                 )
 
     def _is_localhost(self, hostname: str) -> bool:
-        """Check if a hostname is a localhost variant."""
+        """Check if a hostname is a localhost variant or local llama provider."""
         h = hostname.lower()
-        return h in ("localhost", "127.0.0.1", "::1", "[::1]")
+        llama_hosts = set(os.environ.get("LLAMA_HOSTNAMES", "").lower().split())
+        llama_hosts.add("llama")
+        return h in ("localhost", "127.0.0.1", "::1", "[::1]") or h in llama_hosts
 
     def _is_private_ip(self, ip_str: str) -> bool:
         """Check if an IP is a private/loopback/reserved address."""
@@ -447,6 +458,40 @@ class AllowlistAddon:
             return addr.is_loopback or addr.is_private or addr.is_reserved or addr.is_link_local
         except ValueError:
             return False
+
+    def _is_blocked_ip(self, ip_str: str) -> bool:
+        """Check if an IP matches any configured blocked IP range (e.g. SSRF protection)."""
+        if not hasattr(self, "_parsed_blocked_ips"):
+            blocked_env = os.environ.get("PROXY_BLOCKED_IP_RANGES")
+            if blocked_env:
+                try:
+                    import json as _json
+
+                    ranges = _json.loads(blocked_env)
+                except Exception:
+                    ranges = [
+                        "127.0.0.0/8",
+                        "10.0.0.0/8",
+                        "172.16.0.0/12",
+                        "192.168.0.0/16",
+                        "169.254.0.0/16",
+                        "::1/128",
+                        "fc00::/7",
+                        "fe80::/10",
+                    ]
+            else:
+                ranges = [
+                    "127.0.0.0/8",
+                    "10.0.0.0/8",
+                    "172.16.0.0/12",
+                    "192.168.0.0/16",
+                    "169.254.0.0/16",
+                    "::1/128",
+                    "fc00::/7",
+                    "fe80::/10",
+                ]
+            self._parsed_blocked_ips = _parse_ip_patterns(ranges)
+        return _ip_matches(ip_str, self._parsed_blocked_ips)
 
     def _check_rules(self, hostname: str, server_ip: str | None) -> str | None:
         """Check all rules against the request.
@@ -472,10 +517,10 @@ class AllowlistAddon:
         hostname = _strip_port(flow.request.pretty_host or "")
         server_ip = _get_server_ip(flow)
 
-        # Always allow localhost
-        if self._is_localhost(hostname) or (server_ip and self._is_private_ip(server_ip)):
+        # Always allow localhost / llama provider hostnames
+        if self._is_localhost(hostname):
             if self._log_allowed:
-                log.info(f"[allowlist] ALLOW (localhost/private) {hostname}{' ' + server_ip if server_ip else ''}")
+                log.info(f"[allowlist] ALLOW (localhost/llama) {hostname}{' ' + server_ip if server_ip else ''}")
             return
 
         # Check rules
@@ -484,6 +529,16 @@ class AllowlistAddon:
         if result == "allow":
             if self._log_allowed:
                 log.info(f"[allowlist] ALLOW {hostname}{' ' + server_ip if server_ip else ''}")
+            return
+
+        # SSRF Protection: if destination IP is in blocked private/loopback/metadata ranges and not explicitly allowed
+        effective_ip = server_ip or (hostname if _is_ip_address(hostname) else None)
+        if effective_ip and self._is_blocked_ip(effective_ip):
+            if self._log_blocked:
+                log.info(f"[allowlist] DENY (blocked IP range / SSRF) {hostname} -> {effective_ip}")
+            if self._dry_run:
+                return
+            self._block_flow(flow, reason="blocked IP range / SSRF")
             return
 
         if result == "deny":

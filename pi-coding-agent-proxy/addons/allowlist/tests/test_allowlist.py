@@ -593,10 +593,44 @@ class TestAllowlistAddonOnRequest:
             )
         ]
 
-        # Private IP should always be allowed regardless of allowlist rules.
+        # Unlisted private IP should be blocked by SSRF protection
+        flow = _make_flow("some-private-host", "192.168.1.100")
+        addon.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_private_ip_allowed_when_explicitly_allowlisted(self):
+        addon = AllowlistAddon(config_path="")
+        addon._mode = "allow"
+        addon._default_action = "block"
+        addon.rules = [
+            AllowlistRule(
+                {
+                    "name": "internal-net",
+                    "mode": "allow",
+                    "hostnames": [],
+                    "ip_ranges": ["192.168.1.0/24"],
+                }
+            )
+        ]
+
         flow = _make_flow("some-private-host", "192.168.1.100")
         addon.request(flow)
         assert flow.response is None
+
+    def test_localhost_and_llama_always_allowed(self):
+        addon = AllowlistAddon(config_path="")
+        addon._mode = "allow"
+        addon._default_action = "block"
+        addon.rules = []
+
+        flow1 = _make_flow("localhost", "127.0.0.1")
+        addon.request(flow1)
+        assert flow1.response is None
+
+        flow2 = _make_flow("llama", "172.19.0.1")
+        addon.request(flow2)
+        assert flow2.response is None
 
     def test_dry_run_no_blocking(self):
         addon = AllowlistAddon(config_path="")

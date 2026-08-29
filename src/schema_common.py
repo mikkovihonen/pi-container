@@ -140,6 +140,16 @@ SCHEMA: dict = {
             "allow": {"type": dict},
         },
     },
+    "security": {
+        "type": dict,
+        "required": False,
+        "keys": {
+            "read_only_git_hooks": {"type": (bool, str, int), "required": False},
+            "blocked_mount_paths": {"type": list, "required": False},
+            "blocked_ip_ranges": {"type": list, "required": False},
+            "git_config_allowlist": {"type": list, "required": False},
+        },
+    },
 }
 
 
