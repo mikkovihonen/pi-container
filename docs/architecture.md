@@ -70,25 +70,30 @@ By default the whole stack is **IPv4-only**. The isolated network has no IPv6 su
 When `pi` runs (`src/run.py`), startup dependencies are orchestrated concurrently using `start_dependencies_parallel()` in `src/containers.py`:
 
 ```mermaid
-flowchart TD
-    Sweep["1. Crash Recovery & Sweepers<br/>(reap dead servers, proxies, agent containers)"] --> Parallel
+flowchart TB
+    Sweep["<b>1. Crash Recovery & Sweepers</b><br/>Reap dead servers, stale proxy locks, and dangling containers"]
 
-    subgraph Parallel ["2. Parallel Dependency Initialization"]
+    Sweep --> S1
+    Sweep --> S2
+    Sweep --> Proxy
+
+    subgraph Parallel["<b>2. Parallel Dependency Startup</b> (start_dependencies_parallel)"]
         direction TB
-        S1["llama-server 1<br/>(allocate port → load weights → /health)"]
-        S2["llama-server 2<br/>(allocate port → load weights → /health)"]
-        Proxy["pi-coding-agent-proxy<br/>(create network → run container → mitmweb probe)"]
+        S1["<b>llama-server 1</b><br/>Port allocated<br/>Model weight loading & /health polling"]
+        S2["<b>llama-server 2</b><br/>Port allocated<br/>Model weight loading & /health polling"]
+        Proxy["<b>pi-coding-agent-proxy</b><br/>Create isolated network<br/>Start proxy container & poll mitmweb"]
     end
+    style Parallel fill:none,text-align:left
 
-    S1 -.->|port_ready_event (~15ms)| Proxy
-    S2 -.->|port_ready_event (~15ms)| Proxy
+    S1 -.->|"port_ready_event (~15ms)"| Proxy
+    S2 -.->|"port_ready_event (~15ms)"| Proxy
 
-    S1 --> Barrier["3. Health Readiness Barrier"]
+    S1 --> Barrier["<b>3. Health Readiness Barrier</b><br/>Synchronizes all server & proxy /health checks"]
     S2 --> Barrier
     Proxy --> Barrier
 
-    Barrier -->|All healthy| Agent["4. Start pi-coding-agent<br/>(attach network, route default gateway + DNS to proxy)"]
-    Barrier -.->|Any failure / SIGINT| Cleanup["Rollback & Teardown via ExitStack"]
+    Barrier -->|All healthy| Agent["<b>4. Start pi-coding-agent</b><br/>Attach to isolated-net<br/>Route default gateway & DNS to proxy"]
+    Barrier -.->|Any failure or SIGINT| Rollback["<b>ExitStack Rollback</b><br/>Clean teardown of all started resources"]
 ```
 
 ### Dependency lifecycle stages
