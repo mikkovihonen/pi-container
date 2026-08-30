@@ -88,6 +88,30 @@ def validate_environment(llama_bin: str | None) -> str:
     if runtime is None:
         raise EnvironmentError("podman not found. Install it (macOS: brew install podman).")
 
+    try:
+        result = subprocess.run(
+            [runtime, "info"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        raise EnvironmentError(
+            "Podman did not respond within 15 seconds. Please check if Podman is running properly (e.g. 'podman machine start')."
+        )
+    except Exception as e:
+        raise EnvironmentError(
+            f"Failed to communicate with Podman: {e}. Please check if Podman is running properly."
+        )
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        msg = "Podman is not running or not responsive."
+        if detail:
+            msg += f"\n{detail}"
+        msg += "\nPlease check if Podman is running properly (e.g. 'podman machine start' on macOS or check the podman service on Linux)."
+        raise EnvironmentError(msg)
+
     return runtime
 
 

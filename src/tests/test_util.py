@@ -92,21 +92,22 @@ class TestLoadDotenv:
 
 class TestValidateEnvironment:
     def test_all_dependencies_present(self):
-        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
-            # Mock llama_bin path exists
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
 
-            # Mock shutil.which
             mock_shutil.which.side_effect = lambda cmd: {
                 "hf": "/usr/bin/hf",
                 "socat": "/usr/bin/socat",
                 "podman": "/usr/bin/podman",
             }.get(cmd)
 
+            mock_run.return_value = subprocess.CompletedProcess(args=["podman", "info"], returncode=0, stdout="", stderr="")
+
             result = validate_environment("/usr/bin/llama-server")
             assert result == "podman"
+            mock_run.assert_called_once_with(["podman", "info"], capture_output=True, text=True, timeout=15)
 
     def test_llama_bin_not_found_raises(self):
         with patch("util.Path") as mock_path:
@@ -137,7 +138,7 @@ class TestValidateEnvironment:
 
     def test_socat_not_found_does_not_raise(self):
         """socat is no longer required (removed when Apple container support was dropped)."""
-        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -146,6 +147,8 @@ class TestValidateEnvironment:
                 "hf": "/usr/bin/hf",
                 "podman": "/usr/bin/podman",
             }.get(cmd)
+
+            mock_run.return_value = subprocess.CompletedProcess(args=["podman", "info"], returncode=0, stdout="", stderr="")
 
             # Should succeed - socat is no longer required
             result = validate_environment("/usr/bin/llama-server")
@@ -181,7 +184,7 @@ class TestValidateEnvironment:
                 validate_environment("/usr/bin/llama-server")
 
     def test_returns_podman_when_only_podman(self):
-        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -192,11 +195,13 @@ class TestValidateEnvironment:
                 "podman": "/usr/bin/podman",
             }.get(cmd)
 
+            mock_run.return_value = subprocess.CompletedProcess(args=["podman", "info"], returncode=0, stdout="", stderr="")
+
             assert validate_environment("/usr/bin/llama-server") == "podman"
 
     def test_podman_auto_detected(self):
         """Podman is auto-detected when no env var is set."""
-        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil:
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -206,7 +211,69 @@ class TestValidateEnvironment:
                 "podman": "/usr/bin/podman",
             }.get(cmd)
 
+            mock_run.return_value = subprocess.CompletedProcess(args=["podman", "info"], returncode=0, stdout="", stderr="")
+
             assert validate_environment("/usr/bin/llama-server") == "podman"
+
+    def test_podman_info_failure_raises(self):
+        """When podman info returns non-zero exit code, EnvironmentError is raised with guidance."""
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
+            mock_path_instance = MagicMock()
+            mock_path_instance.exists.return_value = True
+            mock_path.return_value = mock_path_instance
+
+            mock_shutil.which.side_effect = lambda cmd: {
+                "hf": "/usr/bin/hf",
+                "podman": "/usr/bin/podman",
+            }.get(cmd)
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["podman", "info"],
+                returncode=125,
+                stdout="",
+                stderr="Cannot connect to Podman. Please verify your connection or run podman machine start",
+            )
+
+            with pytest.raises(EnvironmentError) as exc_info:
+                validate_environment("/usr/bin/llama-server")
+
+            assert "Podman is not running or not responsive" in str(exc_info.value)
+            assert "Cannot connect to Podman" in str(exc_info.value)
+            assert "podman machine start" in str(exc_info.value)
+
+    def test_podman_info_timeout_raises(self):
+        """When podman info times out, EnvironmentError is raised."""
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
+            mock_path_instance = MagicMock()
+            mock_path_instance.exists.return_value = True
+            mock_path.return_value = mock_path_instance
+
+            mock_shutil.which.side_effect = lambda cmd: {
+                "hf": "/usr/bin/hf",
+                "podman": "/usr/bin/podman",
+            }.get(cmd)
+
+            mock_run.side_effect = subprocess.TimeoutExpired(cmd=["podman", "info"], timeout=15)
+
+            with pytest.raises(EnvironmentError, match="Podman did not respond within 15 seconds"):
+                validate_environment("/usr/bin/llama-server")
+
+    def test_podman_info_exception_raises(self):
+        """When executing podman info raises an OSError or other exception, EnvironmentError is raised."""
+        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
+            mock_path_instance = MagicMock()
+            mock_path_instance.exists.return_value = True
+            mock_path.return_value = mock_path_instance
+
+            mock_shutil.which.side_effect = lambda cmd: {
+                "hf": "/usr/bin/hf",
+                "podman": "/usr/bin/podman",
+            }.get(cmd)
+
+            mock_run.side_effect = OSError("Execution failed")
+
+            with pytest.raises(EnvironmentError, match="Failed to communicate with Podman: Execution failed"):
+                validate_environment("/usr/bin/llama-server")
 
 
 # ---------------------------------------------------------------------------
