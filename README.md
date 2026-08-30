@@ -41,7 +41,8 @@ See **[Getting Started](docs/getting-started.md)** for prerequisites, hardware r
 | Page | Contents |
 |------|---------------|
 | [Getting Started](docs/getting-started.md) | Prerequisites, hardware, platform notes, build & run |
-| [Architecture](docs/architecture.md) | Components, network topology, egress policy, project structure |
+| [Architecture](docs/architecture.md) | Components, network topology, parallel startup orchestration, project structure |
+| [Design Details](docs/design-details.md) | Proxy egress policy, nested containers, toolchain builder image |
 | [Sandboxing Technologies](docs/sandboxing.md) | Cloud vs. local sandbox paradigms, microVMs, host kernel isolation, and container tradeoffs |
 | [Configuration](docs/configuration.md) | Environment variables and per-workspace configuration (allowlist, token replacer, temporary file system, apt dependencies, `.gitignore`) |
 | [Development](docs/development.md) | Local dev setup, tests, lint, coverage |

@@ -257,6 +257,7 @@ class TestServerStartNewProcess:
 
         assert s.server_pid == 1234
         assert s.port == 18080
+        assert s.port_ready_event.is_set()
 
     def test_fails_when_process_dies_immediately(self, tmp_path):
         s = self._make_server(tmp_path)

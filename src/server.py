@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import subprocess
+import threading
 import time
 import urllib.request
 from datetime import UTC, datetime
@@ -78,6 +79,7 @@ class Server:
         self.port: int | None = None
         self.container_port: int | None = container_port
         self.server_pid: int | None = None
+        self.port_ready_event: threading.Event = threading.Event()
         self.models: dict[str, Model] = {}
 
         # Sharing identity: provider name + a fingerprint of its config. Same
@@ -205,6 +207,7 @@ class Server:
             healthy, pid, port = self._is_existing_server_healthy()
             if healthy and pid and port:
                 self.port = port
+                self.port_ready_event.set()
                 return True
             if pid:
                 self._cleanup(pid_to_kill=pid, full_cleanup=False)
@@ -268,6 +271,7 @@ class Server:
         for attempt in range(self.startup_attempts):
             port = get_free_port()
             self.port = port
+            self.port_ready_event.set()
 
             self.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
             self.paths["log_file"].parent.mkdir(parents=True, exist_ok=True)
@@ -309,6 +313,7 @@ class Server:
         )
 
     def stop(self) -> None:
+        self.port_ready_event.clear()
         stop_refcounted_resource(
             lock_file=self.paths["ref_count_lock"],
             clients_file=self.paths["clients_file"],

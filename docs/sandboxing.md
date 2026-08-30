@@ -1,4 +1,4 @@
-# Sandboxing Technologies for AI Coding Agents
+# Sandboxing 101
 
 AI coding agents (such as Claude Code, OpenHands, Devin, E2B, and Modal) require sandboxing to safely execute untrusted, agent-generated code and arbitrary shell commands.
 

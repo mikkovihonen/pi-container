@@ -4,10 +4,13 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from contextlib import ExitStack
     from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -103,6 +106,87 @@ def sweep_orphaned_servers(lock_dir: Path) -> list[str]:
 def sweep_orphaned_proxies(runtime: str, lock_dir: Path) -> list[str]:
     """Stop proxy containers and remove isolated networks whose client sessions have all died."""
     return ContainerNetworkManager.cleanup_orphaned_proxies(runtime, lock_dir)
+
+
+def start_dependencies_parallel(
+    servers: list[Server],
+    netmgr_factory: Callable[[str], ContainerNetworkManager],
+    stack: ExitStack,
+) -> ContainerNetworkManager:
+    """Start all llama-server instances and ContainerNetworkManager in parallel.
+
+    Orchestration:
+      1. If no servers are configured, starts ContainerNetworkManager synchronously.
+      2. If servers are configured:
+         - Concurrently starts each server in a worker thread (acquires lock, prepares
+           model, allocates port, and starts /health polling).
+         - Waits for each server to allocate its host port (~15ms).
+         - Constructs the LLAMA_PORTS port mapping immediately.
+         - Starts ContainerNetworkManager in a worker thread (creates network, starts
+           proxy container, and polls mitmweb health).
+         - Waits for all servers and the proxy to report healthy concurrently.
+         - Registers all started resources with ``stack`` so failure or termination
+           triggers clean rollback and teardown.
+    """
+    if not servers:
+        netmgr = netmgr_factory("[]")
+        stack.enter_context(netmgr)
+        return netmgr
+
+    stack_lock = threading.Lock()
+    server_errors: list[BaseException] = []
+
+    def _run_server(srv: Server) -> None:
+        try:
+            with stack_lock:
+                stack.callback(srv.stop)
+            srv.start()
+        except BaseException as e:
+            srv.port_ready_event.set()
+            server_errors.append(e)
+
+    server_threads: list[threading.Thread] = []
+    for srv in servers:
+        t = threading.Thread(target=_run_server, args=(srv,), daemon=True)
+        t.start()
+        server_threads.append(t)
+
+    # Wait for all servers to resolve their ports or encounter an early error
+    for srv in servers:
+        srv.port_ready_event.wait()
+
+    if server_errors:
+        for t in server_threads:
+            t.join()
+        raise server_errors[0]
+
+    portconfig = json.dumps([{"cp": srv.container_port, "hp": srv.port} for srv in servers])
+    netmgr = netmgr_factory(portconfig)
+    with stack_lock:
+        stack.callback(netmgr.stop)
+
+    netmgr_errors: list[BaseException] = []
+
+    def _run_netmgr() -> None:
+        try:
+            netmgr.start()
+        except BaseException as e:
+            netmgr_errors.append(e)
+
+    netmgr_thread = threading.Thread(target=_run_netmgr, daemon=True)
+    netmgr_thread.start()
+
+    # Wait for all servers and netmgr to finish starting & health checking
+    for t in server_threads:
+        t.join()
+    netmgr_thread.join()
+
+    if server_errors:
+        raise server_errors[0]
+    if netmgr_errors:
+        raise netmgr_errors[0]
+
+    return netmgr
 
 
 def hostname_allowed(host: str, patterns: list[str]) -> bool:

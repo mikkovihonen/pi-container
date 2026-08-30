@@ -331,6 +331,14 @@ class TestGetFreePort:
         port2 = get_free_port()
         assert port1 != port2
 
+    def test_concurrent_allocations_are_unique(self):
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            ports = list(executor.map(lambda _: get_free_port(), range(16)))
+
+        assert len(ports) == len(set(ports))
+
 
 # ---------------------------------------------------------------------------
 # handle_signal

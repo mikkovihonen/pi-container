@@ -183,7 +183,7 @@ originally promised. It is the main reason nesting must stay opt-in.
 Added to `pi-coding-agent/Containerfile`. Debian trixie supplies the parts it ships
 at a version podman 6 accepts; `podman`, `netavark` and `aardvark-dns` are compiled
 in `pi-coding-agent-builder/` and copied in (see
-[Toolchain builder image](../architecture.md#toolchain-builder-image) — trixie's
+[Toolchain builder image](../design-details.md#toolchain-builder-image) — trixie's
 podman is 5.4.2 and its netavark 1.14.0, which podman 6 does not accept):
 
 ```dockerfile

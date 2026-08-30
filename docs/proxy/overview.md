@@ -50,7 +50,7 @@ protocol the agent emits goes straight to the internet
 (DNAT'd to the host) is explicitly permitted. Operators can opt specific
 extra protocols in via `PROXY_ALLOW_*` env vars (`PROXY_ALLOW_SSH`,
 `PROXY_ALLOW_SMTP`, `PROXY_ALLOW_GIT`, `PROXY_ALLOW_NTP`, `PROXY_ALLOW_TCP_PORTS`,
-`PROXY_ALLOW_UDP_PORTS`). See [Proxy egress policy](../architecture.md#proxy-egress-policy). **Traffic
+`PROXY_ALLOW_UDP_PORTS`). See [Proxy egress policy](../design-details.md#proxy-egress-policy). **Traffic
 allowed this way is plain NAT and is NOT seen by mitmproxy or the allowlist.**
 
 ## Addons

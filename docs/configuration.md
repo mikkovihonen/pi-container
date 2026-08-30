@@ -674,7 +674,7 @@ This is **not** fixable in the image's `containers.conf` drop-in, which is where
 
 **Machine sizing.** A podman machine of **at least 4 GB is required** to build the agent image at all (see [Getting Started](getting-started.md#prerequisites)). Nesting is the workload most likely to expose anything smaller than that. The default `resources.agent.memory` is `16g`, which a 4 GB VM cannot honour. Raise the machine (`podman machine set --memory 8192` or more) before enabling nesting. Do this especially before choosing `storage: tmpfs`, where the first sizeable image pull lands in RAM.
 
-The same limit bites at **image build** time. The [toolchain image](architecture.md#toolchain-builder-image) compiles CPython, podman, and netavark (and Node too, with `NODE_SOURCE=build`). One PGO compile job peaks near 900 MiB. Anything already running in the VM (other containers, a live `pi` session) eats into the total. This is why 2 GiB is not enough and 4 GB is the documented minimum. `build.sh` checks available memory in the builder **before starting the build**. It refuses with the fix options instead of dying minutes later at `gcc: fatal error: Killed signal terminated program cc1`:
+The same limit bites at **image build** time. The [toolchain image](design-details.md#toolchain-builder-image) compiles CPython, podman, and netavark (and Node too, with `NODE_SOURCE=build`). One PGO compile job peaks near 900 MiB. Anything already running in the VM (other containers, a live `pi` session) eats into the total. This is why 2 GiB is not enough and 4 GB is the documented minimum. `build.sh` checks available memory in the builder **before starting the build**. It refuses with the fix options instead of dying minutes later at `gcc: fatal error: Killed signal terminated program cc1`:
 
 ```
 ERROR: Only 276 MiB of memory is available where images are built, but compiling
@@ -815,7 +815,7 @@ The `build_project_image()` function in `src/build.py` accepts the following par
 
 **Key principles:**
 
-- The shared base image carries the language runtimes and tooling every workspace needs: **Node 26**, **CPython 3.14 with `uv`**, the nested-container toolchain (**podman**, `netavark`, `aardvark-dns`), and `podman-compose`. All of those are compiled in the [toolchain builder image](architecture.md#toolchain-builder-image) and copied in. Anything beyond that is project-specific and belongs in `root/commands.sh`.
+- The shared base image carries the language runtimes and tooling every workspace needs: **Node 26**, **CPython 3.14 with `uv`**, the nested-container toolchain (**podman**, `netavark`, `aardvark-dns`), and `podman-compose`. All of those are compiled in the [toolchain builder image](design-details.md#toolchain-builder-image) and copied in. Anything beyond that is project-specific and belongs in `root/commands.sh`.
 - None of it is per-project. Building Python in `root/commands.sh` meant a workspace that left the file at its no-op default had no interpreter at all. Every project-image rebuild recompiled CPython (the slowest and most OOM-prone step in the build). A project-image rebuild now compiles nothing. It copies a prebuilt tree.
 - Both files are optional. If absent, the workspace uses the shared image.
 - Changes to definition files trigger a rebuild on the next `run.sh` invocation (detected via image label comparison). Old images are removed automatically.
@@ -882,7 +882,7 @@ egress:
     udp_ports: []         # arbitrary extra UDP ports, e.g. [51820]
 ```
 
-`run.py` translates truthy flags and non-empty port lists into the proxy container's `PROXY_ALLOW_*` env vars. The entrypoint uses them to open the matching `iptables` FORWARD rules. An absent or malformed section means **deny-all** (fail-safe). See [Proxy egress policy](architecture.md#proxy-egress-policy) for the full protocol/port reference.
+`run.py` translates truthy flags and non-empty port lists into the proxy container's `PROXY_ALLOW_*` env vars. The entrypoint uses them to open the matching `iptables` FORWARD rules. An absent or malformed section means **deny-all** (fail-safe). See [Proxy egress policy](design-details.md#proxy-egress-policy) for the full protocol/port reference.
 
 ### Chat templates
 

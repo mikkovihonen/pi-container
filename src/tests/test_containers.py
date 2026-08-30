@@ -449,3 +449,122 @@ class TestSweepOrphanedProxies:
         res = containers.sweep_orphaned_proxies("podman", tmp_path)
         assert res == ["pi-proxy-1234567890"]
         assert called_with == [("podman", tmp_path)]
+
+
+class TestStartDependenciesParallel:
+    def test_zero_servers_starts_proxy_synchronously(self):
+        from contextlib import ExitStack
+        from unittest.mock import MagicMock
+
+        mock_netmgr = MagicMock()
+        mock_factory = MagicMock(return_value=mock_netmgr)
+
+        with ExitStack() as stack:
+            res = containers.start_dependencies_parallel([], mock_factory, stack)
+            assert res == mock_netmgr
+            mock_factory.assert_called_once_with("[]")
+            mock_netmgr.__enter__.assert_called_once()
+
+        mock_netmgr.__exit__.assert_called_once()
+
+    def test_single_server_starts_in_parallel(self):
+        import threading
+        from contextlib import ExitStack
+        from unittest.mock import MagicMock
+
+        mock_server = MagicMock()
+        mock_server.container_port = 8080
+        mock_server.port = 50001
+        mock_server.port_ready_event = threading.Event()
+
+        def _mock_server_start():
+            mock_server.port_ready_event.set()
+
+        mock_server.start.side_effect = _mock_server_start
+
+        mock_netmgr = MagicMock()
+        mock_factory = MagicMock(return_value=mock_netmgr)
+
+        with ExitStack() as stack:
+            res = containers.start_dependencies_parallel([mock_server], mock_factory, stack)
+            assert res == mock_netmgr
+            mock_factory.assert_called_once_with('[{"cp": 8080, "hp": 50001}]')
+            mock_server.start.assert_called_once()
+            mock_netmgr.start.assert_called_once()
+
+        mock_server.stop.assert_called_once()
+        mock_netmgr.stop.assert_called_once()
+
+    def test_multiple_servers_start_in_parallel(self):
+        import threading
+        from contextlib import ExitStack
+        from unittest.mock import MagicMock
+
+        s1 = MagicMock()
+        s1.container_port = 8080
+        s1.port = 50001
+        s1.port_ready_event = threading.Event()
+        s1.start.side_effect = lambda: s1.port_ready_event.set()
+
+        s2 = MagicMock()
+        s2.container_port = 8081
+        s2.port = 50002
+        s2.port_ready_event = threading.Event()
+        s2.start.side_effect = lambda: s2.port_ready_event.set()
+
+        mock_netmgr = MagicMock()
+        mock_factory = MagicMock(return_value=mock_netmgr)
+
+        with ExitStack() as stack:
+            res = containers.start_dependencies_parallel([s1, s2], mock_factory, stack)
+            assert res == mock_netmgr
+            mock_factory.assert_called_once_with('[{"cp": 8080, "hp": 50001}, {"cp": 8081, "hp": 50002}]')
+            s1.start.assert_called_once()
+            s2.start.assert_called_once()
+            mock_netmgr.start.assert_called_once()
+
+        s1.stop.assert_called_once()
+        s2.stop.assert_called_once()
+        mock_netmgr.stop.assert_called_once()
+
+    def test_server_failure_raises_and_cleans_up(self):
+        import threading
+        from contextlib import ExitStack
+        from unittest.mock import MagicMock
+
+        import pytest
+
+        mock_server = MagicMock()
+        mock_server.port_ready_event = threading.Event()
+        mock_server.start.side_effect = RuntimeError("Failed to start llama-server")
+
+        mock_netmgr = MagicMock()
+        mock_factory = MagicMock(return_value=mock_netmgr)
+
+        with ExitStack() as stack, pytest.raises(RuntimeError, match="Failed to start llama-server"):
+            containers.start_dependencies_parallel([mock_server], mock_factory, stack)
+
+        mock_server.stop.assert_called_once()
+
+    def test_netmgr_failure_raises_and_cleans_up(self):
+        import threading
+        from contextlib import ExitStack
+        from unittest.mock import MagicMock
+
+        import pytest
+
+        mock_server = MagicMock()
+        mock_server.container_port = 8080
+        mock_server.port = 50001
+        mock_server.port_ready_event = threading.Event()
+        mock_server.start.side_effect = lambda: mock_server.port_ready_event.set()
+
+        mock_netmgr = MagicMock()
+        mock_netmgr.start.side_effect = RuntimeError("Failed to start proxy")
+        mock_factory = MagicMock(return_value=mock_netmgr)
+
+        with ExitStack() as stack, pytest.raises(RuntimeError, match="Failed to start proxy"):
+            containers.start_dependencies_parallel([mock_server], mock_factory, stack)
+
+        mock_server.stop.assert_called_once()
+        mock_netmgr.stop.assert_called_once()

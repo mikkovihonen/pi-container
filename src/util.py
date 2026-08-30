@@ -12,6 +12,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -121,11 +122,24 @@ def validate_environment(llama_bin: str | None) -> str:
     return runtime
 
 
+_allocated_ports_lock = threading.Lock()
+_allocated_ports: set[int] = set()
+
+
 def get_free_port() -> int:
-    """Bind to an ephemeral port on 127.0.0.1, close the socket, and return the free port number."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        return s.getsockname()[1]
+    """Bind to an ephemeral port on 127.0.0.1, close the socket, and return a free port number.
+
+    Thread-safe against concurrent allocations within the same process.
+    """
+    with _allocated_ports_lock:
+        for _ in range(50):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("", 0))
+                port = s.getsockname()[1]
+                if port not in _allocated_ports:
+                    _allocated_ports.add(port)
+                    return port
+        return port
 
 
 def is_pid_alive(pid: int) -> bool:
