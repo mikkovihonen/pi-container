@@ -28,6 +28,7 @@ from config import (
     LLAMA_SERVER_LOCK_DIR,
     MODELS_DIR,
     PROJECT_DIR,
+    PROXY_LOCK_DIR,
     PROXY_UPSTREAM_NETWORK_ENV,
     REPO_ROOT,
 )
@@ -155,8 +156,9 @@ def main() -> None:
         logger.error("\nFix: remove the forbidden host mount paths from config.yaml under agent.mounts.")
         sys.exit(1)
 
-    # Crash recovery: reap orphaned servers and agent containers from prior crashed runs
+    # Crash recovery: reap orphaned servers, proxies, and agent containers from prior crashed runs
     containers.sweep_orphaned_servers(LLAMA_SERVER_LOCK_DIR)
+    containers.sweep_orphaned_proxies(CONTAINER_RUNTIME, PROXY_LOCK_DIR)
     containers.cleanup_orphaned_agent_containers(CONTAINER_RUNTIME, project.project_key(PROJECT_DIR))
     if flow_export_enabled:
         recover_dangling_flows(

@@ -5,13 +5,13 @@
 Install the following tools on your host machine before running:
 
 - **[uv](https://docs.astral.sh/uv/)**: Manages the Python environment and dependencies for the host-side build/run scripts.
-  - On macOS: `brew install uv`
-  - Other platforms: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-  - `build.sh` and `run.sh` invoke `uv run`. The `uv run` command creates `.venv` and installs the declared dependencies (including the `hf` CLI and `huggingface_hub`) automatically on first use. You do not need a manual `pip install`.
+    - On macOS: `brew install uv`
+    - Other platforms: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+    - `build.sh` and `run.sh` invoke `uv run`. The `uv run` command creates `.venv` and installs the declared dependencies (including the `hf` CLI and `huggingface_hub`) automatically on first use. You do not need a manual `pip install`.
 
 - **[podman](https://podman.io)**: the only supported container runtime.
-  - On macOS: `brew install podman`, then **`podman machine init --memory 4096`** and `podman machine start`
-  - On Linux (Debian/Ubuntu): `sudo apt install podman`, or your distro's package manager
+    - On macOS: `brew install podman`, then **`podman machine init --memory 4096`** and `podman machine start`
+    - On Linux (Debian/Ubuntu): `sudo apt install podman`, or your distro's package manager
 
   **The podman machine needs at least 4 GB of memory** (macOS/Windows, where podman
   runs in a VM). The default is 2 GiB, which is not enough. `build.sh` compiles CPython,
@@ -33,10 +33,10 @@ Install the following tools on your host machine before running:
   See [Configuration](configuration.md#nested-containers).
 
 - **llama.cpp**: Specifically `llama-server`.
-  - On macOS: `brew install llama.cpp`
-  - On Linux (Debian/Ubuntu): `sudo apt install llama.cpp`
-  - On Linux (other): [build from source](https://github.com/ggerganov/llama.cpp)
-  - On WSL2: `sudo apt install llama.cpp`
+    - On macOS: `brew install llama.cpp`
+    - On Linux (Debian/Ubuntu): `sudo apt install llama.cpp`
+    - On Linux (other): [build from source](https://github.com/ggerganov/llama.cpp)
+    - On WSL2: `sudo apt install llama.cpp`
 
 You declare Python dependencies (`huggingface_hub[cli]`, `pyyaml`) in
 `pyproject.toml`. `uv` installs them. You do not install them manually.
@@ -46,14 +46,14 @@ You declare Python dependencies (`huggingface_hub[cli]`, `pyyaml`) in
 Use the following hardware to run this environment comfortably, especially with the full 128k context window:
 
 - **Processor:**
-  - Apple Silicon (M2-series Max/Ultra or above) for high memory bandwidth.
-  - On Linux/WSL2: A modern multi-core CPU with AVX2 support.
+    - Apple Silicon (M2-series Max/Ultra or above) for high memory bandwidth.
+    - On Linux/WSL2: A modern multi-core CPU with AVX2 support.
 - **Memory (RAM):**
-  - **Minimum:** 32 GB (Performance may degrade with large contexts).
-  - **Recommended:** 64 GB or more (For optimal performance).
+    - **Minimum:** 32 GB (Performance may degrade with large contexts).
+    - **Recommended:** 64 GB or more (For optimal performance).
 - **podman machine (macOS/Windows):**
-  - **Required:** 4 GB (`podman machine set --memory 4096`). The 2 GiB default cannot build the toolchain image.
-  - **Recommended:** 8 GB, and more again if you enable [nested containers](configuration.md#nested-containers).
+    - **Required:** 4 GB (`podman machine set --memory 4096`). The 2 GiB default cannot build the toolchain image.
+    - **Recommended:** 8 GB, and more again if you enable [nested containers](configuration.md#nested-containers).
 - **Storage:** 50 GB of available SSD space.
 
 ## Platform-Specific Notes

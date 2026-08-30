@@ -84,10 +84,10 @@ COPY --from=pi-coding-agent-proxy:local /home/mitmproxy/.mitmproxy/mitmproxy-ca-
 Then:
 
 - A directory for extra CA certificates is created
-  - `RUN mkdir /usr/local/share/ca-certificates/extra`
+    - `RUN mkdir /usr/local/share/ca-certificates/extra`
 - PEM format `mitmproxy-ca.pem` is converted into CRT format `mitmproxy-ca.crt`
-  - `RUN openssl x509 -in /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.pem -inform PEM -out /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.crt`
+    - `RUN openssl x509 -in /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.pem -inform PEM -out /usr/local/share/ca-certificates/extra/mitmproxy-ca-cert.crt`
 - System CA certificates are updated
-  - `RUN update-ca-certificates`
+    - `RUN update-ca-certificates`
 
 After this, the pi-coding-agent image has the mitmproxy CA installed.

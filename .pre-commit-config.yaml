@@ -24,4 +24,18 @@ repos:
         types: [python]
         pass_filenames: false
 
+      - id: format-markdown
+        name: format-markdown
+        entry: uv run --project . python3 scripts/format_markdown.py
+        language: system
+        types: [markdown]
+        pass_filenames: true
+
+      - id: pymarkdown
+        name: pymarkdown
+        entry: uv run --project . pymarkdown --config .pymarkdown.json scan
+        language: system
+        types: [markdown]
+        pass_filenames: true
+
 

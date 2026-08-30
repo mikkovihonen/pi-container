@@ -1,6 +1,6 @@
 # Sandboxing Technologies for AI Coding Agents
 
-AI coding agents (such as Claude Code, OpenHands, Devin, E2B, and Modal) require sandboxing to safely execute untrusted, agent-generated code and arbitrary shell commands. 
+AI coding agents (such as Claude Code, OpenHands, Devin, E2B, and Modal) require sandboxing to safely execute untrusted, agent-generated code and arbitrary shell commands.
 
 In practice, sandboxing solutions divide into **two primary categories** based on deployment architecture:
 
@@ -79,11 +79,11 @@ Attempting to run every local agent action inside a standard container creates s
 Local CLI agents increasingly use lightweight, in-process host-level sandboxing:
 
 * **Linux**:
-  * **`bubblewrap` (`bwrap`)**: Unprivileged sandboxing that creates ephemeral user, mount, and network namespaces without daemon overhead.
-  * **`Landlock`**: An unprivileged Linux Security Module (LSM) allowing processes to restrict their own filesystem access at runtime.
-  * **`seccomp-bpf`**: System call filtering to restrict dangerous operations.
+    * **`bubblewrap` (`bwrap`)**: Unprivileged sandboxing that creates ephemeral user, mount, and network namespaces without daemon overhead.
+    * **`Landlock`**: An unprivileged Linux Security Module (LSM) allowing processes to restrict their own filesystem access at runtime.
+    * **`seccomp-bpf`**: System call filtering to restrict dangerous operations.
 * **macOS**:
-  * **`Seatbelt` (`sandbox-exec` / `libsandbox`)**: Kernel-enforced sandboxing profiles that restrict process I/O and network operations.
+    * **`Seatbelt` (`sandbox-exec` / `libsandbox`)**: Kernel-enforced sandboxing profiles that restrict process I/O and network operations.
 
 ### Benefits for Local Agent Workflows
 
@@ -109,22 +109,22 @@ While cloud systems trend toward MicroVMs and lightweight CLI agents trend towar
 
 1. **Ease of Orchestrating the Traffic-Intercepting Auditing Proxy**:
    Transparent network auditing and domain allowlisting require isolating the agent's network stack so that traffic cannot escape uninspected. OCI container networks provide this out-of-the-box:
-      - The agent runs inside an isolated, gateway-less container network (`--internal`).
-      - L3/L4 routing rules redirect all HTTP, HTTPS, and DNS traffic transparently through a companion `mitmproxy` proxy container.
-      - Domain allowlists, secret redaction, and flow logging operate reliably without needing complex host-level packet filters, root-level firewall rules, or host OS-specific network hooks.
+    - The agent runs inside an isolated, gateway-less container network (`--internal`).
+    - L3/L4 routing rules redirect all HTTP, HTTPS, and DNS traffic transparently through a companion `mitmproxy` proxy container.
+    - Domain allowlists, secret redaction, and flow logging operate reliably without needing complex host-level packet filters, root-level firewall rules, or host OS-specific network hooks.
 
 2. **Standardized and Reproducible Project Workspaces**:
    Rather than relying on whatever tools happen to be installed on the host machine, containerization provides a hermetic, predictable environment:
-   - Packages an audited base toolchain (Node, Python, `uv`, rootless Podman, netavark) compiled from source.
-   - Protects the developer's host machine from accidental global package installs, state drift, or configuration pollution.
-   - Allows each project workspace to define its own persistent volume mounts and project-specific dependencies without impacting other workspaces or the host system.
+    - Packages an audited base toolchain (Node, Python, `uv`, rootless Podman, netavark) compiled from source.
+    - Protects the developer's host machine from accidental global package installs, state drift, or configuration pollution.
+    - Allows each project workspace to define its own persistent volume mounts and project-specific dependencies without impacting other workspaces or the host system.
 
 3. **The macOS & Windows VM Reality: Implicit Hardware Isolation**:
    macOS is the platform of choice for many AI developers due to Apple Silicon's unified memory architecture. On macOS (and Windows), Linux containers **do not run directly on the host kernel**; they execute inside a lightweight Linux virtual machine managed by the container runtime (e.g., Apple's `Virtualization.framework` / `applehv` or WSL2/Hyper-V).
-   
+
    This introduces a critical security advantage:
-   - **Hypervisor Boundary**: Even if a malicious exploit achieved a Linux container breakout, the attacker would still be trapped inside the guest Linux VM, unable to compromise the host macOS Darwin or Windows kernel.
-   - **Hybrid Host/Container Topology for Local LLMs**: Heavy LLM inference (`llama-server`) runs natively as a host process to leverage Apple Metal GPU acceleration and high-bandwidth unified memory at native speed. Meanwhile, the untrusted agent and auditing proxy run securely inside the container runtime, with the proxy routing authenticated inference requests to the host over `host.containers.internal`.
+    - **Hypervisor Boundary**: Even if a malicious exploit achieved a Linux container breakout, the attacker would still be trapped inside the guest Linux VM, unable to compromise the host macOS Darwin or Windows kernel.
+    - **Hybrid Host/Container Topology for Local LLMs**: Heavy LLM inference (`llama-server`) runs natively as a host process to leverage Apple Metal GPU acceleration and high-bandwidth unified memory at native speed. Meanwhile, the untrusted agent and auditing proxy run securely inside the container runtime, with the proxy routing authenticated inference requests to the host over `host.containers.internal`.
 
 ```mermaid
 flowchart TB
@@ -151,7 +151,7 @@ flowchart TB
 
 ## 5. The Human Factor: Attack Vectors and the Limits of Sandboxing
 
-Ultimately, **no sandbox is more secure than the vigilance of the operator configuring and overseeing it.** 
+Ultimately, **no sandbox is more secure than the vigilance of the operator configuring and overseeing it.**
 
 A sandbox confines runtime execution while the container is running. However, the primary goal of an AI coding agent is to produce artifacts—source code, build scripts, dependencies, configuration files, and git commits—that are intended to be reviewed, built, deployed, and executed on host machines and production infrastructure.
 

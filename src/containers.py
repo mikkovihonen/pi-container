@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 sys.dont_write_bytecode = True
 
 from models import ServerConfig
+from network import ContainerNetworkManager
 from server import Server
 from util import is_pid_alive, run_quiet
 
@@ -97,6 +98,11 @@ def cleanup_orphaned_agent_containers(runtime: str, project_key: str) -> list[st
 def sweep_orphaned_servers(lock_dir: Path) -> list[str]:
     """Stop llama-server processes whose client sessions have all died."""
     return Server.cleanup_orphaned_servers(lock_dir)
+
+
+def sweep_orphaned_proxies(runtime: str, lock_dir: Path) -> list[str]:
+    """Stop proxy containers and remove isolated networks whose client sessions have all died."""
+    return ContainerNetworkManager.cleanup_orphaned_proxies(runtime, lock_dir)
 
 
 def hostname_allowed(host: str, patterns: list[str]) -> bool:

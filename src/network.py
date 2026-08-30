@@ -20,13 +20,12 @@ from typing import TYPE_CHECKING, Any
 from config import ADMIN_PASSWORD, CONFIG_DIR, REPO_ROOT
 from runtimes import ContainerRuntime
 from util import (
-    deregister_client,
     get_free_port,
     get_ref_count,
     read_live_clients,
-    register_client,
     run_quiet,
-    write_clients,
+    start_refcounted_resource,
+    stop_refcounted_resource,
 )
 
 if TYPE_CHECKING:
@@ -436,7 +435,6 @@ class ContainerNetworkManager:
         self.paths: dict[str, Path] = {
             "lock_dir": self.lock_dir,
             "ref_count_lock": self.lock_dir / f".{self.proxy_name}.lock",
-            "ref_count_file": self.lock_dir / f".{self.proxy_name}.refcount",
             "clients_file": self.lock_dir / f".{self.proxy_name}.clients.json",
         }
 
@@ -582,64 +580,100 @@ class ContainerNetworkManager:
             "registered_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
-        with self.paths["ref_count_lock"].open("a") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-
-            live_clients = read_live_clients(self.paths["clients_file"])
-            is_healthy = self._is_existing_proxy_healthy()
-
-            if live_clients:
-                if is_healthy:
-                    register_client(self.paths["clients_file"], client_info)
-                    self.paths["ref_count_file"].write_text(str(len(live_clients) + 1))
-                else:
-                    logger.warning(
-                        "Existing proxy refcount > 0 but proxy container is "
-                        "unreachable or stale; cleaning up stale state and restarting."
-                    )
-                    self._actually_stop()
-                    self._cleanup_stale_refcount()
-                    self._actually_start()
-                    write_clients(self.paths["clients_file"], [client_info])
-                    self.paths["ref_count_file"].write_text("1")
-            else:
-                # No live clients
-                if is_healthy:
-                    logger.info(f"Adopting existing healthy proxy {self.proxy_name}")
-                    write_clients(self.paths["clients_file"], [client_info])
-                    self.paths["ref_count_file"].write_text("1")
-                else:
-                    if self.paths["ref_count_file"].exists() or self.paths["clients_file"].exists():
-                        self._actually_stop()
-                        self._cleanup_stale_refcount()
-                    self._actually_start()
-                    write_clients(self.paths["clients_file"], [client_info])
-                    self.paths["ref_count_file"].write_text("1")
+        start_refcounted_resource(
+            lock_file=self.paths["ref_count_lock"],
+            clients_file=self.paths["clients_file"],
+            client_info=client_info,
+            is_healthy_fn=self._is_existing_proxy_healthy,
+            start_fn=self._actually_start,
+            stop_fn=self._actually_stop,
+            cleanup_stale_fn=self._cleanup_stale_refcount,
+            on_adopt_fn=lambda: logger.info(f"Adopting existing healthy proxy {self.proxy_name}"),
+            logger=logger,
+            label=f"proxy {self.proxy_name}",
+        )
 
     def stop(self) -> None:
-        if not self.paths["clients_file"].exists() and not self.paths["ref_count_file"].exists():
-            return
-
-        should_full_cleanup = False
-        with self.paths["ref_count_lock"].open("a") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-
-            remaining = deregister_client(self.paths["clients_file"], os.getpid())
-            if not remaining:
-                self._actually_stop()
-                should_full_cleanup = True
-            else:
-                self.paths["ref_count_file"].write_text(str(len(remaining)))
-
-        if should_full_cleanup:
-            self.paths["ref_count_file"].unlink(missing_ok=True)
-            self.paths["clients_file"].unlink(missing_ok=True)
+        def _cleanup_lock_dir() -> None:
             with contextlib.suppress(OSError):
                 if self.paths["lock_dir"].exists() and not any(self.paths["lock_dir"].iterdir()):
                     self.paths["lock_dir"].rmdir()
 
+        stop_refcounted_resource(
+            lock_file=self.paths["ref_count_lock"],
+            clients_file=self.paths["clients_file"],
+            pid=os.getpid(),
+            stop_fn=self._actually_stop,
+            full_cleanup_fn=_cleanup_lock_dir,
+            logger=logger,
+            label=f"proxy {self.proxy_name}",
+        )
+
+    @classmethod
+    def cleanup_orphaned_proxies(cls, runtime: str | ContainerRuntime, lock_dir: Path) -> list[str]:
+        """Scan lock_dir for proxy instances whose clients are all dead, and stop them."""
+        if not lock_dir.exists():
+            return []
+
+        runtime_bin = getattr(runtime, "runtime", str(runtime))
+        cleaned: list[str] = []
+        seen_proxies: set[str] = set()
+
+        for entry in lock_dir.iterdir():
+            name = entry.name
+            if not name.startswith("."):
+                continue
+            parts = name[1:].split(".")
+            if parts and parts[0].startswith("pi-proxy-"):
+                seen_proxies.add(parts[0])
+
+        for proxy_name in sorted(seen_proxies):
+            lock_file = lock_dir / f".{proxy_name}.lock"
+            clients_file = lock_dir / f".{proxy_name}.clients.json"
+
+            if not lock_file.exists() and not clients_file.exists():
+                continue
+
+            try:
+                with lock_file.open("a") as lf:
+                    try:
+                        fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError, OSError:
+                        continue
+
+                    live_clients = read_live_clients(clients_file)
+                    if not live_clients:
+                        if clients_file.exists():
+                            logger.info(f"Stopping orphaned proxy container {proxy_name}...")
+                            run_quiet(
+                                [runtime_bin, "rm", "-f", proxy_name],
+                                check=False,
+                                label=f"remove orphaned proxy container {proxy_name}",
+                                logger=logger,
+                            )
+                            project_hash = proxy_name.removeprefix("pi-proxy-")
+                            network_name = f"pi-net-{project_hash}"
+                            logger.info(f"Removing orphaned proxy network {network_name}...")
+                            run_quiet(
+                                [runtime_bin, "network", "rm", network_name],
+                                check=False,
+                                label=f"remove orphaned proxy network {network_name}",
+                                logger=logger,
+                            )
+                            clients_file.unlink(missing_ok=True)
+                            cleaned.append(proxy_name)
+                        lock_file.unlink(missing_ok=True)
+            except Exception as e:
+                logger.debug(f"Could not check/clean proxy lock {lock_file}: {e}")
+
+        with contextlib.suppress(OSError):
+            if lock_dir.exists() and not any(lock_dir.iterdir()):
+                lock_dir.rmdir()
+
+        return cleaned
+
     def _get_ref_count(self) -> int:
-        return get_ref_count(self.paths["clients_file"], self.paths["ref_count_file"])
+        return get_ref_count(self.paths["clients_file"])
 
     def _actually_start(self) -> None:
         # Pull secrets required by the mounted token_replacer config
@@ -885,8 +919,7 @@ class ContainerNetworkManager:
         return True
 
     def _cleanup_stale_refcount(self) -> None:
-        """Remove the stale refcount artifact so the next start() begins fresh."""
-        self.paths["ref_count_file"].unlink(missing_ok=True)
+        """Remove stale client artifacts so the next start() begins fresh."""
         self.paths["clients_file"].unlink(missing_ok=True)
 
     def _wait_for_proxy_health(self, timeout: int = 30) -> None:

@@ -42,6 +42,7 @@ IMAGE_TAG: str = os.environ.get("IMAGE_TAG", "pi-coding-agent:local")
 LLAMA_BIN: str | None = os.environ.get("LLAMA_BIN") or shutil.which("llama-server")
 MODELS_DIR: Path = REPO_ROOT / "llama-server" / "models"
 LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / "llama-server" / ".locks"
+PROXY_LOCK_DIR: Path = REPO_ROOT / "pi-coding-agent-proxy" / ".locks"
 ADMIN_PASSWORD: str = os.environ.get("ADMIN_PASSWORD", "")
 
 # Directory on the host where the proxy container's config files live.

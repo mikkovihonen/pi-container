@@ -195,7 +195,6 @@ class TestContainerNetworkManagerRefCount:
         mgr.paths = {
             "lock_dir": lock_dir,
             "ref_count_lock": lock_dir / ".network_manager.lock",
-            "ref_count_file": lock_dir / ".network_manager.refcount",
             "clients_file": lock_dir / ".network_manager.clients.json",
         }
         return mgr
@@ -204,15 +203,14 @@ class TestContainerNetworkManagerRefCount:
         mgr = self._make_manager(tmp_path)
         assert mgr._get_ref_count() == 0
 
-    def test_ref_count_reads_file(self, tmp_path):
-        mgr = self._make_manager(tmp_path)
-        mgr.paths["ref_count_file"].write_text("5\n")
-        assert mgr._get_ref_count() == 5
+    def test_ref_count_reads_clients_file(self, tmp_path):
+        import os
 
-    def test_ref_count_handles_invalid_content(self, tmp_path):
+        from util import write_clients
+
         mgr = self._make_manager(tmp_path)
-        mgr.paths["ref_count_file"].write_text("not_a_number\n")
-        assert mgr._get_ref_count() == 0
+        write_clients(mgr.paths["clients_file"], [{"pid": os.getpid(), "run_id": "r1"}])
+        assert mgr._get_ref_count() == 1
 
     def test_start_increment_and_stop_decrement(self, tmp_path):
         mgr = self._make_manager(tmp_path)
@@ -267,21 +265,22 @@ class TestContainerNetworkManagerRefCount:
         with patch("fcntl.flock"):
             mgr.stop()
 
-        # Ref count file and clients file should be removed
-        assert not mgr.paths["ref_count_file"].exists()
+        # Clients file should be removed
         assert not mgr.paths["clients_file"].exists()
 
-    def test_start_recovers_from_stale_refcount(self, tmp_path):
-        """When refcount > 0 but the proxy is unreachable, start must restart it."""
+    def test_start_recovers_from_stale_state(self, tmp_path):
+        """When clients exist but the proxy is unreachable, start must restart it."""
+        from util import write_clients
+
         mgr = self._make_manager(tmp_path)
         mgr.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
         mgr._actually_start = MagicMock()
         mgr._actually_stop = MagicMock()
 
-        # Pre-seed a stale refcount file (container is gone).
-        mgr.paths["ref_count_file"].write_text("2\n")
+        # Pre-seed a stale clients file (container is gone).
+        write_clients(mgr.paths["clients_file"], [{"pid": 999999, "run_id": "dead"}])
 
-        # _is_existing_proxy_healthy returns False → stale refcount detected.
+        # _is_existing_proxy_healthy returns False → stale detected.
         mgr._is_existing_proxy_healthy = MagicMock(return_value=False)
 
         with patch("fcntl.flock"):
@@ -291,9 +290,87 @@ class TestContainerNetworkManagerRefCount:
         # then _actually_start to bring the proxy up fresh.
         mgr._actually_stop.assert_called_once()
         mgr._actually_start.assert_called_once()
-        # A fresh refcount file is written (the stale value was replaced).
-        assert mgr.paths["ref_count_file"].exists()
-        assert int(mgr.paths["ref_count_file"].read_text().strip()) == 1
+        assert mgr.paths["clients_file"].exists()
+
+
+class TestCleanupOrphanedProxies:
+    def test_cleans_proxies_with_dead_clients(self, tmp_path):
+        from util import write_clients
+
+        lock_dir = tmp_path / ".locks"
+        lock_dir.mkdir(parents=True)
+        proxy_name = "pi-proxy-abcdef1234"
+        (lock_dir / f".{proxy_name}.lock").touch()
+        write_clients(lock_dir / f".{proxy_name}.clients.json", [{"pid": 88888}])
+
+        with (
+            patch("util.is_pid_alive", return_value=False),
+            patch("network.run_quiet") as mock_run_quiet,
+        ):
+            cleaned = ContainerNetworkManager.cleanup_orphaned_proxies("podman", lock_dir)
+
+        assert cleaned == [proxy_name]
+        assert mock_run_quiet.call_count == 2
+        # First call: rm -f proxy_name
+        assert mock_run_quiet.call_args_list[0][0][0] == ["podman", "rm", "-f", proxy_name]
+        # Second call: network rm pi-net-abcdef1234
+        assert mock_run_quiet.call_args_list[1][0][0] == ["podman", "network", "rm", "pi-net-abcdef1234"]
+        assert not (lock_dir / f".{proxy_name}.clients.json").exists()
+        assert not (lock_dir / f".{proxy_name}.lock").exists()
+        assert not lock_dir.exists()
+
+    def test_cleans_stale_lock_without_clients_file(self, tmp_path):
+        lock_dir = tmp_path / ".locks"
+        lock_dir.mkdir(parents=True)
+        proxy_name = "pi-proxy-abcdef1234"
+        lock_file = lock_dir / f".{proxy_name}.lock"
+        lock_file.touch()
+
+        with patch("network.run_quiet") as mock_run_quiet:
+            cleaned = ContainerNetworkManager.cleanup_orphaned_proxies("podman", lock_dir)
+
+        assert cleaned == []
+        mock_run_quiet.assert_not_called()
+        assert not lock_file.exists()
+        assert not lock_dir.exists()
+
+    def test_keeps_proxies_with_live_clients(self, tmp_path):
+        import os
+
+        from util import write_clients
+
+        lock_dir = tmp_path / ".locks"
+        lock_dir.mkdir(parents=True)
+        proxy_name = "pi-proxy-abcdef1234"
+        (lock_dir / f".{proxy_name}.lock").touch()
+        write_clients(lock_dir / f".{proxy_name}.clients.json", [{"pid": os.getpid()}])
+
+        with (
+            patch("util.is_pid_alive", return_value=True),
+            patch("network.run_quiet") as mock_run_quiet,
+        ):
+            cleaned = ContainerNetworkManager.cleanup_orphaned_proxies("podman", lock_dir)
+
+        assert cleaned == []
+        mock_run_quiet.assert_not_called()
+
+    def test_skips_when_lock_held_by_other_process(self, tmp_path):
+        import fcntl
+
+        lock_dir = tmp_path / ".locks"
+        lock_dir.mkdir(parents=True)
+        proxy_name = "pi-proxy-abcdef1234"
+        (lock_dir / f".{proxy_name}.lock").touch()
+
+        def mock_flock(fd, op):
+            if op & fcntl.LOCK_NB:
+                raise BlockingIOError("Locked")
+
+        with patch("fcntl.flock", side_effect=mock_flock), patch("network.run_quiet") as mock_run_quiet:
+            cleaned = ContainerNetworkManager.cleanup_orphaned_proxies("podman", lock_dir)
+
+        assert cleaned == []
+        mock_run_quiet.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -348,13 +425,13 @@ class TestPerProjectProxy:
             proxy_name=proxy_name,
         )
 
-    def test_refcount_files_keyed_by_proxy_name(self):
-        """Two projects' managers must not share refcount files."""
+    def test_client_and_lock_files_keyed_by_proxy_name(self):
+        """Two projects' managers must not share client or lock files."""
         a = self._make_manager("pi-proxy-aaaaaaaaaa")
         b = self._make_manager("pi-proxy-bbbbbbbbbb")
-        assert a.paths["ref_count_file"] != b.paths["ref_count_file"]
+        assert a.paths["clients_file"] != b.paths["clients_file"]
         assert a.paths["ref_count_lock"] != b.paths["ref_count_lock"]
-        assert "pi-proxy-aaaaaaaaaa" in a.paths["ref_count_file"].name
+        assert "pi-proxy-aaaaaaaaaa" in a.paths["clients_file"].name
         # Lock dir itself is shared (kept out of user workspaces).
         assert a.paths["lock_dir"] == b.paths["lock_dir"]
 

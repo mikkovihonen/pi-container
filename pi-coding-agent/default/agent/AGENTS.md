@@ -9,3 +9,5 @@ When trying to understand workspace structure, use `git ls-files --cached --othe
 CRITICAL: Do not use the `<|tool_call>call:` syntax when explaining your reasoning or plan. Only use it at the exact moment you intend to execute a tool.
 
 All generated text must follow ASD-STE100 standard.
+
+When writing or editing Markdown documents, indent all nested list items by four spaces (multiples of four spaces for deeper levels) as required by Zensical / Python-Markdown.

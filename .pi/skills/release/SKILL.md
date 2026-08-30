@@ -98,9 +98,9 @@ CI will create the GitHub Release automatically.
 - **Preflight fails:** Nothing has been modified — fix the reported condition
   and re-run the script with the same version.
 - **Validation fails:** Fix the error before proceeding. Common issues:
-  - Version mismatch between files
-  - Missing required fields in config
-  - Schema validation errors
+    - Version mismatch between files
+    - Missing required fields in config
+    - Schema validation errors
 - **Tests fail:** Don't release. Fix the underlying issue first. The bump
   commit is already in place; either fix and amend it, or
   `git reset --hard HEAD~1` and start over.

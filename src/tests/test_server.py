@@ -125,16 +125,6 @@ class TestServerRefCount:
         write_clients(s.paths["clients_file"], [{"pid": os.getpid(), "run_id": "r1"}])
         assert s._get_current_ref_count() == 1
 
-    def test_ref_count_reads_legacy_file(self, tmp_path):
-        s = self._make_server(tmp_path)
-        s.paths["ref_count_file"].write_text("3\n")
-        assert s._get_current_ref_count() == 3
-
-    def test_ref_count_handles_invalid(self, tmp_path):
-        s = self._make_server(tmp_path)
-        s.paths["ref_count_file"].write_text("garbage\n")
-        assert s._get_current_ref_count() == 0
-
 
 # ---------------------------------------------------------------------------
 # ServerIsExistingServerHealthy
@@ -333,7 +323,7 @@ class TestServerStop:
             s.stop()
         s._cleanup.assert_not_called()
 
-    def test_no_cleanup_when_no_refcount_file(self, tmp_path):
+    def test_no_cleanup_when_no_clients_file(self, tmp_path):
         s = self._make_server(tmp_path)
         s._cleanup = MagicMock()
 
@@ -367,6 +357,22 @@ class TestCleanupOrphanedServers:
         assert cleaned == ["instance-1"]
         mock_stop.assert_called_once()
         assert mock_stop.call_args[0] == (99999, "orphaned llama-server instance-1")
+        assert not instance_dir.exists()
+        assert not lock_dir.exists()
+
+    def test_cleans_stale_lock_without_pid_or_clients(self, tmp_path):
+        lock_dir = tmp_path / "locks"
+        instance_dir = lock_dir / "instance-1"
+        instance_dir.mkdir(parents=True)
+        (instance_dir / ".llama_server_refcount.lock").touch()
+
+        with patch("server.stop_process_group") as mock_stop:
+            cleaned = Server.cleanup_orphaned_servers(lock_dir)
+
+        assert cleaned == []
+        mock_stop.assert_not_called()
+        assert not instance_dir.exists()
+        assert not lock_dir.exists()
 
     def test_keeps_instance_with_live_clients(self, tmp_path):
         import os

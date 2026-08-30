@@ -239,10 +239,10 @@ ENV TOKEN_REPLACER_CONFIG_PATH=/home/mitmproxy/config/token_replacer.yaml
 #### Troubleshooting
 
 - If the addon does not load or has no effect, check the mitmproxy logs. Common issues include:
-  - **No `addons = [addon]` list** — the script loads (config parses) but hooks never fire.
-  - **Wrong hook name** — hooks must be `request` / `response`, not `on_request` / `on_response`.
-  - **Matching on `flow.request.host`** — use `pretty_host`; in transparent mode `host` is the destination IP, so hostname rules never match.
-  - Incorrect script path (verify the file exists in the container).
-  - YAML syntax errors in the config file.
-  - Python import errors (ensure `pyyaml` is installed in the mitmproxy environment).
-  - Script file not readable by the `mitmproxy` user (COPY preserves host file mode; `chmod a+r` in the image if needed).
+    - **No `addons = [addon]` list** — the script loads (config parses) but hooks never fire.
+    - **Wrong hook name** — hooks must be `request` / `response`, not `on_request` / `on_response`.
+    - **Matching on `flow.request.host`** — use `pretty_host`; in transparent mode `host` is the destination IP, so hostname rules never match.
+    - Incorrect script path (verify the file exists in the container).
+    - YAML syntax errors in the config file.
+    - Python import errors (ensure `pyyaml` is installed in the mitmproxy environment).
+    - Script file not readable by the `mitmproxy` user (COPY preserves host file mode; `chmod a+r` in the image if needed).

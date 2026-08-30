@@ -92,7 +92,11 @@ class TestLoadDotenv:
 
 class TestValidateEnvironment:
     def test_all_dependencies_present(self):
-        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
+        with (
+            patch("util.Path") as mock_path,
+            patch("util.shutil") as mock_shutil,
+            patch("util.subprocess.run") as mock_run,
+        ):
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -103,7 +107,9 @@ class TestValidateEnvironment:
                 "podman": "/usr/bin/podman",
             }.get(cmd)
 
-            mock_run.return_value = subprocess.CompletedProcess(args=["podman", "info"], returncode=0, stdout="", stderr="")
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["podman", "info"], returncode=0, stdout="", stderr=""
+            )
 
             result = validate_environment("/usr/bin/llama-server")
             assert result == "podman"
@@ -138,7 +144,11 @@ class TestValidateEnvironment:
 
     def test_socat_not_found_does_not_raise(self):
         """socat is no longer required (removed when Apple container support was dropped)."""
-        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
+        with (
+            patch("util.Path") as mock_path,
+            patch("util.shutil") as mock_shutil,
+            patch("util.subprocess.run") as mock_run,
+        ):
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -148,7 +158,9 @@ class TestValidateEnvironment:
                 "podman": "/usr/bin/podman",
             }.get(cmd)
 
-            mock_run.return_value = subprocess.CompletedProcess(args=["podman", "info"], returncode=0, stdout="", stderr="")
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["podman", "info"], returncode=0, stdout="", stderr=""
+            )
 
             # Should succeed - socat is no longer required
             result = validate_environment("/usr/bin/llama-server")
@@ -184,7 +196,11 @@ class TestValidateEnvironment:
                 validate_environment("/usr/bin/llama-server")
 
     def test_returns_podman_when_only_podman(self):
-        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
+        with (
+            patch("util.Path") as mock_path,
+            patch("util.shutil") as mock_shutil,
+            patch("util.subprocess.run") as mock_run,
+        ):
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -195,13 +211,19 @@ class TestValidateEnvironment:
                 "podman": "/usr/bin/podman",
             }.get(cmd)
 
-            mock_run.return_value = subprocess.CompletedProcess(args=["podman", "info"], returncode=0, stdout="", stderr="")
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["podman", "info"], returncode=0, stdout="", stderr=""
+            )
 
             assert validate_environment("/usr/bin/llama-server") == "podman"
 
     def test_podman_auto_detected(self):
         """Podman is auto-detected when no env var is set."""
-        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
+        with (
+            patch("util.Path") as mock_path,
+            patch("util.shutil") as mock_shutil,
+            patch("util.subprocess.run") as mock_run,
+        ):
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -211,13 +233,19 @@ class TestValidateEnvironment:
                 "podman": "/usr/bin/podman",
             }.get(cmd)
 
-            mock_run.return_value = subprocess.CompletedProcess(args=["podman", "info"], returncode=0, stdout="", stderr="")
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["podman", "info"], returncode=0, stdout="", stderr=""
+            )
 
             assert validate_environment("/usr/bin/llama-server") == "podman"
 
     def test_podman_info_failure_raises(self):
         """When podman info returns non-zero exit code, EnvironmentError is raised with guidance."""
-        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
+        with (
+            patch("util.Path") as mock_path,
+            patch("util.shutil") as mock_shutil,
+            patch("util.subprocess.run") as mock_run,
+        ):
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -243,7 +271,11 @@ class TestValidateEnvironment:
 
     def test_podman_info_timeout_raises(self):
         """When podman info times out, EnvironmentError is raised."""
-        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
+        with (
+            patch("util.Path") as mock_path,
+            patch("util.shutil") as mock_shutil,
+            patch("util.subprocess.run") as mock_run,
+        ):
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -260,7 +292,11 @@ class TestValidateEnvironment:
 
     def test_podman_info_exception_raises(self):
         """When executing podman info raises an OSError or other exception, EnvironmentError is raised."""
-        with patch("util.Path") as mock_path, patch("util.shutil") as mock_shutil, patch("util.subprocess.run") as mock_run:
+        with (
+            patch("util.Path") as mock_path,
+            patch("util.shutil") as mock_shutil,
+            patch("util.subprocess.run") as mock_run,
+        ):
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
             mock_path.return_value = mock_path_instance
@@ -410,31 +446,207 @@ class TestGetRefCount:
         from util import get_ref_count, write_clients
 
         clients_file = tmp_path / "clients.json"
-        ref_count_file = tmp_path / "ref_count"
         write_clients(clients_file, [{"pid": os.getpid(), "run_id": "r1"}])
-        ref_count_file.write_text("5")
+        assert get_ref_count(clients_file) == 1
 
-        # Live clients take priority
-        assert get_ref_count(clients_file, ref_count_file) == 1
-
-    def test_get_ref_count_fallback_to_file(self, tmp_path):
+    def test_get_ref_count_nonexistent_file(self, tmp_path):
         from util import get_ref_count
 
         clients_file = tmp_path / "clients.json"
-        ref_count_file = tmp_path / "ref_count"
-        ref_count_file.write_text("3")
+        assert get_ref_count(clients_file) == 0
 
-        assert get_ref_count(clients_file, ref_count_file) == 3
-
-    def test_get_ref_count_corrupted_or_missing_file(self, tmp_path):
-        from util import get_ref_count
+    def test_get_ref_count_dead_clients(self, tmp_path):
+        from util import get_ref_count, write_clients
 
         clients_file = tmp_path / "clients.json"
-        ref_count_file = tmp_path / "ref_count"
-        assert get_ref_count(clients_file, ref_count_file) == 0
+        write_clients(clients_file, [{"pid": 999999, "run_id": "dead"}])
 
-        ref_count_file.write_text("not_a_number")
-        assert get_ref_count(clients_file, ref_count_file) == 0
+        with patch("util.is_pid_alive", return_value=False):
+            assert get_ref_count(clients_file) == 0
+
+
+# ---------------------------------------------------------------------------
+# File Lock & RefCount Lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestFileLock:
+    def test_file_lock_acquires_and_releases(self, tmp_path):
+        from util import file_lock
+
+        lock_file = tmp_path / "test.lock"
+        with file_lock(lock_file) as f:
+            assert lock_file.exists()
+            assert not f.closed
+
+    def test_file_lock_timeout(self, tmp_path):
+        import fcntl
+        from unittest.mock import patch
+
+        from util import file_lock
+
+        lock_file = tmp_path / "test.lock"
+
+        def mock_flock(fd, op):
+            if op & fcntl.LOCK_NB:
+                raise BlockingIOError("Locked")
+
+        with (
+            patch("fcntl.flock", side_effect=mock_flock),
+            pytest.raises(TimeoutError, match="Timed out after 0.05s"),
+            file_lock(lock_file, timeout=0.05, poll_interval=0.01),
+        ):
+            pass
+
+    def test_file_lock_logs_waiting(self, tmp_path):
+        import fcntl
+        from unittest.mock import MagicMock, patch
+
+        from util import file_lock
+
+        lock_file = tmp_path / "test.lock"
+        mock_logger = MagicMock()
+        call_count = 0
+
+        def mock_flock(fd, op):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3 and (op & fcntl.LOCK_NB):
+                raise BlockingIOError("Locked")
+
+        with (
+            patch("fcntl.flock", side_effect=mock_flock),
+            patch("time.time", side_effect=[0.0, 0.5, 1.5, 1.6, 1.7]),
+            file_lock(lock_file, timeout=5.0, poll_interval=0.01, logger=mock_logger, label="test-res"),
+        ):
+            pass
+
+        mock_logger.info.assert_called_once()
+        assert "Waiting for lock" in mock_logger.info.call_args[0][0]
+
+
+class TestRefCountLifecycle:
+    def test_start_refcounted_resource_attach(self, tmp_path):
+        from util import read_live_clients, start_refcounted_resource, write_clients
+
+        lock_file = tmp_path / "res.lock"
+        clients_file = tmp_path / "res.clients.json"
+
+        # Pre-seed existing live client
+        write_clients(clients_file, [{"pid": 111, "name": "c1"}])
+
+        start_mock = MagicMock()
+        stop_mock = MagicMock()
+        attach_mock = MagicMock()
+
+        with patch("util.is_pid_alive", return_value=True):
+            start_refcounted_resource(
+                lock_file=lock_file,
+                clients_file=clients_file,
+                client_info={"pid": 222, "name": "c2"},
+                is_healthy_fn=lambda: True,
+                start_fn=start_mock,
+                stop_fn=stop_mock,
+                on_attach_fn=attach_mock,
+            )
+            clients = read_live_clients(clients_file)
+
+        start_mock.assert_not_called()
+        stop_mock.assert_not_called()
+        attach_mock.assert_called_once_with(2)
+        assert len(clients) == 2
+
+    def test_start_refcounted_resource_recovers_unhealthy(self, tmp_path):
+        from util import read_live_clients, start_refcounted_resource, write_clients
+
+        lock_file = tmp_path / "res.lock"
+        clients_file = tmp_path / "res.clients.json"
+
+        write_clients(clients_file, [{"pid": 111, "name": "c1"}])
+
+        start_mock = MagicMock()
+        stop_mock = MagicMock()
+
+        with patch("util.is_pid_alive", return_value=True):
+            start_refcounted_resource(
+                lock_file=lock_file,
+                clients_file=clients_file,
+                client_info={"pid": 222, "name": "c2"},
+                is_healthy_fn=lambda: False,
+                start_fn=start_mock,
+                stop_fn=stop_mock,
+            )
+            clients = read_live_clients(clients_file)
+
+        stop_mock.assert_called_once()
+        start_mock.assert_called_once()
+        assert len(clients) == 1
+        assert clients[0]["pid"] == 222
+
+    def test_start_refcounted_resource_adopts_healthy(self, tmp_path):
+        from util import read_live_clients, start_refcounted_resource
+
+        lock_file = tmp_path / "res.lock"
+        clients_file = tmp_path / "res.clients.json"
+
+        start_mock = MagicMock()
+        stop_mock = MagicMock()
+        adopt_mock = MagicMock()
+
+        start_refcounted_resource(
+            lock_file=lock_file,
+            clients_file=clients_file,
+            client_info={"pid": 222, "name": "c2"},
+            is_healthy_fn=lambda: True,
+            start_fn=start_mock,
+            stop_fn=stop_mock,
+            on_adopt_fn=adopt_mock,
+        )
+
+        adopt_mock.assert_called_once()
+        start_mock.assert_not_called()
+        stop_mock.assert_not_called()
+        with patch("util.is_pid_alive", return_value=True):
+            clients = read_live_clients(clients_file)
+        assert len(clients) == 1
+
+    def test_stop_refcounted_resource(self, tmp_path):
+        from util import stop_refcounted_resource, write_clients
+
+        lock_file = tmp_path / "res.lock"
+        clients_file = tmp_path / "res.clients.json"
+
+        write_clients(clients_file, [{"pid": 111, "name": "c1"}, {"pid": 222, "name": "c2"}])
+
+        stop_mock = MagicMock()
+        full_cleanup_mock = MagicMock()
+
+        with patch("util.is_pid_alive", return_value=True):
+            # First stop: 1 client remains
+            stopped = stop_refcounted_resource(
+                lock_file=lock_file,
+                clients_file=clients_file,
+                pid=111,
+                stop_fn=stop_mock,
+                full_cleanup_fn=full_cleanup_mock,
+            )
+            assert stopped is False
+            stop_mock.assert_not_called()
+            full_cleanup_mock.assert_not_called()
+
+            # Second stop: last client exits -> full cleanup
+            stopped = stop_refcounted_resource(
+                lock_file=lock_file,
+                clients_file=clients_file,
+                pid=222,
+                stop_fn=stop_mock,
+                full_cleanup_fn=full_cleanup_mock,
+            )
+            assert stopped is True
+            stop_mock.assert_called_once()
+            full_cleanup_mock.assert_called_once()
+            assert not clients_file.exists()
+            assert not lock_file.exists()
 
 
 # ---------------------------------------------------------------------------

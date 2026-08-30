@@ -436,3 +436,16 @@ class TestSweepOrphanedServers:
         res = containers.sweep_orphaned_servers(tmp_path)
         assert res == ["cleaned-instance"]
         assert called_with == [tmp_path]
+
+
+class TestSweepOrphanedProxies:
+    def test_delegates_to_network_manager_cleanup(self, monkeypatch, tmp_path):
+        called_with = []
+        monkeypatch.setattr(
+            containers.ContainerNetworkManager,
+            "cleanup_orphaned_proxies",
+            lambda runtime, lock_dir: called_with.append((runtime, lock_dir)) or ["pi-proxy-1234567890"],
+        )
+        res = containers.sweep_orphaned_proxies("podman", tmp_path)
+        assert res == ["pi-proxy-1234567890"]
+        assert called_with == [("podman", tmp_path)]

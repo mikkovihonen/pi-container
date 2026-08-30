@@ -373,7 +373,7 @@ drift apart.
 │   └── .locks/                       # Process lock files (gitignored)
 │       └── local-gemma/              # Per-model lock directory
 │           ├── .llama_server.pid
-│           └── .llama_server_refcount
+│           └── .llama_server_clients.json
 │
 ├── pi-coding-agent/setups/           # Model-specific setup directories
 │   └── gemma-4-26b-a4b-it-qat-GGUF/  # Notes and config for specific model setups

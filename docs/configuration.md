@@ -301,8 +301,8 @@ Any missing section falls back to a safe default (values above). The system trea
 The `proxy` section tunes the `pi-coding-agent-proxy` container:
 
 - `proxy.expose_ui` controls where the proxy's mitmweb UI (on its auto-assigned port) is published:
-  - `localhost` (default) — bound to `127.0.0.1` only. Not reachable from other machines.
-  - `lan` — bound to `0.0.0.0`. Reachable across the network (still password-gated by `ADMIN_PASSWORD`).
+    - `localhost` (default) — bound to `127.0.0.1` only. Not reachable from other machines.
+    - `lan` — bound to `0.0.0.0`. Reachable across the network (still password-gated by `ADMIN_PASSWORD`).
 - `proxy.max_view_flows` (integer, default `2000`) sets the maximum number of allowed flows retained in `mitmweb`'s in-memory view to prevent container memory exhaustion and OOM crashes during long sessions. **Blocked/denied flows are always retained** so rejections remain inspectable. Set to `null` or `0` for unlimited in-memory retention.
 - `proxy.stream_large_bodies` (string, default `"10m"`) enables direct body streaming for transfers larger than this threshold, bypassing full RAM buffering in mitmproxy. Set to `null`, `"none"`, or `"off"` to disable.
 

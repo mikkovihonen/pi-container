@@ -19,6 +19,7 @@ docs = [
 ]
 dev = [
     "pre-commit>=4.6.1",
+    "pymarkdownlnt>=0.9.34",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.1",
