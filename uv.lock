@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 
 [manifest]
@@ -431,11 +431,11 @@ wheels = [
 
 [[package]]
 name = "filelock"
-version = "3.32.2"
+version = "4.2.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f6/57/3ba6e6cb097f85b855b00163d169f35365f44277df044dcf96d55b8f62a3/filelock-3.32.2.tar.gz", hash = "sha256:c33351e1f49cae33414acbc6d56784e6ecee82514ec90795da1161fc4836b5b8", size = 217172, upload-time = "2026-07-29T22:46:04.895Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d5/98/771d8ca889f220d7d7e352addf500666368f0fd081c6080a83767580c6e4/filelock-4.2.1.tar.gz", hash = "sha256:c4c937ccac2a813cee448e662a56366cfb374c0f8702e75f295c412cc1c5d5a3", size = 650997, upload-time = "2026-10-17T16:48:14.435Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c1/e8/72f8cef9fdfeffe06213fe8508039396ee48daa0e3259457ed766173bfd6/filelock-3.32.2-py3-none-any.whl", hash = "sha256:87dd94cf281e586d135fa51132b8e3d9a598b316e90377a288663c9321036c82", size = 98830, upload-time = "2026-07-29T22:46:03.52Z" },
+    { url = "https://files.pythonhosted.org/packages/28/00/db89d339bc4ecdc8087fa7b8607ba22ffc27bf96286f340c9620bea428b3/filelock-4.2.1-py3-none-any.whl", hash = "sha256:7be2662e9e826b9bba28afc0f843a123280d799a2ea44bb5d35ccec67905ae44", size = 162455, upload-time = "2026-10-17T16:48:12.937Z" },
 ]
 
 [[package]]
@@ -824,6 +824,7 @@ wheels = [
 name = "pi-container"
 version = "0.5.6"
 source = { virtual = "." }
+default-groups = ["dev", "proxy", "src"]
 dependencies = [
     { name = "pyyaml" },
 ]
@@ -1110,14 +1111,14 @@ wheels = [
 
 [[package]]
 name = "python-discovery"
-version = "1.5.1"
+version = "1.6.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/04/b7/1581a8103855c43567776aa34135e5ec3c597346c23bfd10c7eb5e0b10a4/python_discovery-1.5.1.tar.gz", hash = "sha256:e2ea8b884cd1701f386eda8cf327b87743f1dc21b7f784470799537d95635384", size = 77200, upload-time = "2026-07-31T22:06:02.48Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/0b/908da9ef8a14b600fc188eee8d63ede071996114613721153f6fc9ea3cd5/python_discovery-1.6.7.tar.gz", hash = "sha256:7f7c28568c8ec3d988d8bddbdbec8e65f08e8767e52f734e18b8b498549b9b70", size = 117807, upload-time = "2026-10-28T06:24:21.878Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6a/07/a89b539750a159d5101c4eb9fc84e2961f65cefbd5e0b7440b284471c0b0/python_discovery-1.5.1-py3-none-any.whl", hash = "sha256:ac07f44cade589d954e9d6a1e1468539fdddd2cf676beb51da73e0f156b7c932", size = 35752, upload-time = "2026-07-31T22:06:01.116Z" },
+    { url = "https://files.pythonhosted.org/packages/57/e4/1c7c388e874222c28afb92fe3ebfeebe55555276523ba7aab0a82a10b2b5/python_discovery-1.6.7-py3-none-any.whl", hash = "sha256:5422f67e5f533bb02d7b73de1c422ed74037536fd869e05156c07565926ec68e", size = 39156, upload-time = "2026-10-28T06:24:20.462Z" },
 ]
 
 [[package]]
@@ -1299,17 +1300,18 @@ wheels = [
 
 [[package]]
 name = "virtualenv"
-version = "21.7.1"
+version = "21.15.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "distlib" },
     { name = "filelock" },
+    { name = "packaging" },
     { name = "platformdirs" },
     { name = "python-discovery" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ea/fa/18004e5cb15541ad2a68ff219c755233b012b12d4ec8663d06a258082bec/virtualenv-21.7.1.tar.gz", hash = "sha256:d0dbfaa5483487baea28d7210ef8d24c9d1bd0f10f449eeb215568825a9b334e", size = 5525237, upload-time = "2026-07-30T15:40:36.36Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b2/24/20282bc8e69ff8dee680dc2b95e9dc81fa7e7894b14c1a8d06330e97fef7/virtualenv-21.15.1.tar.gz", hash = "sha256:e79c90b8f601701599c25905e02839924fede2c798d52325670d24fbdaab74ee", size = 5517048, upload-time = "2026-10-28T01:12:50.919Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4b/a7/ded126c19495158a05c7202b3389139839d4cf78d622d453867778e0f7a8/virtualenv-21.7.1-py3-none-any.whl", hash = "sha256:6394973f990536e34c05157179146c020284c42fe01da1dfeb0ba16c345280d9", size = 5504576, upload-time = "2026-07-30T15:40:34.512Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/23/cdab19d3a9da42ca0938081e163e25f81e610141800ead743ba1ee881f0e/virtualenv-21.15.1-py3-none-any.whl", hash = "sha256:0d14a991689c67600316880eadc0a37b7690cb632e3b4ac67e2bc05b2b2e24a4", size = 5558848, upload-time = "2026-10-28T01:12:48.605Z" },
 ]
 
 [[package]]
@@ -1365,7 +1367,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/94/e5/389cdd675cfb847d49bd8901944b06abae7dde1385767738f159ea11f8c3/zensical-0.0.66-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:edd3be5e9d6cceaccaed2fdc53d4e02d02db004706e49389cbce6f96c92c4e4d", size = 15425564, upload-time = "2026-09-28T09:48:07.374Z" },
     { url = "https://files.pythonhosted.org/packages/0d/8d/8ad9cff38c92a728466666654f3063ebbcad54ffc252d4d35a58bf890007/zensical-0.0.66-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:fa2aca4e1d3ecafd2444904183894bf5c4afb2d3541bb3ffc88f324b24d93444", size = 15097798, upload-time = "2026-09-28T09:48:09.836Z" },
     { url = "https://files.pythonhosted.org/packages/fa/20/3d95d7fcd29d4b662615ac055c1bc35b13bd9adf5243d95f7996b082a4ba/zensical-0.0.66-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8cdcd5482450defb3da9fa7538ae87c849354c72ab4c3d45f18cbd3762788a47", size = 15388458, upload-time = "2026-09-28T09:48:12.377Z" },
-    { url = "https://files.pythonhosted.org/packages/7b/44/27cb13e5690233b0b01368d25a0f07efe60f84ca076fd897b6a598ea224b/zensical-0.0.66-cp310-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:f2976572c867859a65f2ce73af017425417109e64aa081b2faa274ca28d06fcf", size = 15461069, upload-time = "2026-09-28T09:48:16.124Z" },
     { url = "https://files.pythonhosted.org/packages/20/65/5c7aef820f0f775932d61d0f2c13a88066daacb82eea9c06e1cab1f0f1c5/zensical-0.0.66-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e2c672393e4de4abde78c0f06a975eeef00d8d3d0fc19541d2a9e4155776be41", size = 15733416, upload-time = "2026-09-28T09:48:18.725Z" },
     { url = "https://files.pythonhosted.org/packages/06/48/93e35db88ce5a3d8e453d9b87e1b9c72ddca49b87fb614defbac9b888ec1/zensical-0.0.66-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:04911b79ad4b468a3234b16d3b0fcb6fb7d61dd4f5ea34cb2a8cc1a240cc1b39", size = 15564602, upload-time = "2026-09-28T09:48:21.407Z" },
     { url = "https://files.pythonhosted.org/packages/48/dd/4bf42e4135b0651bd43174458d94471a482dbdcd87f6b2afc199cae2f01c/zensical-0.0.66-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:9fb539cb7f3153c050b412d917330d1d5f86ba4e997bca59479d22ef98a5273d", size = 15967451, upload-time = "2026-09-28T09:48:23.665Z" },
