@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.14"
 
 [manifest]
@@ -890,9 +890,8 @@ wheels = [
 
 [[package]]
 name = "pi-container"
-version = "0.5.6"
+version = "0.6.0"
 source = { virtual = "." }
-default-groups = ["dev", "proxy", "src"]
 dependencies = [
     { name = "keyring" },
     { name = "pyyaml" },

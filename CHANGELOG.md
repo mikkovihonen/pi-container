@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.6.0] - 2026-09-05
+
 ### Added
 - **Opper AI cloud gateway and user keyring secret integration.** Added support for external API-key model gateways (such as [Opper AI](https://platform.opper.ai/)) via `type: api-key` in `GatewayAuth`, with seamless secret resolution from the host environment or OS user keyring (macOS Keychain, Linux GNOME Keyring / Secret Service, Windows Credential Manager). Added `src/secret_store.py` for cross-platform keyring management, gateway hostname allowlist preflight warnings in `src/containers.py`, and ready-made setup templates in `docs/setups/opper/`.
 - **Decoupled global model registry (`~/.config/pi-container/models/`) and gateway support.** Decoupled `llama-server` and Hugging Face model definitions from `.pi-container/agent/models.json` into a global registry under `~/.config/pi-container/models/<id>.yaml`. Relocated runtime weights, locks, and logs to `~/.cache/pi-container/`. Added support for external model gateways (e.g. `https://gw.nitor.app`) with interactive browser OpenID Connect authentication (PKCE) and secure token caching in `~/.cache/pi-container/tokens/`. Default template seeding updated to Qwen3.6 and retired Ornith.
