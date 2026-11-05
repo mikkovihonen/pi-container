@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.6.1] - 2026-11-05
+
 ### Added
 - **Automatic proxy container rebuild on definition changes.** Added `compute_proxy_image_hash()` and `proxy_image_is_current()` to `src/images.py`, hashing `entrypoint.sh`, `Containerfile`, and proxy addons. Added `ensure_proxy_image()` in `src/run.py` to automatically rebuild the proxy container before startup when proxy definition files change. Ensures the shared agent image is also refreshed when shared base images are newer.
 
