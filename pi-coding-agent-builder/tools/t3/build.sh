@@ -33,3 +33,4 @@ mkdir -p "${PI_STAGE}/usr/local/bin"
 ln -sf ../lib/t3/t3 "${PI_STAGE}/usr/local/bin/t3"
 
 stage_record "t3" "${T3_VERSION}"
+

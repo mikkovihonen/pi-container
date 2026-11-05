@@ -42,7 +42,8 @@ proxy:
 # By default, only the core baseline (Python 3.14, Node 26, Podman 6, Netavark)
 # is included. Add extra toolchains here (e.g. "go", "rust") to include them:
 tools:
-  include: []
+  include:
+    - "t3"
 
 # Extra agent-container env vars / bind mounts (absolute host paths).
 agent:
