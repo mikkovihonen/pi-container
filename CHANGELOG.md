@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+- **On-demand source-built toolchains with declarative inclusion.** Added `tools.include` to `config.yaml` and `src/config_schema.py`, supporting declarative selection of 16 source-built toolchains: compilers and linkers (`go`, `rust`, `mold`), search and AST tools (`ripgrep`, `fd`, `ast-grep`, `tree-sitter-cli`, `colgrep`), vector storage (`qdrant`, `sqlite-vec`), language servers (`rust-analyzer`, `gopls`, `clangd`, `zls`), and VCS and language runtimes (`git`, `ruby`). Added dedicated per-tool `build.sh` recipes under `pi-coding-agent-builder/tools/`, build-context mounts in `pi-coding-agent/Containerfile`, hash tracking and on-demand building in `src/images.py` and `src/run.py`, and a full test suite in `src/tests/test_toolchains.py`.
+- **Toolchain-upgrade maintenance skill.** Added `.pi/skills/upgrade-toolchains/SKILL.md` and supporting scripts (`check_upgrades.py`, upstream resolvers for GitHub releases, GitHub git tags, and PyPI) to automate auditing and upgrading of all source-compiled tools and runtimes in the builder image.
+
+### Changed
+- **Separated Rust and Go into dedicated builder scripts and stages.** Extracted `build-go.sh` and `build-rust.sh` from `common.sh` in `pi-coding-agent-builder/`, giving each toolchain its own build script and Containerfile stage. Updated `build-network.sh`, `build-node.sh`, and `build-podman.sh` accordingly.
+- **Upgraded all 24 source-built tools to latest upstream versions.** Key upgrades: `mold` v2.36.0 → v3.0.0, `clangd` llvmorg-19.1.7 → llvmorg-23.1.5, `rust-analyzer` 2025-02-24 → 2026-11-02, `ast-grep` 0.38.6 → 0.51.1, `ripgrep` 14.1.1 → 15.2.0, `tree-sitter-cli` v0.25.3 → v0.27.1, `rust` 1.97.1 → 1.99.1, `go` 1.26.5 → 1.27.3, `node` 26.6.0 → 26.13.0, `uv` 0.11.30 → 0.13.7, `qdrant` v1.13.4 → v1.20.0, `gopls` v0.18.1 → v0.24.0, `zls` 0.14.0 → 0.17.0, `git` 2.48.1 → 2.56.0, `ruby` 3.4.2 → 3.4.12, `podman` v6.0.2 → v6.1.4.
+- **Removed redundant `dir` field from model configs and definitions.** Dropped the `dir` field from `schema_common.py`, model YAML definitions, and all call sites in `src/models.py`, `src/registry.py`, `src/server.py`, and related tests.
+- **Removed dead duplicate definition loader from registry and enforced strict YAML.** Deleted the unused secondary loader in `src/registry.py` and added regression tests in `src/tests/test_registry.py`.
+- **Dependency update.** Bumped `h2` 4.3.0 → 4.4.1.
+
+### Fixed
+- **Added toolchain upstream URLs to proxy allowlist.** Added all tool upstream download URLs to `.pi-container/allowlist.yaml` and `pi-coding-agent/default/allowlist.yaml` so the upgrade skill and builder can reach upstream sources through the proxy.
+- **Corrected `test_main_with_unknown_tool` to use `SystemExit` side effect.** The previous `MagicMock` let execution continue after the first `sys.exit(1)` call, triggering a second exit from the `CalledProcessError` handler. Changed to `side_effect=SystemExit` to stop execution on the first exit call.
+
 ## [0.6.1] - 2026-11-05
 
 ### Added
