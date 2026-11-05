@@ -283,6 +283,7 @@ def unavailable_host_ports(publish: list[tuple[int, int]], expose: str) -> list[
     taken: list[int] = []
     for host_port, _ in publish:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 probe.bind((host, host_port))
             except OSError:

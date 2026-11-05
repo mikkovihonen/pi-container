@@ -46,3 +46,4 @@ chmod 0755 "${PI_STAGE}/usr/local/bin/cafe"
 
 "${PI_STAGE}/usr/local/bin/cafe" --version || true
 stage_record "cafe" "${CAFE_VERSION}"
+

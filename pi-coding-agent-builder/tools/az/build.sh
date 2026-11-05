@@ -36,3 +36,4 @@ chmod 0755 "${PI_STAGE}/usr/local/bin/az"
 
 AZURE_EXTENSION_SYS_DIR="${ext_sys_dir}" "${az_dir}/bin/python" -m azure.cli version
 stage_record "az" "${AZ_VERSION}"
+

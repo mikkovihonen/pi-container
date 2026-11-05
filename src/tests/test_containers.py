@@ -190,6 +190,35 @@ class TestUnavailableHostPorts:
         finally:
             sock.close()
 
+    def test_probe_sets_so_reuseaddr(self, monkeypatch):
+        import socket
+
+        opts = []
+        orig_socket = socket.socket
+
+        class MockSocket:
+            def __init__(self, *args, **kwargs):
+                self._real = orig_socket(*args, **kwargs)
+
+            def setsockopt(self, level, optname, value):
+                opts.append((level, optname, value))
+                return self._real.setsockopt(level, optname, value)
+
+            def __getattr__(self, name):
+                return getattr(self._real, name)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self._real.close()
+
+        monkeypatch.setattr(socket, "socket", MockSocket)
+        port, s = self._bound("127.0.0.1")
+        s.close()
+        containers.unavailable_host_ports([(port, port)], "localhost")
+        assert (socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) in opts
+
 
 class TestPortHolders:
     """Attribution for a port conflict: which container is holding it."""

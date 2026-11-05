@@ -31,3 +31,4 @@ rm -f "/tmp/${glab_tarball}"
 
 "${PI_STAGE}/usr/local/bin/glab" --version
 stage_record "glab" "${GLAB_VERSION}"
+

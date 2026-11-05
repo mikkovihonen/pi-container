@@ -31,3 +31,4 @@ rm -f "/tmp/${gh_tarball}"
 
 "${PI_STAGE}/usr/local/bin/gh" --version
 stage_record "gh" "${GH_VERSION}"
+

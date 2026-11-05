@@ -44,6 +44,7 @@ proxy:
 tools:
   include:
     - "t3"
+    - "gh"
 
 # Extra agent-container env vars / bind mounts (absolute host paths).
 agent:
