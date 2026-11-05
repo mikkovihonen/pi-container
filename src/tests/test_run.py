@@ -258,3 +258,10 @@ class TestT3LaunchConfiguration:
         assert settings["providerInstances"]["codex"]["enabled"] is False
         assert settings["providerInstances"]["claudeAgent"]["enabled"] is False
         assert settings["textGenerationModelSelection"]["instanceId"] == "pi"
+
+    def test_t3_seed_settings_file(self):
+        script_file = run.REPO_ROOT / "pi-coding-agent" / "t3-seed-settings.cjs"
+        assert script_file.is_file()
+        content = script_file.read_text()
+        assert "providerInstances.pi" in content
+        assert 'driver: "pi", enabled: true' in content
