@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+- **Automatic proxy container rebuild on definition changes.** Added `compute_proxy_image_hash()` and `proxy_image_is_current()` to `src/images.py`, hashing `entrypoint.sh`, `Containerfile`, and proxy addons. Added `ensure_proxy_image()` in `src/run.py` to automatically rebuild the proxy container before startup when proxy definition files change. Ensures the shared agent image is also refreshed when shared base images are newer.
+
+### Fixed
+- **Isolated mitmweb port 8081 from the agent container on `eth1`.** Updated `pi-coding-agent-proxy/entrypoint.sh` to bind mitmweb only on the external interface, preventing the agent container from reaching the proxy admin UI. Added security tests in `src/tests/test_security.py`.
+- **Resolved build DNS timeouts and added `libzstd-dev` to the Python toolchain.** Added `_build_dns_args()` in `src/build.py` to pass `--dns 1.1.1.1` to container builds, resolving concurrent AAAA lookup hangs in Podman machine gvproxy on macOS. Added `libzstd-dev` to `pi-coding-agent-builder` and `pi-coding-agent` Containerfiles so Python 3.14 compiles the stdlib `_zstd` module required by mitmproxy 12.3.1.
+- **Tightened Opper allowlist configuration.** Removed an overly broad allowlist entry and simplified `token_replacer.yaml` for the Opper AI gateway setup.
+
+### Changed
+- **Dependency updates.** Bumped `mitmproxy` 12.2.3 → 12.3.1, `zensical` 0.0.66 → 0.0.74, `pre-commit` 4.6.2 → 4.7.0, `pymarkdownlnt` 0.9.40 → 0.9.41, `pytest` 9.1.1 → 9.2.0, `ruff` 0.16.9 → 0.17.3, `filelock` 3.32.2 → 4.2.1, `tornado` 6.5.8 → 6.6, `pyasn1` 0.6.4 → 0.6.5, `virtualenv` 21.7.1 → 21.14.13, `werkzeug` 3.1.8 → 3.1.9, `huggingface-hub` 1.31.0 → 2.1.1.
+
 ## [0.6.0] - 2026-09-05
 
 ### Added
