@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.6.4] - 2026-11-05
+
 ### Added
 - **Source control provider integration (`source_control`).** Added `src/source_control.py` with `read_source_control_config()` and `resolve_source_control_tokens()`. Tokens for GitHub, GitLab, Forgejo/Gitea, Azure DevOps, Bitbucket, and GitCafe are resolved exclusively from the OS keyring (service `"pi-container"`) or active host CLI sessions (`auto_detect_host_cli: true`). Host environment variables and `agent.env` are strictly rejected as credential stores. Configurable per-provider `keyring_var` (single name or fallback list) and `keyring_service`. Resolved tokens are injected into the container together with secondary alias variables (e.g. `GH_TOKEN` + `GITHUB_TOKEN`). Added `get_keyring_secret()` to `src/secret_store.py` for direct keyring lookup without environment fallback. Added `src/tests/test_source_control.py` and extended `src/tests/test_secret_store.py`.
 - **`git` configuration section.** Added `git.safe_directory` and `git.rewrite_ssh_to_https` to `config.yaml` and `src/schema_common.py`. `safe_directory: true` runs `git config --system --add safe.directory '*'` on startup to prevent UID-mismatch errors. `rewrite_ssh_to_https: true` adds system-level `url.insteadOf` rules to redirect SSH remotes for GitHub, GitLab, Codeberg, Bitbucket, and GitCafe to HTTPS so Git operations succeed through the proxy. Added `read_git_config()` to `src/network.py`, wired into `src/run.py`, and documented in `docs/configuration.md`. Added tests in `src/tests/test_network.py` and `src/tests/test_run.py`.

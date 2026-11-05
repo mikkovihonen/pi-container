@@ -884,7 +884,7 @@ wheels = [
 
 [[package]]
 name = "pi-container"
-version = "0.6.3"
+version = "0.6.4"
 source = { virtual = "." }
 default-groups = ["dev", "proxy", "src"]
 dependencies = [
