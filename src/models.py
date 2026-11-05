@@ -29,7 +29,6 @@ class ModelConfig:
     file_flag: str
     repo: str
     file: str
-    directory: Path
     additional_server_flags: list[Any]
     sha256: str | None = None
 
@@ -39,7 +38,6 @@ class ModelConfig:
             file_flag=data["fileFlag"],
             repo=data["repo"],
             file=data["file"],
-            directory=Path(data["dir"]),
             additional_server_flags=data.get("additionalServerFlags", []),
             sha256=data.get("sha256"),
         )
@@ -80,7 +78,7 @@ class Model:
         if isinstance(cached, str) and Path(cached).exists():
             return Path(cached)
 
-        return self.models_dir / self.config.directory / self.config.file
+        return self.models_dir / self.config.file
 
     def _verify_sha256(self) -> None:
         """Verify the downloaded model file against its expected SHA256 hash.

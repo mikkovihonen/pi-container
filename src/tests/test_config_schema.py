@@ -610,7 +610,6 @@ class TestModelDefinitionValidation:
                     "fileFlag": "--model",
                     "repo": "org/repo",
                     "file": "model.gguf",
-                    "dir": "model-dir",
                 }
             },
             "flags": ["--ctx-size", 4096],
@@ -649,14 +648,13 @@ class TestModelDefinitionValidation:
             "hfModels": {
                 "main": {
                     "fileFlag": "--model",
-                    # Missing: repo, file, dir
+                    # Missing: repo, file
                 }
             }
         }
         errors = validate_model_def_data(data, model_id="test")
         assert any("repo must be a non-empty string" in e for e in errors)
         assert any("file must be a non-empty string" in e for e in errors)
-        assert any("dir must be a non-empty string" in e for e in errors)
 
     def test_flags_invalid_item_type(self):
         from schema_common import validate_model_def_data
@@ -667,7 +665,6 @@ class TestModelDefinitionValidation:
                     "fileFlag": "--model",
                     "repo": "r",
                     "file": "f",
-                    "dir": "d",
                 }
             },
             "flags": ["--ctx-size", 4096, None],

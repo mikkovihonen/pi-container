@@ -31,7 +31,6 @@ class TestServerGetServerFlags:
                 "fileFlag": "--model",
                 "repo": "org/repo",
                 "file": "model.gguf",
-                "dir": "models",
                 "additionalServerFlags": ["--threads", "4"],
                 "sha256": None,
             }
@@ -205,7 +204,6 @@ class TestServerStartNewProcess:
                 "fileFlag": "--model",
                 "repo": "org/repo",
                 "file": "model.gguf",
-                "dir": "models",
                 "additionalServerFlags": [],
                 "sha256": None,
             }
@@ -458,7 +456,7 @@ class TestConfigFingerprint:
         assert a.instance_key != b.instance_key
 
     def test_model_file_change_separates(self, tmp_path):
-        base = {"fileFlag": "--model", "repo": "o/r", "dir": "d", "additionalServerFlags": [], "sha256": None}
+        base = {"fileFlag": "--model", "repo": "o/r", "additionalServerFlags": [], "sha256": None}
         a = self._server(
             tmp_path, ServerConfig(hf_models={"main": ModelConfig.from_dict({**base, "file": "a.gguf"})}, flags=[])
         )
@@ -478,7 +476,6 @@ class TestConfigFingerprint:
                 "fileFlag": "--model",
                 "repo": "o/r",
                 "file": "m.gguf",
-                "dir": "d",
                 "additionalServerFlags": [],
                 "sha256": None,
             }
@@ -500,7 +497,6 @@ class TestConfigFingerprint:
                 "fileFlag": "--model",
                 "repo": "o/r",
                 "file": "m.gguf",
-                "dir": "d",
                 "additionalServerFlags": [],
                 "sha256": None,
             }

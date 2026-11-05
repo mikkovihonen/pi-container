@@ -272,7 +272,7 @@ class TestExtractServerConfigs:
         models_dir = tmp_path / "models"
         models_dir.mkdir(parents=True)
         (models_dir / "ornith.yaml").write_text(
-            "id: ornith\nflags: []\nhfModels:\n  main:\n    fileFlag: '--model'\n    repo: 'r'\n    file: 'f'\n    dir: 'd'\n"
+            "id: ornith\nflags: []\nhfModels:\n  main:\n    fileFlag: '--model'\n    repo: 'r'\n    file: 'f'\n"
         )
         data = {
             "providers": {
@@ -292,10 +292,10 @@ class TestExtractServerConfigs:
         models_dir = tmp_path / "models"
         models_dir.mkdir(parents=True)
         (models_dir / "ornith.yaml").write_text(
-            "id: ornith\nflags: []\nhfModels:\n  main:\n    fileFlag: '--model'\n    repo: 'r'\n    file: 'f'\n    dir: 'd'\n"
+            "id: ornith\nflags: []\nhfModels:\n  main:\n    fileFlag: '--model'\n    repo: 'r'\n    file: 'f'\n"
         )
         (models_dir / "gemma.yaml").write_text(
-            "id: gemma\nflags: []\nhfModels:\n  main:\n    fileFlag: '--model'\n    repo: 'r'\n    file: 'f'\n    dir: 'd'\n"
+            "id: gemma\nflags: []\nhfModels:\n  main:\n    fileFlag: '--model'\n    repo: 'r'\n    file: 'f'\n"
         )
         data = {
             "providers": {

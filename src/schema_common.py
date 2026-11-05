@@ -303,7 +303,7 @@ def validate_model_def_data(data: dict, model_id: str = "") -> list[str]:
     else:
         if "main" not in hf_models:
             errors.append(f"model definition '{model_id}': hfModels.main is required")
-        required_fields = ("fileFlag", "repo", "file", "dir")
+        required_fields = ("fileFlag", "repo", "file")
         for m_name, m_cfg in hf_models.items():
             if not isinstance(m_cfg, dict):
                 errors.append(f"model definition '{model_id}': hfModels.{m_name} expected dict")

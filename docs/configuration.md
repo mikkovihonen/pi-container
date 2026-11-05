@@ -113,7 +113,6 @@ hfModels:
     fileFlag: "--model"
     repo: "unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
     file: "Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf"
-    dir: "Qwen3.6-35B-A3B-MTP-GGUF"
     additionalServerFlags:
       - "--spec-type"
       - "draft-mtp"
@@ -144,7 +143,6 @@ You must set each `hfModels` entry:
 | `fileFlag` | The llama-server flag name (e.g. `--model`, `--model-draft`, `--mmproj`). The system emits this flag with the model's resolved path when launching llama-server. |
 | `repo` | Hugging Face repository slug (e.g. `unsloth/gemma-4-26B-A4B-it-qat-GGUF`). |
 | `file` | Filename within the repository (e.g. `ornith-1.0-35b-Q6_K.gguf`). |
-| `dir` | Subdirectory under `llama-server/models/` where the system caches the file. Files from different repos use different dirs to avoid collisions. |
 | `additionalServerFlags` | Extra flags appended after this model's `fileFlag` and path on the llama-server command line. Use this for per-model options like speculative decoding settings (`--spec-type`, `--spec-draft-n-max`). |
 | `sha256` | *(optional)* SHA-256 hex digest of the model file. If you set it, pi-container verifies the downloaded file before starting llama-server. A mismatch aborts startup. Without a checksum, downloads proceed without integrity verification. |
 

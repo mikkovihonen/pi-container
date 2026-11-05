@@ -8,12 +8,10 @@ hfModels:
     fileFlag: "--model"
     repo: "unsloth/gemma-4-26B-A4B-it-qat-GGUF"
     file: "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf"
-    dir: "gemma-4-26B-A4B-it-qat-GGUF"
   draft:
     fileFlag: "--model-draft"
     repo: "unsloth/gemma-4-26B-A4B-it-qat-GGUF"
     file: "mtp-gemma-4-26B-A4B-it.gguf"
-    dir: "gemma-4-26B-A4B-it-qat-GGUF"
     additionalServerFlags:
       - "--spec-type"
       - "draft-mtp"

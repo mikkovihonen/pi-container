@@ -41,7 +41,6 @@ def _config_fingerprint(config: ServerConfig) -> str:
                 "file_flag": m.file_flag,
                 "repo": m.repo,
                 "file": m.file,
-                "directory": str(m.directory),
                 "additional_server_flags": [str(f) for f in m.additional_server_flags],
                 "sha256": m.sha256,
             }

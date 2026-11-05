@@ -8,7 +8,6 @@ hfModels:
     fileFlag: "--model"
     repo: "unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
     file: "Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf"
-    dir: "Qwen3.6-35B-A3B-MTP-GGUF"
     additionalServerFlags:
       - "--spec-type"
       - "draft-mtp"
