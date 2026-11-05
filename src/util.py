@@ -394,6 +394,36 @@ def extract_ipv4_from_ip_addr(output: str) -> str | None:
     return match.group(1) if match else None
 
 
+def get_host_external_ip() -> str:
+    """Detect the host machine's primary outbound IPv4 address on the local network.
+
+    Uses a UDP routing probe to a public address (no network packets are sent).
+    Falls back to hostname resolution, and finally to '127.0.0.1' if offline.
+    """
+    import socket
+
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("1.1.1.1", 80))
+            ip = s.getsockname()[0]
+            if ip and not ip.startswith("127."):
+                return ip
+        finally:
+            s.close()
+    except Exception:
+        pass
+
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+        if ip and not ip.startswith("127."):
+            return ip
+    except Exception:
+        pass
+
+    return "127.0.0.1"
+
+
 def get_sanitized_git_config_json(logger, allowlist: list[str] | None = None):
     """Extract global host git configuration as JSON, strictly filtering against safe allowlist keys."""
     sanitized_dict = {}

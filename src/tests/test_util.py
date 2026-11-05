@@ -1018,3 +1018,53 @@ class TestCheckRepoGitignore:
         with patch("util.check_repo_gitignore", return_value=[]):
             warn_missing_gitignore(tmp_path, mock_logger)
             mock_logger.warning.assert_not_called()
+
+
+class TestGetHostExternalIp:
+    def test_routing_probe_success(self):
+        from util import get_host_external_ip
+
+        mock_sock = MagicMock()
+        mock_sock.getsockname.return_value = ("192.168.1.55", 54321)
+
+        with patch("socket.socket", return_value=mock_sock):
+            ip = get_host_external_ip()
+            assert ip == "192.168.1.55"
+            mock_sock.connect.assert_called_once_with(("1.1.1.1", 80))
+            mock_sock.close.assert_called_once()
+
+    def test_routing_probe_fails_hostname_fallback(self):
+        from util import get_host_external_ip
+
+        with (
+            patch("socket.socket", side_effect=OSError("Network unreachable")),
+            patch("socket.gethostname", return_value="myhost"),
+            patch("socket.gethostbyname", return_value="10.0.0.42"),
+        ):
+            ip = get_host_external_ip()
+            assert ip == "10.0.0.42"
+
+    def test_all_probes_fail_returns_localhost(self):
+        from util import get_host_external_ip
+
+        with (
+            patch("socket.socket", side_effect=OSError("Network unreachable")),
+            patch("socket.gethostname", side_effect=OSError("No hostname")),
+        ):
+            ip = get_host_external_ip()
+            assert ip == "127.0.0.1"
+
+    def test_loopback_probes_fallback_to_default(self):
+        from util import get_host_external_ip
+
+        mock_sock = MagicMock()
+        mock_sock.getsockname.return_value = ("127.0.0.1", 54321)
+
+        with (
+            patch("socket.socket", return_value=mock_sock),
+            patch("socket.gethostname", return_value="myhost"),
+            patch("socket.gethostbyname", return_value="127.0.0.1"),
+        ):
+            ip = get_host_external_ip()
+            assert ip == "127.0.0.1"
+            mock_sock.close.assert_called_once()

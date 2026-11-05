@@ -61,6 +61,7 @@ from source_control import read_source_control_config, resolve_source_control_to
 from util import (
     EnvironmentError,
     extract_ipv4_from_ip_addr,
+    get_host_external_ip,
     get_sanitized_git_config_json,
     handle_signal,
     run_quiet,
@@ -260,6 +261,7 @@ def main() -> None:
 
     cli_t3 = False
     cli_t3_advertise_host: str | None = None
+    cli_lan = False
     container_argv: list[str] = []
     _arg_i = 0
     _raw_args = sys.argv[1:]
@@ -267,6 +269,14 @@ def main() -> None:
         _arg = _raw_args[_arg_i]
         if _arg == "--t3":
             cli_t3 = True
+            _arg_i += 1
+            continue
+        if _arg in ("--t3-lan", "--lan"):
+            cli_lan = True
+            _arg_i += 1
+            continue
+        if _arg in ("--t3-external-ip", "--t3-advertise-external-ip"):
+            cli_t3_advertise_host = "external"
             _arg_i += 1
             continue
         if _arg == "--t3-advertise-host" and _arg_i + 1 < len(_raw_args):
@@ -281,18 +291,32 @@ def main() -> None:
         _arg_i += 1
 
     is_t3_mode = cli_t3 or (read_agent_mode(pi_container_dir) == "t3")
-    t3_advertise_host = (
+    raw_adv_host = (
         cli_t3_advertise_host
         or os.environ.get("T3_ADVERTISE_HOST")
         or read_agent_advertise_host(pi_container_dir)
         or "localhost"
     )
+    if raw_adv_host.strip().lower() in ("external", "external_ip", "auto"):
+        t3_advertise_host = get_host_external_ip()
+    else:
+        t3_advertise_host = raw_adv_host.strip()
 
     agent_ports = read_agent_ports(pi_container_dir)
+    if cli_lan:
+        agent_ports["expose"] = "lan"
+
     if is_t3_mode:
         claimed_agent_ports = {agent for _, agent in agent_ports["publish"]}
         if 3773 not in claimed_agent_ports:
             agent_ports["publish"].append((3773, 3773))
+        if t3_advertise_host not in ("localhost", "127.0.0.1", "::1") and agent_ports.get("expose") != "lan":
+            logger.warning(
+                f"T3 Code advertised host is an external address ({t3_advertise_host}), "
+                f"but agent.ports.expose is 'localhost'. Inbound connections from other devices "
+                f"or external links may be refused unless agent.ports.expose is set to 'lan' in config.yaml "
+                f"or --t3-lan is passed."
+            )
 
     if agent_ports["publish"]:
         taken = containers.unavailable_host_ports(agent_ports["publish"], agent_ports["expose"])

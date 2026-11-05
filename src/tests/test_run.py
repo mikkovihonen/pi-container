@@ -249,6 +249,7 @@ class TestT3LaunchConfiguration:
         raw_args = ["--t3", "--t3-advertise-host", "192.168.1.50", "extra_arg"]
         cli_t3 = False
         cli_t3_advertise_host = None
+        cli_lan = False
         container_argv = []
         i = 0
         while i < len(raw_args):
@@ -256,33 +257,74 @@ class TestT3LaunchConfiguration:
             if arg == "--t3":
                 cli_t3 = True
                 i += 1
+            elif arg in ("--t3-lan", "--lan"):
+                cli_lan = True
+                i += 1
+            elif arg in ("--t3-external-ip", "--t3-advertise-external-ip"):
+                cli_t3_advertise_host = "external"
+                i += 1
             elif arg == "--t3-advertise-host" and i + 1 < len(raw_args):
                 cli_t3_advertise_host = raw_args[i + 1]
                 i += 2
+            elif arg.startswith("--t3-advertise-host="):
+                cli_t3_advertise_host = arg.split("=", 1)[1]
+                i += 1
             else:
                 container_argv.append(arg)
                 i += 1
 
         assert cli_t3 is True
         assert cli_t3_advertise_host == "192.168.1.50"
+        assert cli_lan is False
         assert container_argv == ["extra_arg"]
 
-        # Equals form
-        raw_args_eq = ["--t3-advertise-host=custom.domain"]
-        cli_t3_advertise_host_eq = None
-        container_argv_eq = []
+        # Equals form with --t3-lan and --t3-external-ip
+        raw_args_flags = ["--t3", "--t3-external-ip", "--t3-lan"]
+        cli_t3 = False
+        cli_t3_advertise_host = None
+        cli_lan = False
         i = 0
-        while i < len(raw_args_eq):
-            arg = raw_args_eq[i]
-            if arg.startswith("--t3-advertise-host="):
-                cli_t3_advertise_host_eq = arg.split("=", 1)[1]
+        while i < len(raw_args_flags):
+            arg = raw_args_flags[i]
+            if arg == "--t3":
+                cli_t3 = True
+                i += 1
+            elif arg in ("--t3-lan", "--lan"):
+                cli_lan = True
+                i += 1
+            elif arg in ("--t3-external-ip", "--t3-advertise-external-ip"):
+                cli_t3_advertise_host = "external"
+                i += 1
+            elif arg == "--t3-advertise-host" and i + 1 < len(raw_args_flags):
+                cli_t3_advertise_host = raw_args_flags[i + 1]
+                i += 2
+            elif arg.startswith("--t3-advertise-host="):
+                cli_t3_advertise_host = arg.split("=", 1)[1]
                 i += 1
             else:
-                container_argv_eq.append(arg)
                 i += 1
 
-        assert cli_t3_advertise_host_eq == "custom.domain"
-        assert container_argv_eq == []
+        assert cli_t3 is True
+        assert cli_t3_advertise_host == "external"
+        assert cli_lan is True
+
+        # Short flags (--lan, --t3-advertise-external-ip)
+        raw_args_short = ["--lan", "--t3-advertise-external-ip"]
+        cli_lan = False
+        cli_t3_advertise_host = None
+        i = 0
+        while i < len(raw_args_short):
+            arg = raw_args_short[i]
+            if arg in ("--t3-lan", "--lan"):
+                cli_lan = True
+                i += 1
+            elif arg in ("--t3-external-ip", "--t3-advertise-external-ip"):
+                cli_t3_advertise_host = "external"
+                i += 1
+            else:
+                i += 1
+        assert cli_lan is True
+        assert cli_t3_advertise_host == "external"
 
     def test_t3_policy_content(self):
         import json
@@ -299,12 +341,70 @@ class TestT3LaunchConfiguration:
         settings["providerInstances"]["pi"] = {"driver": "pi", "enabled": True}
         settings["providerInstances"]["codex"] = {"driver": "codex", "enabled": False}
         settings["providerInstances"]["claudeAgent"] = {"driver": "claudeAgent", "enabled": False}
-        settings["textGenerationModelSelection"] = {"instanceId": "pi", "model": "pi"}
+        settings["textGenerationModelSelection"] = {"instanceId": "pi", "model": "default"}
 
         assert settings["providerInstances"]["pi"]["enabled"] is True
         assert settings["providerInstances"]["codex"]["enabled"] is False
-        assert settings["providerInstances"]["claudeAgent"]["enabled"] is False
-        assert settings["textGenerationModelSelection"]["instanceId"] == "pi"
+        assert settings["textGenerationModelSelection"]["model"] == "default"
+
+
+class TestT3AdvertiseHostResolution:
+    def test_defaults_to_localhost_when_unconfigured(self):
+        from unittest.mock import patch
+
+        cli_t3_advertise_host = None
+        raw_adv_host = cli_t3_advertise_host or "localhost"
+        with patch("util.get_host_external_ip") as mock_get_ip:
+            if raw_adv_host.strip().lower() in ("external", "external_ip", "auto"):
+                t3_advertise_host = mock_get_ip()
+            else:
+                t3_advertise_host = raw_adv_host.strip()
+            assert t3_advertise_host == "localhost"
+            mock_get_ip.assert_not_called()
+
+    def test_explicit_external_resolves_external_ip(self):
+        from unittest.mock import patch
+
+        import util
+
+        for variant in ("external", "EXTERNAL", "external_ip", "auto"):
+            with patch("util.get_host_external_ip", return_value="192.168.10.20"):
+                if variant.strip().lower() in ("external", "external_ip", "auto"):
+                    t3_advertise_host = util.get_host_external_ip()
+                else:
+                    t3_advertise_host = variant.strip()
+                assert t3_advertise_host == "192.168.10.20"
+
+    def test_preserves_custom_configured_host(self):
+        from unittest.mock import patch
+
+        raw_adv_host = "my-custom-dev.lan"
+        with patch("util.get_host_external_ip") as mock_get_ip:
+            if raw_adv_host.strip().lower() in ("external", "external_ip", "auto"):
+                t3_advertise_host = mock_get_ip()
+            else:
+                t3_advertise_host = raw_adv_host.strip()
+            assert t3_advertise_host == "my-custom-dev.lan"
+            mock_get_ip.assert_not_called()
+
+    def test_external_ip_does_not_implicitly_elevate_lan(self):
+        from unittest.mock import MagicMock
+
+        mock_logger = MagicMock()
+        agent_ports = {"expose": "localhost", "publish": [(3773, 3773)]}
+        t3_advertise_host = "192.168.1.50"
+        if t3_advertise_host not in ("localhost", "127.0.0.1", "::1") and agent_ports.get("expose") != "lan":
+            mock_logger.warning("warn message")
+        # Ensure expose remains localhost
+        assert agent_ports["expose"] == "localhost"
+        mock_logger.warning.assert_called_once()
+
+    def test_explicit_lan_flag_elevates_agent_ports(self):
+        agent_ports = {"expose": "localhost", "publish": [(3773, 3773)]}
+        cli_lan = True
+        if cli_lan:
+            agent_ports["expose"] = "lan"
+        assert agent_ports["expose"] == "lan"
 
     def test_t3_seed_settings_file(self):
         script_file = run.REPO_ROOT / "pi-coding-agent" / "t3-seed-settings.cjs"

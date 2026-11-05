@@ -89,12 +89,15 @@ agent:
   # Execution mode: "cli" (interactive terminal pi) or "t3" (headless T3 Code server).
   # Can also be selected on the command line via `./run.sh --t3`.
   mode: cli
-  # Advertised host address or hostname in pairing/connection links (e.g. "localhost" or a LAN IP).
-  # Defaults to "localhost" if omitted. Can also be overridden via --t3-advertise-host <host>.
+  # Advertised host address or hostname in pairing/connection links.
+  # Options: "localhost" (default), "external" (resolves host machine's external LAN IP),
+  # or an explicit IP / domain name. Can also be set via --t3-advertise-host <host> or --t3-external-ip.
   # advertise_host: localhost
   # Host ports published directly from the agent container (e.g. for T3 Code or dev web UIs).
   # Kept separate from nested_containers.ports.
   ports:
+    # "localhost" (127.0.0.1 only) or "lan" (0.0.0.0, reachable on the local network).
+    # Can also be overridden on the command line via --t3-lan.
     expose: localhost
     publish: []
 

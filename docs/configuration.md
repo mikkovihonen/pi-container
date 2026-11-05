@@ -325,6 +325,11 @@ agent:
   capabilities: []            # Linux capabilities to add (e.g., SYS_PTRACE)
   devices: []                 # device passthroughs (e.g., /dev/video0:/dev/video0)
   read_only_pi_container: true # lock .pi-container inside /workspace as read-only
+  mode: cli                   # agent mode: cli | t3
+  advertise_host: localhost   # pairing link advertised host: localhost | external | IP
+  ports:
+    expose: localhost         # agent host bind: localhost | lan
+    publish: []               # host ports for agent services (e.g. [3773])
 nested_containers:
   enabled: false              # let the agent run its own containers (off by default)
   storage: volume             # nested image store: volume | tmpfs
@@ -437,6 +442,19 @@ agent:
 ```
 
 Subdirectories mounted under separate container paths (such as `/home/pi/.pi/agent` for storing session logs and transcripts) remain fully functional and writable. Set to `false` only if you explicitly want the agent to edit project configuration files directly.
+
+### Agent execution mode, host advertising, and ports
+
+The `agent` section controls the execution mode (`cli` vs `t3`), advertised pairing host, and directly published host ports:
+
+- `agent.mode` (string, default `cli`): Mode of operation. `"cli"` launches the standard interactive Pi terminal. `"t3"` starts the headless T3 Code server inside the container. Can also be invoked on demand with `./run.sh --t3`.
+- `agent.advertise_host` (string, default `localhost`): The host address or domain displayed in T3 Code connection links, pairing URLs, and terminal QR codes.
+    - Set to `"localhost"` to generate local links (`http://localhost:3773/...`).
+    - Set to `"external"` (or pass `--t3-external-ip`) to automatically resolve the host machine's primary outbound IPv4 address.
+    - Set to an explicit hostname or IP (e.g. `"192.168.1.100"`, `"my-box.local"`) to override.
+- `agent.ports`: Inbound port publishing directly from the agent container (independent of `nested_containers.ports`).
+    - `expose`: `"localhost"` (binds `127.0.0.1`, default) or `"lan"` (binds `0.0.0.0`, all interfaces). Can also be elevated on the CLI with `--t3-lan`.
+    - `publish`: List of ports to map from the host to the agent container (e.g. `[3773]` or `["13773:3773"]`). When running in `t3` mode, port 3773 is claimed automatically.
 
 ### Transient `tmpfs` mounts
 
