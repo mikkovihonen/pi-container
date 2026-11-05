@@ -239,8 +239,7 @@ podman build --build-arg PODMAN_VERSION=v6.1.0 --build-arg PODMAN_COMMIT=<sha> \
     -f pi-coding-agent-builder/Containerfile .
 ```
 
-The Rust pin is the one exception to per-stage declaration. It is declared *before* the
-first `FROM` because two stages need it (netavark and aardvark-dns are Rust, and Node 26
-implements `Temporal` in Rust). Those stages re-declare `ARG RUST_VERSION` with no
-default. This is how a pre-`FROM` ARG is inherited. It gives one pin rather than two that can
-drift apart.
+The Rust pin is declared *before* the first `FROM` because multiple stages and build
+scripts rely on it (the `rust` stage, `netavark`/`aardvark-dns`, and Node 26 Temporal).
+The `rust` stage inherits `ARG RUST_VERSION` with no default, maintaining a single pin
+source of truth across the toolchain.

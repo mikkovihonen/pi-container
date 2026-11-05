@@ -94,62 +94,6 @@ clone_verified() {
     fi
 }
 
-# ─── Rust toolchain ──────────────────────────────────────────────────────────
-#
-# Needed by two unrelated stages, which is why the pin lives here rather than in
-# either of them:
-#   * build-network.sh — netavark and aardvark-dns are Rust programs.
-#   * build-node.sh    — Node 26 implements `Temporal` in Rust. Without a toolchain
-#                        node's configure prints "cargo not found! Support for Temporal
-#                        will be disabled" as a *warning* and builds a Node without it.
-#
-# Debian trixie has 1.85, and both netavark and aardvark-dns declare
-# rust-version = "1.88", so the toolchain is downloaded. Hashes come from
-# https://static.rust-lang.org/dist/channel-rust-stable.toml.
-#
-# The pin is the one set of ARGs declared *before* the first FROM in Containerfile,
-# because it is the only one two stages share. Each of those stages re-declares
-# `ARG RUST_VERSION` (and friends) with no default to inherit the global value —
-# which is what keeps this a single pin rather than two that can drift apart.
-
-# Install the pinned Rust into /opt/rust and prepend it to PATH.
-#
-# The caller is responsible for removing /opt/rust when done: a stage keeps whatever it
-# leaves behind, and none of it is meant to ship.
-install_rust() {
-    local arch rust_sha rust_pkg
-    require_env RUST_VERSION RUST_DIST_DATE RUST_SHA256_X86_64 RUST_SHA256_AARCH64
-    arch="$(gnu_arch)"
-
-    case "${arch}" in
-        x86_64) rust_sha="${RUST_SHA256_X86_64}" ;;
-        aarch64) rust_sha="${RUST_SHA256_AARCH64}" ;;
-        *)
-            echo "ERROR: no pinned Rust tarball for '${arch}'" >&2
-            return 1
-            ;;
-    esac
-
-    rust_pkg="rust-${RUST_VERSION}-${arch}-unknown-linux-gnu"
-    fetch_verified \
-        "https://static.rust-lang.org/dist/${RUST_DIST_DATE}/${rust_pkg}.tar.gz" \
-        "${rust_sha}" \
-        "/tmp/${rust_pkg}.tar.gz"
-    tar -C /usr/src -xzf "/tmp/${rust_pkg}.tar.gz"
-    rm -f "/tmp/${rust_pkg}.tar.gz"
-
-    # --without=rust-docs drops most of the tarball's size. --disable-ldconfig because
-    # nothing outside this image links against Rust's shared libraries.
-    run_logged "Installing Rust ${RUST_VERSION}" /tmp/rust-install.log \
-        "/usr/src/${rust_pkg}/install.sh" \
-        --prefix=/opt/rust --without=rust-docs --disable-ldconfig
-    rm -rf "/usr/src/${rust_pkg}"
-
-    export PATH="/opt/rust/bin:${PATH}"
-    rustc --version
-    cargo --version
-}
-
 # ─── Running build steps ─────────────────────────────────────────────────────
 
 # Run a verbose build step with its output captured to a log file. On failure,

@@ -22,16 +22,19 @@ set -euo pipefail
 # shellcheck source=pi-coding-agent-builder/common.sh
 source "$(dirname "$0")/common.sh"
 
-# Pins come from Containerfile as build ARGs; see require_env in common.sh. RUST_* is
-# checked by install_rust rather than here, since that is what consumes it.
+# Pins come from Containerfile as build ARGs; see require_env in common.sh.
 require_env \
     NETAVARK_VERSION NETAVARK_COMMIT NETAVARK_VENDOR_SHA256 \
     AARDVARK_VERSION AARDVARK_COMMIT AARDVARK_VENDOR_SHA256
 
-# The Rust toolchain is a builder-only dependency; nothing Rust-related is staged. Its
-# pin is the one declared before the first FROM in Containerfile, because this stage and
-# the node stage share it.
-install_rust
+# The Rust toolchain is staged by build-rust.sh and copied into this stage.
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+    echo "ERROR: Rust toolchain (cargo, rustc) not found on PATH. Ensure the Rust stage is copied in." >&2
+    exit 1
+fi
+
+cargo --version
+rustc --version
 
 # Both crates are built from upstream's own vendor tarball, so cargo must never reach
 # crates.io: --offline plus this makes a missing crate an error instead of a silent
@@ -96,6 +99,5 @@ build_helper aardvark-dns "${AARDVARK_VERSION}" "${AARDVARK_COMMIT}" "${AARDVARK
 stage_record "netavark" "${NETAVARK_VERSION}"
 stage_record "aardvark-dns" "${AARDVARK_VERSION}"
 
-# As in build-podman.sh: the toolchain and its build caches are ~2 GB this stage has
-# no reason to keep.
-rm -rf /opt/rust /root/.cargo /root/.rustup
+# As in build-podman.sh: build caches are ~2 GB this stage has no reason to keep.
+rm -rf /root/.cargo /root/.rustup

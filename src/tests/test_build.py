@@ -655,10 +655,6 @@ class TestToolchainPinsAreDeclared:
     def test_every_required_arg_is_declared_on_its_stage(self):
         """Each script's require_env names must be ARGs on the stage that runs it."""
         stages = _containerfile_stages()
-        # install_rust lives in common.sh, so its RUST_* requirements belong to
-        # whichever stages actually call it rather than to a stage of their own.
-        rust_required = _required_env(BUILDER_DIR / "common.sh")
-        assert rust_required, "expected install_rust to assert its RUST_* pins"
 
         checked = 0
         for stage_name, stage in stages.items():
@@ -667,9 +663,6 @@ class TestToolchainPinsAreDeclared:
                 assert script.is_file(), f"{stage_name} runs missing script {script_name}"
 
                 required = _required_env(script)
-                if "install_rust" in script.read_text():
-                    required |= rust_required
-
                 missing = required - stage["args"]
                 assert not missing, (
                     f"stage '{stage_name}' runs {script_name}, which requires "
@@ -679,7 +672,7 @@ class TestToolchainPinsAreDeclared:
                 )
                 checked += 1
 
-        assert checked >= 4, f"expected to check all four component scripts, saw {checked}"
+        assert checked >= 6, f"expected to check all component scripts, saw {checked}"
 
     def test_scripts_hardcode_no_pins(self):
         """No sha256 or commit-looking literal may sit in a build script."""
@@ -697,7 +690,6 @@ class TestToolchainPinsAreDeclared:
     def test_every_declared_pin_is_actually_used(self):
         """An ARG no script reads is a pin that silently does nothing."""
         stages = _containerfile_stages()
-        rust_required = _required_env(BUILDER_DIR / "common.sh")
         # Mode/tuning knobs are read directly with a shell default rather than through
         # require_env, so they are exempt from the "must be required" rule below.
         knobs = {"PYTHON_OPTIMIZE", "MAKE_JOBS", "NODE_SOURCE"}
@@ -709,8 +701,6 @@ class TestToolchainPinsAreDeclared:
             for script_name in stage["scripts"]:
                 script = BUILDER_DIR / script_name
                 required |= _required_env(script)
-                if "install_rust" in script.read_text():
-                    required |= rust_required
 
             unused = stage["args"] - required - knobs
             assert not unused, (

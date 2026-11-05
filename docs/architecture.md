@@ -165,6 +165,8 @@ For in-depth explanations of proxy egress forwarding rules, nested container arc
 │   ├── common.sh                     # Verified fetch/clone, required-ARG check, memory-capped jobs, manifest
 │   ├── build-node.sh                 # Node 26 (official tarball, or from source; replaces the node: image)
 │   ├── build-python.sh               # CPython 3.14 (from source, PGO) + uv + podman-compose
+│   ├── build-go.sh                   # Go compiler toolchain (verified official tarball, staged)
+│   ├── build-rust.sh                 # Rust toolchain (verified official installer, staged)
 │   ├── build-podman.sh               # podman 6.x with an explicit BUILDTAGS set (not Debian's 5.4)
 │   └── build-network.sh              # netavark + aardvark-dns 2.0 (the pair podman 6 requires)
 │

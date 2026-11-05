@@ -124,8 +124,11 @@ build_node_from_source() {
     #   WARNING: cargo not found! Support for Temporal will be disabled.
     # and carries on — producing a Node with no `Temporal` global. The node: image this
     # replaces has it (measured), so dropping it would be a silent language-feature
-    # regression. The pin is in common.sh, shared with build-network.sh.
-    install_rust
+    # regression.
+    if ! command -v cargo >/dev/null 2>&1; then
+        echo "ERROR: cargo not found! Support for Temporal requires the Rust toolchain." >&2
+        exit 1
+    fi
 
     mkdir -p "${BUILD_DIR}"
     cd "${BUILD_DIR}"

@@ -25,13 +25,8 @@ set -euo pipefail
 # shellcheck source=pi-coding-agent-builder/common.sh
 source "$(dirname "$0")/common.sh"
 
-# Pins come from Containerfile as build ARGs; see require_env in common.sh. Go is a
-# builder-only dependency pinned there too — nothing Go-related is staged, but podman 6
-# requires Go >= 1.25 to build, which rules out Debian trixie's 1.24 and is one more
-# reason the toolchain is downloaded rather than apt-installed.
-require_env \
-    PODMAN_VERSION PODMAN_COMMIT \
-    GO_VERSION GO_SHA256_AMD64 GO_SHA256_ARM64
+# Pins come from Containerfile as build ARGs; see require_env in common.sh.
+require_env PODMAN_VERSION PODMAN_COMMIT
 
 # ─── Build tags ──────────────────────────────────────────────────────────────
 #
@@ -66,22 +61,12 @@ require_env \
 BUILDTAGS="seccomp libsqlite3 containers_image_openpgp exclude_graphdriver_btrfs grpcnotrace"
 
 # ─── Go toolchain ────────────────────────────────────────────────────────────
+# Staged by build-go.sh and copied into this stage from the `go` stage.
+if ! command -v go >/dev/null 2>&1; then
+    echo "ERROR: Go toolchain not found on PATH. Ensure the Go stage is copied in." >&2
+    exit 1
+fi
 
-case "$(deb_arch)" in
-    amd64) go_sha="${GO_SHA256_AMD64}" ;;
-    arm64) go_sha="${GO_SHA256_ARM64}" ;;
-    *)
-        echo "ERROR: no pinned Go tarball for '$(deb_arch)'" >&2
-        exit 1
-        ;;
-esac
-
-go_tarball="go${GO_VERSION}.linux-$(deb_arch).tar.gz"
-fetch_verified "https://go.dev/dl/${go_tarball}" "${go_sha}" "/tmp/${go_tarball}"
-tar -C /opt -xzf "/tmp/${go_tarball}"
-rm -f "/tmp/${go_tarball}"
-
-export PATH="/opt/go/bin:${PATH}"
 # Podman vendors its dependencies in-tree, so the build needs no module downloads;
 # -mod=vendor makes that explicit and fails loudly if something is missing rather
 # than silently reaching out to a proxy. GOTOOLCHAIN=local likewise refuses to
@@ -146,6 +131,6 @@ stage_record "podman" "${PODMAN_VERSION}"
 stage_record "podman-tags" "${BUILDTAGS}"
 
 # The builder image is not shipped, but it is kept on the host between builds:
-# Go plus the source tree plus the build cache is ~2 GB of nothing useful.
+# the source tree plus the build cache is ~2 GB of nothing useful.
 cd /
-rm -rf /usr/src/podman /opt/go /root/.cache/go-build /root/go
+rm -rf /usr/src/podman /root/.cache/go-build /root/go
