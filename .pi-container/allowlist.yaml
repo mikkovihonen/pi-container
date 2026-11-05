@@ -66,3 +66,60 @@ global:
       hostnames:
         - "api.opper.ai"
       ip_ranges: []
+
+    # Toolchain and language runtime upstream sources (for upgrade-toolchains skill)
+    - name: "go-dev-allow"
+      mode: "allow"
+      hostnames:
+        - "go.dev"
+        - "*.go.dev"
+        - "golang.org"
+        - "*.golang.org"
+      ip_ranges: []
+
+    - name: "rust-lang-allow"
+      mode: "allow"
+      hostnames:
+        - "rust-lang.org"
+        - "*.rust-lang.org"
+        - "static.rust-lang.org"
+      ip_ranges: []
+
+    - name: "nodejs-org-allow"
+      mode: "allow"
+      hostnames:
+        - "nodejs.org"
+        - "*.nodejs.org"
+      ip_ranges: []
+
+    - name: "kernel-org-allow"
+      mode: "allow"
+      hostnames:
+        - "kernel.org"
+        - "*.kernel.org"
+        - "mirrors.edge.kernel.org"
+      ip_ranges: []
+
+    - name: "ruby-lang-allow"
+      mode: "allow"
+      hostnames:
+        - "ruby-lang.org"
+        - "*.ruby-lang.org"
+        - "www.ruby-lang.org"
+        - "cache.ruby-lang.org"
+      ip_ranges: []
+
+    - name: "ziglang-org-allow"
+      mode: "allow"
+      hostnames:
+        - "ziglang.org"
+        - "*.ziglang.org"
+      ip_ranges: []
+
+    - name: "python-org-allow"
+      mode: "allow"
+      hostnames:
+        - "python.org"
+        - "*.python.org"
+        - "www.python.org"
+      ip_ranges: []

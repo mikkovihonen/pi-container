@@ -102,3 +102,4 @@ def resolve_pyyaml() -> ToolReleaseInfo:
         category="core",
         release_url=f"https://github.com/yaml/pyyaml/releases/tag/{ver}",
     )
+

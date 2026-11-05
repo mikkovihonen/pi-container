@@ -110,3 +110,4 @@ def resolve_zls() -> ToolReleaseInfo:
         category="lsp",
         release_url=f"https://github.com/zigtools/zls/releases/tag/{zls_tag}",
     )
+
