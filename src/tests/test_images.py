@@ -115,6 +115,85 @@ class TestComputeImageHash:
         assert result is None
 
 
+class TestComputeProxyImageHash:
+    def test_entrypoint_change_changes_hash(self, tmp_path):
+        proxy_dir = tmp_path / "pi-coding-agent-proxy"
+        proxy_dir.mkdir(parents=True)
+        entrypoint = proxy_dir / "entrypoint.sh"
+        entrypoint.write_text("#!/bin/sh\necho v1\n")
+        (proxy_dir / "Containerfile").write_text("FROM base\n")
+
+        hash1 = images.compute_proxy_image_hash(repo_root=tmp_path)
+        assert len(hash1) == 16
+
+        entrypoint.write_text("#!/bin/sh\necho v2\n")
+        hash2 = images.compute_proxy_image_hash(repo_root=tmp_path)
+
+        assert hash1 != hash2
+
+    def test_containerfile_change_changes_hash(self, tmp_path):
+        proxy_dir = tmp_path / "pi-coding-agent-proxy"
+        proxy_dir.mkdir(parents=True)
+        (proxy_dir / "entrypoint.sh").write_text("#!/bin/sh\necho v1\n")
+        cfile = proxy_dir / "Containerfile"
+        cfile.write_text("FROM base:1\n")
+
+        hash1 = images.compute_proxy_image_hash(repo_root=tmp_path)
+
+        cfile.write_text("FROM base:2\n")
+        hash2 = images.compute_proxy_image_hash(repo_root=tmp_path)
+
+        assert hash1 != hash2
+
+    def test_addon_change_changes_hash(self, tmp_path):
+        proxy_dir = tmp_path / "pi-coding-agent-proxy"
+        addon_dir = proxy_dir / "addons" / "allowlist"
+        addon_dir.mkdir(parents=True)
+        (proxy_dir / "entrypoint.sh").write_text("#!/bin/sh\necho v1\n")
+        script = addon_dir / "allowlist.py"
+        script.write_text("# addon v1\n")
+
+        hash1 = images.compute_proxy_image_hash(repo_root=tmp_path)
+
+        script.write_text("# addon v2\n")
+        hash2 = images.compute_proxy_image_hash(repo_root=tmp_path)
+
+        assert hash1 != hash2
+
+    def test_identical_content_identical_hash(self, tmp_path):
+        proxy_dir = tmp_path / "pi-coding-agent-proxy"
+        proxy_dir.mkdir(parents=True)
+        (proxy_dir / "entrypoint.sh").write_text("#!/bin/sh\necho test\n")
+        (proxy_dir / "Containerfile").write_text("FROM base\n")
+
+        h1 = images.compute_proxy_image_hash(repo_root=tmp_path)
+        h2 = images.compute_proxy_image_hash(repo_root=tmp_path)
+        assert h1 == h2
+
+
+class TestProxyImageIsCurrent:
+    def test_returns_false_when_image_missing(self, monkeypatch):
+        monkeypatch.setattr(images, "image_exists", lambda *a, **kw: False)
+        assert images.proxy_image_is_current() is False
+
+    def test_returns_false_when_label_missing(self, monkeypatch):
+        monkeypatch.setattr(images, "image_exists", lambda *a, **kw: True)
+        monkeypatch.setattr(images, "get_image_label", lambda *a, **kw: None)
+        assert images.proxy_image_is_current() is False
+
+    def test_returns_false_when_hash_mismatch(self, monkeypatch):
+        monkeypatch.setattr(images, "image_exists", lambda *a, **kw: True)
+        monkeypatch.setattr(images, "get_image_label", lambda *a, **kw: "oldhash12345678")
+        monkeypatch.setattr(images, "compute_proxy_image_hash", lambda *a, **kw: "newhash12345678")
+        assert images.proxy_image_is_current() is False
+
+    def test_returns_true_when_hash_matches(self, monkeypatch):
+        monkeypatch.setattr(images, "image_exists", lambda *a, **kw: True)
+        monkeypatch.setattr(images, "get_image_label", lambda *a, **kw: "matchhash123456")
+        monkeypatch.setattr(images, "compute_proxy_image_hash", lambda *a, **kw: "matchhash123456")
+        assert images.proxy_image_is_current() is True
+
+
 class TestHasDependencyFiles:
     def test_returns_false_when_no_files(self, tmp_path):
         repo = tmp_path / "repo"

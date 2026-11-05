@@ -20,7 +20,7 @@ import containers
 import images
 import project
 import volumes
-from build import build_project_image
+from build import build_agent, build_project_image, build_proxy
 from config import (
     ADMIN_PASSWORD,
     BRIDGE_INTERFACE_ENV,
@@ -29,6 +29,7 @@ from config import (
     LOGS_DIR,
     MODELS_DIR,
     PROJECT_DIR,
+    PROXY_IMAGE_TAG,
     PROXY_LOCK_DIR,
     PROXY_UPSTREAM_NETWORK_ENV,
     REPO_ROOT,
@@ -131,6 +132,18 @@ def process_gateway_configs(gateway_configs: list[dict], pi_container_dir: Path)
             os.environ[var_name] = token
 
     containers.warn_about_gateway_allowlist(pi_container_dir, gateway_configs)
+
+
+def ensure_proxy_image(runtime: str, repo_root: Path = REPO_ROOT) -> bool:
+    """Ensure the proxy container image is built and current with its definition files.
+
+    Returns True if the image was rebuilt, False if it was already current.
+    """
+    if not images.proxy_image_is_current(repo_root=repo_root, runtime=runtime):
+        logger.info("Proxy image definition changed or missing; rebuilding proxy image...")
+        build_proxy(runtime)
+        return True
+    return False
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -273,11 +286,13 @@ def main() -> None:
             agent_container_name = f"pi-coding-agent-{run_id}"
             proxy_name, network_name = project.project_scope(PROJECT_DIR)
 
+            ensure_proxy_image(CONTAINER_RUNTIME, repo_root=REPO_ROOT)
+
             def _make_netmgr(portconfig: str) -> ContainerNetworkManager:
                 return ContainerNetworkManager(
                     RUNTIME,
                     network_name,
-                    "pi-coding-agent-proxy:local",
+                    PROXY_IMAGE_TAG,
                     proxy_name=proxy_name,
                     config_dir=pi_container_dir,
                     llama_ports=portconfig,
@@ -347,13 +362,13 @@ def main() -> None:
                 if removed:
                     logger.info(f"Removed {len(removed)} stale project image(s): {', '.join(removed)}")
 
-                newest_shared = images.newest_shared_image_time()
+                newest_shared = images.newest_shared_image_time(runtime=CONTAINER_RUNTIME)
                 if newest_shared is None:
                     sys.exit(1)
                 shared_tag, shared_ts = newest_shared
 
                 reason = images.project_image_build_reason(
-                    PROJECT_DIR, agent_image_tag, label_hash, shared_ts, shared_tag
+                    PROJECT_DIR, agent_image_tag, label_hash, shared_ts, shared_tag, runtime=CONTAINER_RUNTIME
                 )
                 if reason is not None:
                     logger.info(f"Building project-specific agent image: {agent_image_tag} ({reason})")
@@ -370,6 +385,16 @@ def main() -> None:
                 else:
                     logger.info(f"Using cached project-specific image: {agent_image_tag}")
             else:
+                agent_ts = images.get_image_build_time(agent_image_tag, runtime=CONTAINER_RUNTIME)
+                newest_shared = images.newest_shared_image_time(runtime=CONTAINER_RUNTIME)
+                if newest_shared is not None and agent_ts is not None:
+                    shared_tag, shared_ts = newest_shared
+                    if shared_ts > agent_ts:
+                        logger.info(
+                            f"Shared base image {shared_tag} is newer than shared agent image {agent_image_tag}; "
+                            "rebuilding shared agent image..."
+                        )
+                        build_agent(CONTAINER_RUNTIME)
                 logger.info(f"Using shared image: {agent_image_tag}")
 
             # ─── Nested-container image store ───────────────────────────

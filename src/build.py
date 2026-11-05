@@ -233,7 +233,10 @@ def build_proxy(runtime: str) -> None:
     """Build the mitmproxy container image for network egress inspection and rewriting."""
     from datetime import UTC, datetime
 
+    from images import compute_proxy_image_hash
+
     build_ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    proxy_hash = compute_proxy_image_hash(REPO_ROOT)
     logger.info(f"Building proxy image ({runtime}): {PROXY_IMAGE_TAG}")
     _run_command_with_logging(
         [
@@ -244,6 +247,8 @@ def build_proxy(runtime: str) -> None:
             f"pi-container.build.time={build_ts}",
             "--label",
             "pi-container.type=shared",
+            "--label",
+            f"pi-container.hash={proxy_hash}",
             "--tag",
             PROXY_IMAGE_TAG,
             "--file",
@@ -255,6 +260,9 @@ def build_proxy(runtime: str) -> None:
 
 def build_agent(runtime: str) -> None:
     """Build the shared default agent container image."""
+    from datetime import UTC, datetime
+
+    build_ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     logger.info(f"Building agent image ({runtime}): {PI_IMAGE_TAG}")
     _run_command_with_logging(
         [
@@ -265,6 +273,8 @@ def build_agent(runtime: str) -> None:
             f"root_commands_path={DEFAULT_ROOT_COMMANDS.parent}",
             "--build-arg",
             f"ROOT_COMMANDS_PATH={DEFAULT_ROOT_COMMANDS.name}",
+            "--label",
+            f"pi-container.build.time={build_ts}",
             "--label",
             "pi-container.type=shared",
             "--tag",

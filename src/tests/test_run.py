@@ -134,3 +134,23 @@ class TestProcessGatewayConfigs:
             run.process_gateway_configs(gateways, tmp_path)
 
         assert run.os.environ.get("TEST_OPPER_KEY") == "opp_secret_abc"
+
+
+class TestEnsureProxyImage:
+    def test_rebuilds_when_not_current(self, monkeypatch):
+        built = []
+        monkeypatch.setattr(run.images, "proxy_image_is_current", lambda **kw: False)
+        monkeypatch.setattr(run, "build_proxy", lambda rt: built.append(rt))
+
+        result = run.ensure_proxy_image("podman")
+        assert result is True
+        assert built == ["podman"]
+
+    def test_skips_when_current(self, monkeypatch):
+        built = []
+        monkeypatch.setattr(run.images, "proxy_image_is_current", lambda **kw: True)
+        monkeypatch.setattr(run, "build_proxy", lambda rt: built.append(rt))
+
+        result = run.ensure_proxy_image("podman")
+        assert result is False
+        assert built == []

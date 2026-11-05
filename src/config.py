@@ -46,6 +46,7 @@ GLOBAL_GATEWAYS_REGISTRY_DIR: Path = GLOBAL_CONFIG_DIR / "gateways"
 GLOBAL_CACHE_DIR: Path = Path.home() / ".cache" / "pi-container"
 
 IMAGE_TAG: str = os.environ.get("IMAGE_TAG", "pi-coding-agent:local")
+PROXY_IMAGE_TAG: str = os.environ.get("PROXY_IMAGE_TAG", "pi-coding-agent-proxy:local")
 LLAMA_BIN: str | None = os.environ.get("LLAMA_BIN") or shutil.which("llama-server")
 MODELS_DIR: Path = Path(HF_HUB_CACHE)
 LLAMA_SERVER_LOCK_DIR: Path = GLOBAL_CACHE_DIR / "locks" / "servers"

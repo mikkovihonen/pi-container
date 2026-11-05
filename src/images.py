@@ -9,12 +9,13 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 
 import project
-from config import IMAGE_TAG, REPO_ROOT
+from config import IMAGE_TAG, PROXY_IMAGE_TAG, REPO_ROOT
 
 logger = logging.getLogger(__name__)
 
 _IMAGE_DEFINITION_FILES = ("Containerfile", "entrypoint.sh")
-_SHARED_SOURCE_IMAGES = ("pi-coding-agent-proxy:local", "pi-coding-agent-builder:local")
+_PROXY_IMAGE_DEFINITION_FILES = ("Containerfile", "entrypoint.sh")
+_SHARED_SOURCE_IMAGES = (PROXY_IMAGE_TAG, "pi-coding-agent-builder:local")
 _PROTECTED_IMAGE_TAGS = frozenset({IMAGE_TAG, *_SHARED_SOURCE_IMAGES})
 _UNTAGGED_NAME = "<none>:<none>"
 
@@ -60,6 +61,47 @@ def compute_image_hash(project_dir: Path, repo_root: Path | None = None) -> str 
         combined_hash.update(file_hash.encode())
 
     return combined_hash.hexdigest()[:16]
+
+
+def compute_proxy_image_hash(repo_root: Path | None = None) -> str:
+    """Compute content hash for files affecting the proxy container image."""
+    r_root = repo_root or REPO_ROOT
+    proxy_dir = r_root / "pi-coding-agent-proxy"
+    files_to_hash: list[Path] = []
+
+    for img_file in _PROXY_IMAGE_DEFINITION_FILES:
+        img_path = proxy_dir / img_file
+        if img_path.exists():
+            files_to_hash.append(img_path)
+
+    addons_dir = proxy_dir / "addons"
+    if addons_dir.is_dir():
+        for path in addons_dir.rglob("*"):
+            if path.is_file() and not path.name.startswith(".") and "__pycache__" not in path.parts:
+                files_to_hash.append(path)
+
+    files_to_hash.sort()
+
+    combined_hash = hashlib.sha256()
+    for file_path in files_to_hash:
+        file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+        rel_path = file_path.relative_to(proxy_dir)
+        combined_hash.update(f"{rel_path}:{file_hash}".encode())
+
+    return combined_hash.hexdigest()[:16]
+
+
+def proxy_image_is_current(repo_root: Path | None = None, runtime: str | None = None) -> bool:
+    """Check if the proxy image exists and matches current definition content hashes."""
+    if not image_exists(PROXY_IMAGE_TAG, runtime=runtime):
+        return False
+
+    stored_hash = get_image_label(PROXY_IMAGE_TAG, "pi-container.hash", runtime=runtime)
+    if stored_hash is None:
+        return False
+
+    current_hash = compute_proxy_image_hash(repo_root=repo_root)
+    return stored_hash == current_hash
 
 
 def has_dependency_files(project_dir: Path) -> bool:
