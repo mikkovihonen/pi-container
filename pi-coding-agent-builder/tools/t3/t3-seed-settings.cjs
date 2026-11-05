@@ -12,8 +12,12 @@ try {
     settings.providerInstances.pi = Object.assign(settings.providerInstances.pi || {}, { driver: "pi", enabled: true });
     settings.providerInstances.codex = Object.assign(settings.providerInstances.codex || {}, { driver: "codex", enabled: false });
     settings.providerInstances.claudeAgent = Object.assign(settings.providerInstances.claudeAgent || {}, { driver: "claudeAgent", enabled: false });
-    if (!settings.textGenerationModelSelection || !settings.textGenerationModelSelection.instanceId || settings.textGenerationModelSelection.instanceId === "codex") {
-        settings.textGenerationModelSelection = { instanceId: "pi", model: "pi" };
+    if (
+        !settings.textGenerationModelSelection ||
+        !settings.textGenerationModelSelection.instanceId ||
+        settings.textGenerationModelSelection.instanceId === "codex"
+    ) {
+        settings.textGenerationModelSelection = { instanceId: "pi", model: "default" };
     }
     fs.writeFileSync(path, JSON.stringify(settings, null, 2));
 } catch (err) {
