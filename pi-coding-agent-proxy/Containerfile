@@ -61,7 +61,7 @@ RUN ldconfig \
  && pip --version \
  && uv --version \
  && uvx --version \
- && python -c 'import bz2, ctypes, curses, lzma, readline, sqlite3, ssl, zlib' \
+ && python -c 'import _zstd, bz2, ctypes, curses, lzma, readline, sqlite3, ssl, zlib' \
  && cat /usr/local/share/pi-container/toolchain-versions.d/*.txt \
       | sort > /usr/local/share/pi-container/toolchain-versions.txt \
  && cat /usr/local/share/pi-container/toolchain-versions.txt

@@ -309,6 +309,8 @@ fi
 # from $PI_STAGE exercises the staged stdlib rather than the builder's.
 "${stage_bin}/python${py_minor}" --version
 "${stage_bin}/uv" --version
+"${stage_bin}/python${py_minor}" \
+    -c 'import _zstd, bz2, ctypes, curses, lzma, readline, sqlite3, ssl, zlib'
 # NOT `podman-compose --version`: it shells out to `podman version`, and podman is
 # staged by a later script. Import and print the version instead.
 PYTHONPATH="${stage_site}" "${stage_bin}/python${py_minor}" \

@@ -218,6 +218,38 @@ class TestNodeBuildArgs:
 
 
 # ---------------------------------------------------------------------------
+# _build_dns_args
+# ---------------------------------------------------------------------------
+
+
+class TestBuildDNSArgs:
+    def test_default_is_1_1_1_1(self, monkeypatch):
+        import build
+
+        monkeypatch.delenv("BUILD_DNS", raising=False)
+        assert build._build_dns_args() == ["--dns", "1.1.1.1"]
+
+    def test_custom_single_server(self, monkeypatch):
+        import build
+
+        monkeypatch.setenv("BUILD_DNS", "8.8.8.8")
+        assert build._build_dns_args() == ["--dns", "8.8.8.8"]
+
+    def test_multiple_servers(self, monkeypatch):
+        import build
+
+        monkeypatch.setenv("BUILD_DNS", "1.1.1.1, 8.8.8.8")
+        assert build._build_dns_args() == ["--dns", "1.1.1.1", "--dns", "8.8.8.8"]
+
+    def test_disabled_values(self, monkeypatch):
+        import build
+
+        for disabled in ("", "none", "off", "0", "false"):
+            monkeypatch.setenv("BUILD_DNS", disabled)
+            assert build._build_dns_args() == []
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 

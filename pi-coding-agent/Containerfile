@@ -83,6 +83,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libreadline-dev \
     libsqlite3-dev \
     libssl-dev \
+    libzstd-dev \
     uuid-dev \
     zlib1g-dev \
     # Nested containers

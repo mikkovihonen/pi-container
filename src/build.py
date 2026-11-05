@@ -165,6 +165,26 @@ def _python_build_args() -> list[str]:
 _NODE_SOURCES = ("prebuilt", "build")
 
 
+def _build_dns_args() -> list[str]:
+    """Generate ``--dns`` flags for container build commands.
+
+    In Podman on macOS, container builds default to gvproxy's nameserver,
+    which can drop or time out on concurrent AAAA (IPv6) queries. Explicitly
+    passing an upstream DNS resolver avoids transient build resolution failures.
+    Configured via BUILD_DNS (defaults to '1.1.1.1'). Disable by setting
+    BUILD_DNS to 'none', 'off', '0', or empty string.
+    """
+    dns_val = os.environ.get("BUILD_DNS", "1.1.1.1").strip()
+    if not dns_val or dns_val.lower() in ("0", "none", "off", "false"):
+        return []
+    args: list[str] = []
+    for server in dns_val.split(","):
+        server = server.strip()
+        if server:
+            args.extend(["--dns", server])
+    return args
+
+
 def _node_build_args() -> list[str]:
     """Generate ``--build-arg`` flags specifying the Node.js installation source."""
     value = os.environ.get("NODE_SOURCE", "").strip().lower()
@@ -193,6 +213,7 @@ def build_builder(runtime: str) -> None:
         [
             runtime,
             "build",
+            *_build_dns_args(),
             *_python_build_args(),
             *_node_build_args(),
             "--label",
@@ -218,6 +239,7 @@ def build_proxy(runtime: str) -> None:
         [
             runtime,
             "build",
+            *_build_dns_args(),
             "--label",
             f"pi-container.build.time={build_ts}",
             "--label",
@@ -238,6 +260,7 @@ def build_agent(runtime: str) -> None:
         [
             runtime,
             "build",
+            *_build_dns_args(),
             "--build-context",
             f"root_commands_path={DEFAULT_ROOT_COMMANDS.parent}",
             "--build-arg",
@@ -278,6 +301,7 @@ def build_project_image(
     cmd = [
         runtime,
         "build",
+        *_build_dns_args(),
         "--build-context",
         f"root_commands_path={Path(root_commands_path).parent}",
         "--build-arg",
