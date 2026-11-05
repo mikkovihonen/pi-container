@@ -35,6 +35,7 @@ GROUPS: dict[str, list[str]] = {
     "vector": ["qdrant", "sqlite-vec"],
     "lsp": ["rust-analyzer", "gopls", "clangd", "zls"],
     "vcs": ["git", "ruby"],
+    "tools": ["t3"],
     "core": [
         "go",
         "rust",

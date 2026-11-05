@@ -253,8 +253,8 @@ def _parse_port_mapping(entry: object) -> tuple[int, int] | None:
     return host, agent
 
 
-def _read_nested_ports(section: dict) -> dict:
-    """The ``nested_containers.ports`` sub-section → ``{"expose", "publish"}``.
+def _read_ports_section(section: dict, section_name: str = "ports") -> dict:
+    """Read a ``ports`` sub-section → ``{"expose", "publish"}``.
 
     ``publish`` is normalised to a list of ``(host_port, agent_port)`` pairs with
     duplicate *host* ports dropped (podman would reject the second ``-p`` anyway,
@@ -264,17 +264,17 @@ def _read_nested_ports(section: dict) -> dict:
     """
     ports = section.get("ports") or {}
     if not isinstance(ports, dict):
-        logger.warning("nested_containers.ports is not a mapping; ignoring it (no ports published).")
+        logger.warning(f"{section_name} is not a mapping; ignoring it (no ports published).")
         return {"expose": "localhost", "publish": []}
 
     expose = str(ports.get("expose") or "").strip().lower()
     if expose and expose not in ("localhost", "lan"):
-        logger.warning(f"Unknown nested_containers.ports.expose '{expose}'; using 'localhost'.")
+        logger.warning(f"Unknown {section_name}.expose '{expose}'; using 'localhost'.")
         expose = ""
 
     raw = ports.get("publish") or []
     if not isinstance(raw, list):
-        logger.warning("nested_containers.ports.publish is not a list; ignoring it (no ports published).")
+        logger.warning(f"{section_name}.publish is not a list; ignoring it (no ports published).")
         raw = []
 
     publish: list[tuple[int, int]] = []
@@ -284,12 +284,17 @@ def _read_nested_ports(section: dict) -> dict:
         if mapping is None:
             continue
         if mapping[0] in claimed:
-            logger.warning(f"Duplicate host port {mapping[0]} in nested_containers.ports.publish; keeping the first.")
+            logger.warning(f"Duplicate host port {mapping[0]} in {section_name}.publish; keeping the first.")
             continue
         claimed.add(mapping[0])
         publish.append(mapping)
 
     return {"expose": expose or "localhost", "publish": publish}
+
+
+def _read_nested_ports(section: dict) -> dict:
+    """The ``nested_containers.ports`` sub-section → ``{"expose", "publish"}``."""
+    return _read_ports_section(section, "nested_containers.ports")
 
 
 def read_nested_containers_config(config_dir: Path | None = None) -> dict:
@@ -355,6 +360,22 @@ def read_read_only_pi_container(config_dir: Path | None = None) -> bool:
     if val is None:
         return True
     return _egress_truthy(val)
+
+
+def read_agent_ports(config_dir: Path | None = None) -> dict:
+    """Inbound host ports published directly from the agent container (config.yaml ``agent.ports``).
+
+    Returns ``{"expose": "localhost"|"lan", "publish": [(host, agent), ...]}``.
+    """
+    section = load_project_config(config_dir).get("agent") or {}
+    return _read_ports_section(section, "agent.ports")
+
+
+def read_agent_mode(config_dir: Path | None = None) -> str:
+    """Execution mode for the agent container from config.yaml ``agent.mode`` (e.g. 'cli', 't3')."""
+    section = load_project_config(config_dir).get("agent") or {}
+    mode = str(section.get("mode") or "cli").strip().lower()
+    return mode or "cli"
 
 
 # ─── Token Replacer Config Scanner (duplicated from pi-coding-agent-proxy/addons/token_replacer)

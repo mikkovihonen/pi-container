@@ -49,6 +49,10 @@ agent:
   env: {}
   mounts: []
   read_only_pi_container: true
+  mode: cli
+  ports:
+    expose: localhost
+    publish: []
 
 # Nested containers (rootless podman inside the agent container). Off by default:
 # enabling it relaxes the agent container's SELinux confinement and grants

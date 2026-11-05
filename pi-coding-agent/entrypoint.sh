@@ -83,5 +83,18 @@ exec gosu pi bash -c '
         .pi-container/dependencies/pi/commands.sh
     fi
 
-    exec pi "$@"
+    if [ "$PI_CONTAINER_MODE" = "t3" ]; then
+        if ! command -v t3 >/dev/null 2>&1; then
+            echo "ERROR: t3 CLI is not installed in the container." >&2
+            echo "Install it via tools.include: [\"t3\"], npm install -g t3, or .pi-container/dependencies/root/commands.sh." >&2
+            exit 1
+        fi
+        echo "=================================================================="
+        echo "  Starting T3 Code server for Pi inside pi-container..."
+        echo "  Web UI: https://t3.codes"
+        echo "=================================================================="
+        exec t3 serve --host 0.0.0.0 --port "${T3_PORT:-3773}" "$@"
+    else
+        exec pi "$@"
+    fi
 ' -- "$@"

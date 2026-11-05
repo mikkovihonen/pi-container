@@ -111,3 +111,35 @@ def resolve_zls() -> ToolReleaseInfo:
         release_url=f"https://github.com/zigtools/zls/releases/tag/{zls_tag}",
     )
 
+
+def resolve_t3() -> ToolReleaseInfo:
+    release_data = _fetch_json("https://api.github.com/repos/pingdotgg/t3code/releases/latest")
+    tag = release_data["tag_name"]
+    version = tag.removeprefix("v")
+
+    sha_x64 = ""
+    sha_arm64 = ""
+    for asset in release_data.get("assets", []):
+        if asset["name"] == "SHA256SUMS":
+            txt = _fetch_text(asset["browser_download_url"])
+            for line in txt.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    sha, filename = parts[0], parts[1].lstrip("*")
+                    if filename == f"t3-{version}-linux-x64.tar.gz":
+                        sha_x64 = sha
+                    elif filename == f"t3-{version}-linux-arm64.tar.gz":
+                        sha_arm64 = sha
+
+    return ToolReleaseInfo(
+        tool="t3",
+        version=version,
+        args={
+            "T3_VERSION": version,
+            "T3_SHA256_AMD64": sha_x64,
+            "T3_SHA256_ARM64": sha_arm64,
+        },
+        category="tools",
+        release_url=f"https://github.com/pingdotgg/t3code/releases/tag/{tag}",
+    )
+

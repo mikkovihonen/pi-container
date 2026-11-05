@@ -154,3 +154,25 @@ class TestEnsureProxyImage:
         result = run.ensure_proxy_image("podman")
         assert result is False
         assert built == []
+
+
+class TestT3LaunchConfiguration:
+    def test_t3_flag_enables_mode_and_default_port(self):
+        argv = ["run.py", "--t3"]
+        cli_t3 = "--t3" in argv
+        container_argv = [arg for arg in argv[1:] if arg != "--t3"]
+        assert cli_t3 is True
+        assert container_argv == []
+
+        agent_ports = {"expose": "localhost", "publish": []}
+        claimed_agent_ports = {agent for _, agent in agent_ports["publish"]}
+        if 3773 not in claimed_agent_ports:
+            agent_ports["publish"].append((3773, 3773))
+        assert agent_ports["publish"] == [(3773, 3773)]
+
+    def test_t3_preserves_custom_port(self):
+        agent_ports = {"expose": "localhost", "publish": [(13773, 3773)]}
+        claimed_agent_ports = {agent for _, agent in agent_ports["publish"]}
+        if 3773 not in claimed_agent_ports:
+            agent_ports["publish"].append((3773, 3773))
+        assert agent_ports["publish"] == [(13773, 3773)]

@@ -26,6 +26,7 @@ from upstreams.github_git import (
 from upstreams.github_release import (
     resolve_aardvark_dns,
     resolve_netavark,
+    resolve_t3,
     resolve_zls,
 )
 from upstreams.language_manifests import (
@@ -69,4 +70,5 @@ RESOLVERS: dict[str, Callable[[], ToolReleaseInfo]] = {
     "clangd": resolve_clangd,
     "zls": resolve_zls,
     "ruby": resolve_ruby,
+    "t3": resolve_t3,
 }

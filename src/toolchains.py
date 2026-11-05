@@ -32,6 +32,7 @@ ON_DEMAND_TOOLS: frozenset[str] = frozenset(
         "mold",
         "git",
         "ruby",
+        "t3",
     }
 )
 

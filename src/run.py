@@ -40,6 +40,8 @@ from models import Model
 from network import (
     ContainerNetworkManager,
     read_agent_extras,
+    read_agent_mode,
+    read_agent_ports,
     read_flow_export_enabled,
     read_llama_config,
     read_nested_containers_config,
@@ -248,6 +250,43 @@ def main() -> None:
             f"nested_containers.ports.publish lists port(s) "
             f"{', '.join(str(host) for host, _ in nested_ports['publish'])} but "
             f"nested_containers.enabled is false; nothing is published."
+        )
+
+    cli_t3 = "--t3" in sys.argv
+    container_argv = [arg for arg in sys.argv[1:] if arg != "--t3"]
+    is_t3_mode = cli_t3 or (read_agent_mode(pi_container_dir) == "t3")
+
+    agent_ports = read_agent_ports(pi_container_dir)
+    if is_t3_mode:
+        claimed_agent_ports = {agent for _, agent in agent_ports["publish"]}
+        if 3773 not in claimed_agent_ports:
+            agent_ports["publish"].append((3773, 3773))
+
+    if agent_ports["publish"]:
+        taken = containers.unavailable_host_ports(agent_ports["publish"], agent_ports["expose"])
+        if taken:
+            logger.error(f"Host port(s) already in use: {', '.join(str(p) for p in taken)}")
+            holders = containers.port_holders(CONTAINER_RUNTIME, taken, project.project_key(PROJECT_DIR))
+            for port in taken:
+                holder = holders.get(port)
+                logger.error(f"  {port} → {holder}" if holder else f"  {port} → not held by a container")
+            logger.error(f"Free them, or change agent.ports.publish in {config_yaml_path}.")
+            sys.exit(1)
+        bind = "127.0.0.1" if agent_ports["expose"] != "lan" else "all interfaces"
+        logger.info(
+            "Publishing agent container port(s) on "
+            + f"{bind}: "
+            + ", ".join(f"{host}→agent {agent}" for host, agent in agent_ports["publish"])
+            + "."
+        )
+
+    if is_t3_mode:
+        t3_bind = "127.0.0.1" if agent_ports["expose"] != "lan" else "0.0.0.0"
+        logger.info(
+            f"T3 Code mode enabled (https://t3.codes):"
+            f"\n  Inbound server port: {t3_bind}:3773"
+            f"\n  Starting T3 Code server for Pi inside container..."
+            f"\n  Once initialized, open https://t3.codes and use the pairing link displayed below."
         )
 
     with models_path.open("r") as file:
@@ -491,6 +530,7 @@ def main() -> None:
                 "--env",
                 f"IPV6_ENABLED={str(ipv6_enabled).lower()}",
                 *(["--env", f"DEFAULT_ROUTE6={proxy_isolated_ip6}"] if proxy_isolated_ip6 else []),
+                *(["--env", "PI_CONTAINER_MODE=t3"] if is_t3_mode else []),
                 *RUNTIME.tmpfs_args("/home/pi/"),
                 "--volume",
                 f"{agent_config_dir}:/home/pi/.pi/agent",
@@ -503,6 +543,7 @@ def main() -> None:
                 *volume_args,
                 *nested_args,
                 *RUNTIME.nested_port_args(nested_cfg),
+                *RUNTIME.port_publish_args(agent_ports),
                 "--workdir",
                 "/workspace",
                 *[flag for path in tmpfs_paths for flag in RUNTIME.tmpfs_args(path)],
@@ -519,7 +560,7 @@ def main() -> None:
                 *[flag for d in agent_extras["devices"] for flag in ("--device", d)],
                 *resource_limit_args(read_resource_limits(pi_container_dir, "agent")),
                 agent_image_tag,
-                *sys.argv[1:],
+                *container_argv,
             ]
 
             ip_holder: dict[str, list[str]] = {}

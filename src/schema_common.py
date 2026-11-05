@@ -105,6 +105,15 @@ SCHEMA: dict = {
             "capabilities": {"type": list, "required": False},
             "devices": {"type": list, "required": False},
             "read_only_pi_container": {"type": (bool, str, int), "required": False},
+            "mode": {"type": str, "required": False},
+            "ports": {
+                "type": dict,
+                "required": False,
+                "keys": {
+                    "expose": {"type": str, "required": False},
+                    "publish": {"type": list, "required": False},
+                },
+            },
         },
     },
     "nested_containers": {

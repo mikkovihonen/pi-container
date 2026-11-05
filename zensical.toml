@@ -13,6 +13,7 @@ nav = [
   { "Architecture" = "architecture.md" },
   { "Design details" = "design-details.md" },
   { "Configuration" = "configuration.md" },
+  { "T3 Code Integration" = "t3-code.md" },
   { "Development" = "development.md" },
   { "Releases" = "releases.md" },
   { "Proxy & addons" = [

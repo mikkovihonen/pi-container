@@ -123,3 +123,13 @@ global:
         - "*.python.org"
         - "www.python.org"
       ip_ranges: []
+
+    # T3 Code (t3.codes) web app and release endpoints
+    - name: "t3-codes-allow"
+      mode: "allow"
+      hostnames:
+        - "t3.codes"
+        - "*.t3.codes"
+        - "ping.gg"
+        - "*.ping.gg"
+      ip_ranges: []

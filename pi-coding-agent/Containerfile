@@ -15,6 +15,7 @@ FROM scratch AS tool_zls
 FROM scratch AS tool_mold
 FROM scratch AS tool_git
 FROM scratch AS tool_ruby
+FROM scratch AS tool_t3
 
 # Plain Debian, not node:<ver>-trixie-slim. Node is built in
 # pi-coding-agent-builder/ like everything else and arrives through the COPY below, so
@@ -204,6 +205,10 @@ ARG WITH_RUBY=false
 RUN --mount=type=bind,from=tool_ruby,target=/mnt/ruby \
     if [ "${WITH_RUBY}" = "true" ] && [ -d /mnt/ruby ]; then cp -a /mnt/ruby/. /; fi
 
+ARG WITH_T3=false
+RUN --mount=type=bind,from=tool_t3,target=/mnt/t3 \
+    if [ "${WITH_T3}" = "true" ] && [ -d /mnt/t3 ]; then cp -a /mnt/t3/. /; fi
+
 # uv reads the system trust store, which carries the mitmproxy CA (installed below).
 ENV UV_SYSTEM_CERTS=1
 
@@ -240,6 +245,7 @@ RUN ldconfig \
  && if [ -x /usr/local/bin/mold ]; then /usr/local/bin/mold --version; fi \
  && if [ -x /usr/local/bin/git ]; then /usr/local/bin/git --version; fi \
  && if [ -x /usr/local/bin/ruby ]; then /usr/local/bin/ruby --version; fi \
+ && if [ -x /usr/local/bin/t3 ]; then /usr/local/bin/t3 --version; fi \
  && cat /usr/local/share/pi-container/toolchain-versions.d/*.txt \
       | sort > /usr/local/share/pi-container/toolchain-versions.txt \
  && cat /usr/local/share/pi-container/toolchain-versions.txt

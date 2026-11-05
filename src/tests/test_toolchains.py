@@ -24,8 +24,9 @@ def test_tool_collections():
     assert "ripgrep" in ON_DEMAND_TOOLS
     assert "mold" in ON_DEMAND_TOOLS
     assert "git" in ON_DEMAND_TOOLS
+    assert "t3" in ON_DEMAND_TOOLS
     assert AVAILABLE_TOOLS == (CORE_TOOLS | ON_DEMAND_TOOLS)
-    assert len(AVAILABLE_TOOLS) == 16
+    assert len(AVAILABLE_TOOLS) == 17
 
 
 def test_tool_mapping_helpers():

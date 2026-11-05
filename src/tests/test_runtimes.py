@@ -351,3 +351,20 @@ class TestNestedPortArgs:
         """A config read by an older path (or a hand-edited one) must not crash."""
         cfg = {"enabled": True, "storage": "volume", "security": "disable"}
         assert PodmanRuntime().nested_port_args(cfg) == []
+
+
+class TestPortPublishArgs:
+    def test_empty_publish_list(self):
+        assert PodmanRuntime().port_publish_args({"expose": "localhost", "publish": []}) == []
+
+    def test_localhost_publish(self):
+        assert PodmanRuntime().port_publish_args({"expose": "localhost", "publish": [(3773, 3773)]}) == [
+            "-p",
+            "127.0.0.1:3773:3773",
+        ]
+
+    def test_lan_publish(self):
+        assert PodmanRuntime().port_publish_args({"expose": "lan", "publish": [(3773, 3773)]}) == [
+            "-p",
+            "3773:3773",
+        ]

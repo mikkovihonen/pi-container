@@ -224,13 +224,16 @@ class ContainerRuntime(ABC):
             "PI_CONTAINER_NESTED=true",
         ]
 
+    def port_publish_args(self, ports: dict) -> list[str]:
+        """Return ``-p`` flags publishing container ports to the host."""
+        host_bind = "127.0.0.1:" if ports.get("expose", "localhost") != "lan" else ""
+        return [flag for host, agent in ports.get("publish") or [] for flag in ("-p", f"{host_bind}{host}:{agent}")]
+
     def nested_port_args(self, cfg: dict) -> list[str]:
         """Return ``-p`` flags publishing nested-container service ports to the host."""
         if not cfg.get("enabled"):
             return []
-        ports = cfg.get("ports") or {}
-        host_bind = "127.0.0.1:" if ports.get("expose", "localhost") != "lan" else ""
-        return [flag for host, agent in ports.get("publish") or [] for flag in ("-p", f"{host_bind}{host}:{agent}")]
+        return self.port_publish_args(cfg.get("ports") or {})
 
     @staticmethod
     def nested_volume_name(project_hash: str) -> str:

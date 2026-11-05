@@ -897,6 +897,45 @@ class TestReadNestedPorts:
         assert self._ports(tmp_path, "  ports: [3000]\n") == {"expose": "localhost", "publish": []}
 
 
+class TestReadAgentPorts:
+    """``agent.ports`` — the host ports published directly from the agent container."""
+
+    def _ports(self, tmp_path, body):
+        from network import read_agent_ports
+
+        (tmp_path / "config.yaml").write_text(f"agent:\n{body}")
+        return read_agent_ports(tmp_path)
+
+    def test_absent_section_publishes_nothing(self, tmp_path):
+        assert self._ports(tmp_path, "") == {"expose": "localhost", "publish": []}
+
+    def test_bare_port_maps_to_itself(self, tmp_path):
+        assert self._ports(tmp_path, "  ports:\n    publish: [3773]\n")["publish"] == [(3773, 3773)]
+
+    def test_explicit_mapping(self, tmp_path):
+        assert self._ports(tmp_path, "  ports:\n    publish: ['13773:3773']\n")["publish"] == [(13773, 3773)]
+
+    def test_expose_lan(self, tmp_path):
+        assert self._ports(tmp_path, "  ports:\n    expose: lan\n    publish: [3773]\n") == {
+            "expose": "lan",
+            "publish": [(3773, 3773)],
+        }
+
+
+class TestReadAgentMode:
+    def test_default_mode(self, tmp_path):
+        from network import read_agent_mode
+
+        (tmp_path / "config.yaml").write_text("agent: {}\n")
+        assert read_agent_mode(tmp_path) == "cli"
+
+    def test_t3_mode(self, tmp_path):
+        from network import read_agent_mode
+
+        (tmp_path / "config.yaml").write_text("agent:\n  mode: t3\n")
+        assert read_agent_mode(tmp_path) == "t3"
+
+
 # ---------------------------------------------------------------------------
 # ContainerNetworkManager._preflight_ipv6_egress + warn_if_proxy_lacks_ipv6_egress
 # ---------------------------------------------------------------------------
