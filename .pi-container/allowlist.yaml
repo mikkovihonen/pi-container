@@ -65,5 +65,4 @@ global:
       mode: "allow"
       hostnames:
         - "api.opper.ai"
-        - "*.opper.ai"
       ip_ranges: []

@@ -6,11 +6,10 @@ rules:
   - name: "Inject Opper API Key"
     hostnames:
       - "api.opper.ai"
-      - "*.opper.ai"
     content_patterns:
       - field: "headers"
         header_name: "Authorization"
-        regex: "(?<=Bearer\\s)(?:OPPER_API_KEY_PLACEHOLDER|opper-api-key)"
+        regex: "(?<=Bearer\\s)(?:OPPER_API_KEY_PLACEHOLDER)"
     replace_with:
       strategy: "static"
       value: "${ENV:OPPER_API_KEY}"
