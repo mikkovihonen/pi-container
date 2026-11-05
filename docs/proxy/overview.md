@@ -2,7 +2,7 @@
 
 - A Debian-based router container that transparently intercepts the agent's HTTP/HTTPS/DNS traffic through mitmproxy.
 - mitmproxy generates a self-signed certificate with its certificate authority on first run.
-- mitmweb provides a web UI (port 8081) for monitoring traffic.
+- mitmweb provides a web UI (port 8081) for monitoring traffic, accessible only from the host (isolated from the agent container).
 - It runs [`allowlist`](allowlist.md), [`token_replacer`](token-replacer.md), and [`flow_export`](flow-export.md) addons on the intercepted traffic (host filtering + secret redaction + session flow export).
 - It forwards the isolated network's traffic to the Internet. Non-HTTP protocols are denied by default (fail-closed, opt-in via `PROXY_ALLOW_*`).
 
@@ -40,6 +40,12 @@ iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 443 -j REDIRECT --to-port 8
 # itself and forwards other lookups upstream
 iptables -t nat -A PREROUTING -i eth1 -p udp --dport 53 -j REDIRECT --to-port 5353
 iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 53 -j REDIRECT --to-port 5353
+
+# Protect mitmweb UI (port 8081) from the agent container:
+# mitmweb binds to 0.0.0.0 so host port-forwarding on eth0 can reach it,
+# while traffic from eth1 (isolated-net) is rejected with TCP reset.
+iptables -A INPUT -i eth1 -p tcp --dport 8081 -j REJECT --reject-with tcp-reset
+iptables -A INPUT -i eth1 -p udp --dport 8081 -j DROP
 ```
 
 ### Egress policy (default-deny)

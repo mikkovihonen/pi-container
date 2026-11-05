@@ -76,6 +76,13 @@ ipt -t nat -A PREROUTING -i eth1 -p tcp --dport 443 -j REDIRECT --to-port 8080
 ipt -t nat -A PREROUTING -i eth1 -p udp --dport 53 -j REDIRECT --to-port 5353
 ipt -t nat -A PREROUTING -i eth1 -p tcp --dport 53 -j REDIRECT --to-port 5353
 
+# ─── Protect mitmweb UI (port 8081) from the agent container ─────────────
+# mitmweb binds to 0.0.0.0 so host port-forwarding on eth0 can reach it.
+# Reject incoming traffic on eth1 (isolated-net) to port 8081 with a TCP
+# reset so the web UI is completely invisible and unreachable from the agent.
+ipt -A INPUT -i eth1 -p tcp --dport 8081 -j REJECT --reject-with tcp-reset
+ipt -A INPUT -i eth1 -p udp --dport 8081 -j DROP
+
 # ─── Llama-server port forwarding (isolated-net → host) ───────────────────
 # The pi-coding-agent resolves "llama" via this container's mitmproxy DNS
 # (hosts-file entry above) to eth1's IP, then hits http://llama:<cp>/v1.

@@ -83,3 +83,14 @@ class TestIsIpInBlockedRanges:
         assert not is_ip_in_blocked_ranges("1.1.1.1", ranges)
         assert not is_ip_in_blocked_ranges("93.184.216.34", ranges)
         assert not is_ip_in_blocked_ranges("invalid_ip", ranges)
+
+
+class TestProxyIsolation:
+    def test_proxy_entrypoint_protects_mitmweb_from_agent_interface(self):
+        root_dir = Path(__file__).resolve().parent.parent.parent
+        entrypoint = root_dir / "pi-coding-agent-proxy" / "entrypoint.sh"
+        assert entrypoint.exists()
+        content = entrypoint.read_text()
+        assert "ipt -A INPUT -i eth1 -p tcp --dport 8081 -j REJECT --reject-with tcp-reset" in content
+        assert "ipt -A INPUT -i eth1 -p udp --dport 8081 -j DROP" in content
+        assert "--web-host 0.0.0.0" in content

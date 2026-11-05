@@ -63,9 +63,9 @@ def compute_image_hash(project_dir: Path, repo_root: Path | None = None) -> str 
     return combined_hash.hexdigest()[:16]
 
 
-def compute_proxy_image_hash(repo_root: Path | None = None) -> str:
+def compute_proxy_image_hash(repo_root: Path | str | None = None) -> str:
     """Compute content hash for files affecting the proxy container image."""
-    r_root = repo_root or REPO_ROOT
+    r_root = Path(repo_root) if repo_root else REPO_ROOT
     proxy_dir = r_root / "pi-coding-agent-proxy"
     files_to_hash: list[Path] = []
 
@@ -91,7 +91,7 @@ def compute_proxy_image_hash(repo_root: Path | None = None) -> str:
     return combined_hash.hexdigest()[:16]
 
 
-def proxy_image_is_current(repo_root: Path | None = None, runtime: str | None = None) -> bool:
+def proxy_image_is_current(repo_root: Path | str | None = None, runtime: str | None = None) -> bool:
     """Check if the proxy image exists and matches current definition content hashes."""
     if not image_exists(PROXY_IMAGE_TAG, runtime=runtime):
         return False
