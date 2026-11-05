@@ -401,6 +401,7 @@ ENV PI_CONTAINER=1
 ENV PI_CONTAINER_HOST_IP=169.254.1.2
 
 COPY pi-coding-agent/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY pi-coding-agent/t3-advertise-host.cjs /usr/local/share/pi-container/t3-advertise-host.cjs
 
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 

@@ -106,6 +106,7 @@ SCHEMA: dict = {
             "devices": {"type": list, "required": False},
             "read_only_pi_container": {"type": (bool, str, int), "required": False},
             "mode": {"type": str, "required": False},
+            "advertise_host": {"type": (str, type(None)), "required": False},
             "ports": {
                 "type": dict,
                 "required": False,

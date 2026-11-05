@@ -378,6 +378,15 @@ def read_agent_mode(config_dir: Path | None = None) -> str:
     return mode or "cli"
 
 
+def read_agent_advertise_host(config_dir: Path | None = None) -> str | None:
+    """Advertised host address/name for published agent services from config.yaml ``agent.advertise_host``."""
+    section = load_project_config(config_dir).get("agent") or {}
+    host = section.get("advertise_host")
+    if host is not None:
+        host = str(host).strip()
+    return host or None
+
+
 # ─── Token Replacer Config Scanner (duplicated from pi-coding-agent-proxy/addons/token_replacer)
 #
 # run.py lives outside pi-coding-agent-proxy and must not import from it.

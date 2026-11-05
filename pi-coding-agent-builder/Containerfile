@@ -446,7 +446,7 @@ FROM deps AS t3
 ARG T3_VERSION=0.1.7
 ARG T3_SHA256_AMD64=c089892bf7922e2e73c6f44a5d1ea125c99f70e378c18361cbbed2fba1920e6c
 ARG T3_SHA256_ARM64=5a528e23af394cc6f359036d3cb8441fda14129d477630fc6c53e4f4a1025bc8
-COPY pi-coding-agent-builder/tools/t3/build.sh /build/tools/t3/
+COPY pi-coding-agent-builder/tools/t3/ /build/tools/t3/
 RUN bash /build/tools/t3/build.sh
 
 FROM scratch AS stage-t3

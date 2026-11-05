@@ -93,7 +93,21 @@ exec gosu pi bash -c '
         echo "  Starting T3 Code server for Pi inside pi-container..."
         echo "  Web UI: https://t3.codes"
         echo "=================================================================="
-        exec t3 serve --host 0.0.0.0 --port "${T3_PORT:-3773}" "$@"
+        _shim=""
+        if [ -f /usr/local/share/pi-container/t3-advertise-host.cjs ]; then
+            _shim="/usr/local/share/pi-container/t3-advertise-host.cjs"
+        elif [ -f /usr/local/lib/t3/t3-advertise-host.cjs ]; then
+            _shim="/usr/local/lib/t3/t3-advertise-host.cjs"
+        fi
+        if [ -n "$_shim" ]; then
+            export NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }--require ${_shim}"
+        fi
+        export T3_ADVERTISE_HOST="${T3_ADVERTISE_HOST:-localhost}"
+        extra_args=()
+        if [ "${T3_LAN:-}" = "true" ] || [ "${T3CODE_LAN:-}" = "true" ]; then
+            extra_args+=("--lan")
+        fi
+        exec t3 serve --host 0.0.0.0 --port "${T3_PORT:-3773}" "${extra_args[@]}" "$@"
     else
         exec pi "$@"
     fi

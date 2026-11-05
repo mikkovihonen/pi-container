@@ -903,3 +903,49 @@ class TestToolsSchema:
             is_valid, errors, _ = validate_config(valid_config)
         assert is_valid is False
         assert any("expected string tool name" in e for e in errors)
+
+    def test_agent_advertise_host_valid(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["agent"]["advertise_host"] = "192.168.1.100"
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is True
+        assert errors == []
+
+    def test_agent_advertise_host_invalid_type(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["agent"]["advertise_host"] = 12345
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is False
+        assert any("agent.advertise_host" in e for e in errors)
+
+    def test_duplicate_key_error_handling(self, tmp_path: Path):
+        from config_schema import validate_config
+
+        p = tmp_path / "config.yaml"
+        p.write_text("agent:\n  mode: cli\nagent:\n  mode: t3\n")
+        is_valid, errors, _ = validate_config(p)
+        assert is_valid is False
+        assert any("duplicate key" in e.lower() for e in errors)
+
+    def test_validate_project_yaml(self, tmp_path: Path):
+        from config_schema import validate_project_yaml
+
+        (tmp_path / "config.yaml").write_text("foo: 1\nfoo: 2\n")
+        (tmp_path / "allowlist.yaml").write_text("bar: 1\n")
+        (tmp_path / "token_replacer.yaml").write_text("baz: 1\n")
+
+        errors = validate_project_yaml(tmp_path)
+        assert len(errors) == 1
+        assert "duplicate key" in errors[0].lower()

@@ -39,6 +39,7 @@ from flow_export import export_mitmweb_flows, poll_agent_container_ips, recover_
 from models import Model
 from network import (
     ContainerNetworkManager,
+    read_agent_advertise_host,
     read_agent_extras,
     read_agent_mode,
     read_agent_ports,
@@ -252,9 +253,35 @@ def main() -> None:
             f"nested_containers.enabled is false; nothing is published."
         )
 
-    cli_t3 = "--t3" in sys.argv
-    container_argv = [arg for arg in sys.argv[1:] if arg != "--t3"]
+    cli_t3 = False
+    cli_t3_advertise_host: str | None = None
+    container_argv: list[str] = []
+    _arg_i = 0
+    _raw_args = sys.argv[1:]
+    while _arg_i < len(_raw_args):
+        _arg = _raw_args[_arg_i]
+        if _arg == "--t3":
+            cli_t3 = True
+            _arg_i += 1
+            continue
+        if _arg == "--t3-advertise-host" and _arg_i + 1 < len(_raw_args):
+            cli_t3_advertise_host = _raw_args[_arg_i + 1]
+            _arg_i += 2
+            continue
+        if _arg.startswith("--t3-advertise-host="):
+            cli_t3_advertise_host = _arg.split("=", 1)[1]
+            _arg_i += 1
+            continue
+        container_argv.append(_arg)
+        _arg_i += 1
+
     is_t3_mode = cli_t3 or (read_agent_mode(pi_container_dir) == "t3")
+    t3_advertise_host = (
+        cli_t3_advertise_host
+        or os.environ.get("T3_ADVERTISE_HOST")
+        or read_agent_advertise_host(pi_container_dir)
+        or "localhost"
+    )
 
     agent_ports = read_agent_ports(pi_container_dir)
     if is_t3_mode:
@@ -285,6 +312,7 @@ def main() -> None:
         logger.info(
             f"T3 Code mode enabled (https://t3.codes):"
             f"\n  Inbound server port: {t3_bind}:3773"
+            f"\n  Advertised host: {t3_advertise_host}"
             f"\n  Starting T3 Code server for Pi inside container..."
             f"\n  Once initialized, open https://t3.codes and use the pairing link displayed below."
         )
@@ -530,7 +558,17 @@ def main() -> None:
                 "--env",
                 f"IPV6_ENABLED={str(ipv6_enabled).lower()}",
                 *(["--env", f"DEFAULT_ROUTE6={proxy_isolated_ip6}"] if proxy_isolated_ip6 else []),
-                *(["--env", "PI_CONTAINER_MODE=t3"] if is_t3_mode else []),
+                *(
+                    [
+                        "--env",
+                        "PI_CONTAINER_MODE=t3",
+                        "--env",
+                        f"T3_ADVERTISE_HOST={t3_advertise_host}",
+                        *(["--env", "T3_LAN=true"] if agent_ports["expose"] == "lan" else []),
+                    ]
+                    if is_t3_mode
+                    else []
+                ),
                 *RUNTIME.tmpfs_args("/home/pi/"),
                 "--volume",
                 f"{agent_config_dir}:/home/pi/.pi/agent",

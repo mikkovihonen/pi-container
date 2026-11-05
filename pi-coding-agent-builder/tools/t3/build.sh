@@ -29,6 +29,10 @@ mkdir -p "${PI_STAGE}/usr/local/lib/t3"
 tar -C "${PI_STAGE}/usr/local/lib/t3" --strip-components=1 -xzf "/tmp/${t3_tarball}"
 rm -f "/tmp/${t3_tarball}"
 
+if [ -f "${SCRIPT_DIR}/t3-advertise-host.cjs" ]; then
+    cp "${SCRIPT_DIR}/t3-advertise-host.cjs" "${PI_STAGE}/usr/local/lib/t3/t3-advertise-host.cjs"
+fi
+
 mkdir -p "${PI_STAGE}/usr/local/bin"
 ln -sf ../lib/t3/t3 "${PI_STAGE}/usr/local/bin/t3"
 

@@ -102,6 +102,9 @@ agent:
     # Execution mode: "cli" (default interactive terminal) or "t3" (headless server)
     mode: t3
 
+    # Advertised host for pairing links and QR codes (defaults to "localhost")
+    advertise_host: localhost
+
     # Inbound host ports published directly from the agent container
     ports:
         # expose: localhost (127.0.0.1 only) or lan (0.0.0.0)
@@ -110,6 +113,20 @@ agent:
             - 3773              # host 3773 -> container 3773
             - "13773:3773"      # custom host port 13773 -> container 3773
 ```
+
+### Host Advertising & Pairing URLs
+
+When T3 Code runs inside a container, `t3 serve` must bind to `--host 0.0.0.0` so forwarded traffic from the host (`-p 127.0.0.1:3773:3773`) is accepted. By default, T3 Code inspects container network interfaces and would advertise the internal bridge IP (e.g. `10.89.0.2`), which is unreachable from host browsers.
+
+`pi-container` includes an automated network shim (`t3-advertise-host.cjs`) that ensures pairing URLs, connection links, and terminal QR codes always display `localhost` (or your chosen host IP):
+
+- **Default (`localhost`)**: The pairing link displays `http://localhost:3773/pair#token=...` and works directly in host browsers.
+- **Custom Host / LAN IP**: If you expose the port on your local network (`agent.ports.expose: lan`) and want to scan the terminal QR code or pair from a phone or second device, configure `agent.advertise_host` in `config.yaml` or pass `--t3-advertise-host`:
+    ```bash
+    ./run.sh --t3 --t3-advertise-host 192.168.1.100
+    ```
+    The terminal pairing URL and rendered QR code will then be generated with `http://192.168.1.100:3773/pair#token=...`.
+
 
 ### Network Allowlist (`allowlist.yaml`)
 

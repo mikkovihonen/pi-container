@@ -936,6 +936,74 @@ class TestReadAgentMode:
         assert read_agent_mode(tmp_path) == "t3"
 
 
+class TestReadAgentAdvertiseHost:
+    def test_default_advertise_host_none(self, tmp_path):
+        from network import read_agent_advertise_host
+
+        (tmp_path / "config.yaml").write_text("agent: {}\n")
+        assert read_agent_advertise_host(tmp_path) is None
+
+    def test_explicit_advertise_host(self, tmp_path):
+        from network import read_agent_advertise_host
+
+        (tmp_path / "config.yaml").write_text("agent:\n  advertise_host: 192.168.1.50\n")
+        assert read_agent_advertise_host(tmp_path) == "192.168.1.50"
+
+    def test_whitespace_advertise_host(self, tmp_path):
+        from network import read_agent_advertise_host
+
+        (tmp_path / "config.yaml").write_text("agent:\n  advertise_host: '  '\n")
+        assert read_agent_advertise_host(tmp_path) is None
+
+
+class TestTokenReplacerSecretsResolution:
+    def _make_mgr(self, tmp_path):
+        from network import ContainerNetworkManager
+
+        return ContainerNetworkManager(
+            container_runtime="podman",
+            network_name="test-net",
+            proxy_image="proxy:latest",
+            config_dir=tmp_path,
+        )
+
+    def test_missing_config_returns_empty(self, tmp_path):
+        mgr = self._make_mgr(tmp_path)
+        assert mgr._pull_secrets_from_config() == {}
+
+    def test_no_env_refs_returns_empty(self, tmp_path):
+        (tmp_path / "token_replacer.yaml").write_text("rules: []\n")
+        mgr = self._make_mgr(tmp_path)
+        assert mgr._pull_secrets_from_config() == {}
+
+    def test_resolves_and_sets_env(self, tmp_path, monkeypatch):
+        import os
+
+        (tmp_path / "token_replacer.yaml").write_text(
+            "rules:\n  - match: {header: 'X-Key'}\n    replace_with:\n      value: '${ENV:MY_SECRET}'\n"
+        )
+        monkeypatch.setattr("secret_store.resolve_secret", lambda var: "secret-val-99")
+        mgr = self._make_mgr(tmp_path)
+        secrets = mgr._pull_secrets_from_config()
+        assert secrets == {"MY_SECRET": "secret-val-99"}
+        assert os.environ.get("MY_SECRET") == "secret-val-99"
+        os.environ.pop("MY_SECRET", None)
+
+    def test_unresolved_secret_warns(self, tmp_path, monkeypatch):
+        (tmp_path / "token_replacer.yaml").write_text(
+            "rules:\n  - match: {header: 'X-Key'}\n    replace_with:\n      value: '${ENV:UNSET_SECRET}'\n"
+        )
+        monkeypatch.setattr("secret_store.resolve_secret", lambda var: None)
+        mgr = self._make_mgr(tmp_path)
+        secrets = mgr._pull_secrets_from_config()
+        assert secrets == {}
+
+    def test_env_flags_formatting(self, tmp_path):
+        mgr = self._make_mgr(tmp_path)
+        flags = mgr._env_flags({"B_VAR": "val2", "A_VAR": "val1"})
+        assert flags == ["--env", "A_VAR", "--env", "B_VAR"]
+
+
 # ---------------------------------------------------------------------------
 # ContainerNetworkManager._preflight_ipv6_egress + warn_if_proxy_lacks_ipv6_egress
 # ---------------------------------------------------------------------------

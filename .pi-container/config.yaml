@@ -51,6 +51,7 @@ agent:
   mounts: []
   read_only_pi_container: true
   mode: cli
+  advertise_host: localhost
   ports:
     expose: localhost
     publish: []
