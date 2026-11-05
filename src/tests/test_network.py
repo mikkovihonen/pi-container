@@ -150,6 +150,19 @@ class TestContainerNetworkManagerPullSecrets:
 
         assert secrets == {}
 
+    def test_resolves_secret_from_keyring_when_env_unset(self, tmp_path):
+        config = {"rules": [{"replace_with": {"value": "${ENV:KEYRING_SECRET}"}}]}
+        config_file = tmp_path / "token_replacer.yaml"
+        import yaml
+
+        config_file.write_text(yaml.dump(config))
+
+        with patch.dict(os.environ, {}, clear=True), patch("keyring.get_password", return_value="vault_pass_999"):
+            mgr = self._make_manager(tmp_path)
+            secrets = mgr._pull_secrets_from_config()
+            assert secrets == {"KEYRING_SECRET": "vault_pass_999"}
+            assert os.environ.get("KEYRING_SECRET") == "vault_pass_999"
+
 
 # ---------------------------------------------------------------------------
 # ContainerNetworkManagerEnvFlags
@@ -434,6 +447,16 @@ class TestPerProjectProxy:
         assert "pi-proxy-aaaaaaaaaa" in a.paths["clients_file"].name
         # Lock dir itself is shared (kept out of user workspaces).
         assert a.paths["lock_dir"] == b.paths["lock_dir"]
+
+    def test_custom_lock_dir(self, tmp_path):
+        custom_lock_dir = tmp_path / "custom_locks"
+        mgr = ContainerNetworkManager(
+            "podman",
+            "test-net",
+            "test-image",
+            lock_dir=custom_lock_dir,
+        )
+        assert mgr.paths["lock_dir"] == custom_lock_dir
 
     def test_find_free_port_returns_valid_port(self):
         from util import get_free_port
@@ -1100,6 +1123,34 @@ class TestContainerNetworkManagerLlamaHostnames:
         )
 
         assert mgr._is_existing_proxy_healthy() is True
+
+    def test_is_existing_proxy_healthy_checks_secrets_match(self, tmp_path, monkeypatch):
+        """When running proxy has stale secrets, _is_existing_proxy_healthy returns False."""
+        import json
+
+        from network import ContainerNetworkManager
+
+        mgr = ContainerNetworkManager(
+            container_runtime="podman",
+            network_name="test-net",
+            proxy_image="test-proxy:latest",
+            proxy_name="test-proxy",
+            config_dir=tmp_path,
+        )
+        mgr._query_published_port = MagicMock(return_value=8080)
+        monkeypatch.setattr("urllib.request.urlopen", lambda url, timeout=3: MagicMock())
+
+        # Mock inspect returning old secret value
+        mock_env = json.dumps(["OPPER_API_KEY=old_secret"])
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda cmd, **kwargs: MagicMock(returncode=0, stdout=mock_env),
+        )
+
+        # Expected secret is new_secret
+        mgr._pull_secrets_from_config = MagicMock(return_value={"OPPER_API_KEY": "new_secret"})
+
+        assert mgr._is_existing_proxy_healthy() is False
 
 
 class TestReadProxyConfig:

@@ -15,8 +15,8 @@ if TYPE_CHECKING:
 
 sys.dont_write_bytecode = True
 
-from models import ServerConfig
 from network import ContainerNetworkManager
+from registry import LlamaServerModelDef, load_gateway_def, load_model_def, seed_default_models
 from server import Server
 from util import is_pid_alive, run_quiet
 
@@ -203,22 +203,30 @@ def hostname_allowed(host: str, patterns: list[str]) -> bool:
     return False
 
 
-def warn_about_registry_allowlist(config_dir: Path) -> None:
-    """Warn when nested containers are enabled but registry blob domains are missing from allowlist."""
+def get_allowed_hostnames(config_dir: Path) -> list[str] | None:
+    """Extract allowlisted hostnames and pattern strings from allowlist.yaml, or None if unreadable."""
     allowlist_path = config_dir / "allowlist.yaml"
     try:
         from yaml_strict import load_yaml_file
 
         data = load_yaml_file(allowlist_path) or {}
     except Exception:
-        return
+        return None
 
-    patterns = [
+    return [
         str(host)
         for rule in (data.get("global") or {}).get("rules", []) or []
         if str((rule or {}).get("mode", "allow")) == "allow"
         for host in (rule or {}).get("hostnames", []) or []
     ]
+
+
+def warn_about_registry_allowlist(config_dir: Path) -> None:
+    """Warn when nested containers are enabled but registry blob domains are missing from allowlist."""
+    allowlist_path = config_dir / "allowlist.yaml"
+    patterns = get_allowed_hostnames(config_dir)
+    if patterns is None:
+        return
 
     allowed = [registry for registry in _REGISTRY_BLOB_HOSTS if any(registry in pattern for pattern in patterns)]
     if not allowed:
@@ -240,6 +248,32 @@ def warn_about_registry_allowlist(config_dir: Path) -> None:
                 f"{registry} is allowed in {allowlist_path}, but the host its layer blobs redirect to "
                 f"is not ({', '.join(missing)}); pulls will resolve the manifest and then fail on the "
                 f"first layer with mitmproxy's 403. Add those hostnames to the rule."
+            )
+
+
+def warn_about_gateway_allowlist(config_dir: Path, gateway_configs: list[dict]) -> None:
+    """Warn when gateway baseUrl hostnames are missing from allowlist.yaml."""
+    if not gateway_configs:
+        return
+
+    allowlist_path = config_dir / "allowlist.yaml"
+    patterns = get_allowed_hostnames(config_dir)
+    if patterns is None:
+        return
+
+    for gw in gateway_configs:
+        base_url = gw.get("baseUrl")
+        if not base_url:
+            continue
+        parsed_host = urlparse(base_url).hostname
+        if not parsed_host or parsed_host in ("localhost", "127.0.0.1", "::1"):
+            continue
+
+        if not hostname_allowed(parsed_host, patterns):
+            logger.warning(
+                f"Gateway '{gw['name']}' uses baseUrl '{base_url}', but host '{parsed_host}' "
+                f"is not allowed in {allowlist_path}; requests from the agent container will "
+                f"fail with mitmproxy's 403 Forbidden. Add '{parsed_host}' to allowlist.yaml."
             )
 
 
@@ -293,18 +327,47 @@ def port_holders(runtime: str, ports: list[int], project_key: str = "") -> dict[
     return holders
 
 
-def extract_server_configs(data: dict) -> tuple[list[dict], set[str]]:
-    """Extract ServerConfig mappings and custom hostnames from models.json provider definitions."""
-    server_configs = []
+def extract_server_configs(
+    data: dict,
+    models_dir: Path | None = None,
+    gateways_dir: Path | None = None,
+) -> tuple[list[dict], set[str], list[dict]]:
+    """Extract ServerConfig mappings, custom hostnames, and gateway configs from models.json provider definitions."""
+    server_configs: list[dict] = []
+    gateway_configs: list[dict] = []
     llama_hostnames: set[str] = {"llama"}
+
+    # Seed default model definition if registry is empty
+    seed_default_models(models_dir)
+
     for name, val in data.get("providers", {}).items():
-        if isinstance(val, dict) and "serverCustomParameters" in val:
-            server_config = ServerConfig.from_dict(val["serverCustomParameters"])
-            base_url = val.get("baseUrl")
-            server_configs.append({"name": name, "config": server_config, "baseUrl": base_url})
-            llama_hostnames.add(name)
-            if base_url:
-                parsed_host = urlparse(base_url).hostname
-                if parsed_host and parsed_host not in ("localhost", "127.0.0.1", "::1"):
-                    llama_hostnames.add(parsed_host)
-    return server_configs, llama_hostnames
+        if not isinstance(val, dict):
+            continue
+        base_url = val.get("baseUrl")
+
+        # 1. Check if provider is an external gateway in ~/.config/pi-container/gateways/
+        gw_def = load_gateway_def(name, registry_dir=gateways_dir)
+        if gw_def:
+            effective_base_url = base_url or gw_def.base_url
+            gateway_configs.append({"name": name, "gatewayDef": gw_def, "baseUrl": effective_base_url})
+            continue
+
+        # 2. Look up local models in ~/.config/pi-container/models/ (llama-server)
+        for m in val.get("models", []):
+            if not isinstance(m, dict):
+                continue
+            model_id = m.get("id")
+            if not model_id:
+                continue
+
+            m_def = load_model_def(model_id, registry_dir=models_dir)
+            if isinstance(m_def, LlamaServerModelDef):
+                server_configs.append({"name": name, "config": m_def.server_config, "baseUrl": base_url})
+                llama_hostnames.add(name)
+                if base_url:
+                    parsed_host = urlparse(base_url).hostname
+                    if parsed_host and parsed_host not in ("localhost", "127.0.0.1", "::1"):
+                        llama_hostnames.add(parsed_host)
+                break
+
+    return server_configs, llama_hostnames, gateway_configs

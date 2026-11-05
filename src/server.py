@@ -64,6 +64,7 @@ class Server:
         container_port: int | None = None,
         startup_timeout: int = 180,
         startup_attempts: int = 2,
+        logs_dir: Path | None = None,
     ) -> None:
         self.config: ServerConfig = config
         self.server_id: str = server_id
@@ -71,6 +72,7 @@ class Server:
         self.llama_bin: str = llama_bin or ""
         self.lock_dir: Path = lock_dir
         self.repo_root: Path = repo_root
+        self.logs_dir: Path = logs_dir if logs_dir is not None else (self.repo_root / "llama-server" / "logs")
         # llama-server startup tuning (config.yaml llama.*). Large models load
         # slowly; ``startup_timeout`` is the /health wait per attempt and
         # ``startup_attempts`` the number of (re)launches before giving up.
@@ -95,7 +97,7 @@ class Server:
             "ref_count_lock": server_lock_dir / ".llama_server_refcount.lock",
             "clients_file": server_lock_dir / ".llama_server_clients.json",
             "pid_file": server_lock_dir / ".llama_server.pid",
-            "log_file": self.repo_root / "llama-server" / "logs" / self.instance_key / "llama-server.log",
+            "log_file": self.logs_dir / self.instance_key / "llama-server.log",
         }
 
         for label, model_config in self.config.hf_models.items():
@@ -161,6 +163,20 @@ class Server:
                     if self.lock_dir.exists() and not any(self.lock_dir.iterdir()):
                         self.lock_dir.rmdir()
 
+    def _read_recent_log_tail(self, max_lines: int = 15) -> str:
+        """Read the last few lines from the llama-server log file if present."""
+        if not self.paths["log_file"].exists():
+            return ""
+        try:
+            content = self.paths["log_file"].read_text(errors="replace").strip()
+            if not content:
+                return ""
+            lines = content.splitlines()
+            tail = lines[-max_lines:]
+            return "\n".join(f"  {line}" for line in tail)
+        except Exception:
+            return ""
+
     def wait_for_server(self, timeout: int | None = None) -> bool:
         timeout = self.startup_timeout if timeout is None else timeout
         logger.info(f"[Server: {self.server_id}] Waiting for llama-server on port {self.port}")
@@ -171,6 +187,9 @@ class Server:
                     os.kill(self.server_pid, 0)
                 except OSError:
                     logger.error(f"[Server: {self.server_id}] Process died during startup.")
+                    tail = self._read_recent_log_tail()
+                    if tail:
+                        logger.error(f"[Server: {self.server_id}] llama-server log output:\n{tail}")
                     return False
             else:
                 return False
@@ -190,6 +209,9 @@ class Server:
             logger.info(f"[Server: {self.server_id}] Waiting... ({elapsed}s elapsed)")
 
         logger.error(f"[Server: {self.server_id}] Timed out waiting for llama-server")
+        tail = self._read_recent_log_tail()
+        if tail:
+            logger.error(f"[Server: {self.server_id}] llama-server log output:\n{tail}")
         return False
 
     def start(self) -> int:
@@ -286,20 +308,28 @@ class Server:
                 *self._get_server_flags(),
             ]
 
-            process = subprocess.Popen(
-                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
-            )
+            with open(self.paths["log_file"], "ab") as log_file_fp:
+                process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=log_file_fp, start_new_session=True)
             self.server_pid = process.pid
 
             try:
+                time.sleep(0.05)
                 if process.poll() is not None:
-                    raise Exception("llama-server died immediately")
+                    tail = self._read_recent_log_tail()
+                    error_detail = f":\n{tail}" if tail else ""
+                    raise Exception(f"llama-server died immediately (exit code {process.returncode}){error_detail}")
 
                 # pid file: llama pid and port.
                 self.paths["pid_file"].write_text(f"{process.pid}\n{port}\n")
 
                 if self.wait_for_server():
                     return  # Success!
+                elif process.poll() is not None:
+                    tail = self._read_recent_log_tail()
+                    error_detail = f":\n{tail}" if tail else ""
+                    raise Exception(
+                        f"llama-server died during startup on port {port} (exit code {process.returncode}){error_detail}"
+                    )
                 else:
                     raise Exception(f"Timed out waiting for llama-server on port {port}")
 

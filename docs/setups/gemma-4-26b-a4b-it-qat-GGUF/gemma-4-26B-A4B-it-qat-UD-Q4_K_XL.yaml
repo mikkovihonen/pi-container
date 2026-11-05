@@ -1,0 +1,64 @@
+# Place in ~/.config/pi-container/models/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.yaml
+id: gemma-4-26B-A4B-it-qat-UD-Q4_K_XL
+kind: llama-server
+description: "Gemma 4 26B with draft MTP"
+
+hfModels:
+  main:
+    fileFlag: "--model"
+    repo: "unsloth/gemma-4-26B-A4B-it-qat-GGUF"
+    file: "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf"
+    dir: "gemma-4-26B-A4B-it-qat-GGUF"
+  draft:
+    fileFlag: "--model-draft"
+    repo: "unsloth/gemma-4-26B-A4B-it-qat-GGUF"
+    file: "mtp-gemma-4-26B-A4B-it.gguf"
+    dir: "gemma-4-26B-A4B-it-qat-GGUF"
+    additionalServerFlags:
+      - "--spec-type"
+      - "draft-mtp"
+      - "--spec-draft-n-min"
+      - 1
+      - "--spec-draft-n-max"
+      - 4
+
+flags:
+  - "--load-mode"
+  - "mlock"
+  - "--kv-offload"
+  - "--threads"
+  - 10
+  - "--threads-batch"
+  - 8
+  - "--parallel"
+  - 1
+  - "--batch-size"
+  - 4096
+  - "--ubatch-size"
+  - 512
+  - "--flash-attn"
+  - "on"
+  - "--ctx-size"
+  - 131072
+  - "--ctx-checkpoints"
+  - 32
+  - "--checkpoint-min-step"
+  - 256
+  - "--repeat-penalty"
+  - 1.0
+  - "--top-p"
+  - 0.95
+  - "--top-k"
+  - 64
+  - "--prio"
+  - 2
+  - "--cache-ram"
+  - 8192
+  - "--jinja"
+  - "--chat-template-file"
+  - ".pi-container/chat-templates/gemma-4-26B-A4B-it/chat_template.jinja"
+  - "--reasoning"
+  - "on"
+  - "--n-gpu-layers"
+  - 999
+

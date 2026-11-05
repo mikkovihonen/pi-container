@@ -36,47 +36,33 @@
             "top_k": 64
           }
         }
-      ],
-      "serverCustomParameters": {
-        "hfModels": {
-          "main": {
-            "fileFlag": "--model",
-            "repo": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
-            "file": "Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf",
-            "dir": "Qwen3.6-35B-A3B-MTP-GGUF",
-            "additionalServerFlags": [
-              "--spec-type", "draft-mtp",
-              "--spec-draft-n-max", 2
-            ],
-            "sha256": ""
-          }
-        },
-        "flags": [
-          "--no-mmap",
-          "--mlock",
-          "--kv-offload",
-          "--threads", 8,
-          "--threads-batch", 8,
-          "--parallel", 1,
-          "--batch-size", 4096,
-          "--ubatch-size", 512,
-          "--flash-attn", "on",
-          "--cache-type-k", "q8_0",
-          "--cache-type-v", "q8_0",
-          "--ctx-size", 131072,
-          "--ctx-checkpoints", 32,
-          "--checkpoint-min-step", 256,
-          "--repeat-penalty", 1.0,
-          "--top_p", 0.95,
-          "--top_k", 64,
-          "--prio", 2,
-          "--cache-ram", 8192,
-          "--jinja",
-          "--chat-template-file", ".pi-container/chat-templates/Qwen3.6-35B-A3B-UD-Q6_K-XL/chat_template.jinja",
-          "--chat-template-kwargs", "{\"enable_thinking\":true}",
-          "--n-gpu-layers", 999
-        ]
-      }
+      ]
+    },
+    "opper": {
+      "baseUrl": "https://api.opper.ai/v3/compat",
+      "api": "openai-completions",
+      "apiKey": "OPPER_API_KEY_PLACEHOLDER",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": true,
+        "supportsUsageInStreaming": true,
+        "supportsStrictMode": false,
+        "supportsLongCacheRetention": false,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "claude-sonnet-4-6",
+          "name": "Claude Sonnet 4.6 (Opper Failover Pool)",
+          "contextWindow": 200000,
+          "compactionThreshold": 180000,
+          "maxTokens": 8192,
+          "streaming": true,
+          "toolCalling": true,
+          "vision": true
+        }
+      ]
     }
   }
 }

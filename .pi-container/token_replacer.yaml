@@ -1,4 +1,16 @@
-# No token replacements needed for pi-container in this project
 global:
   log_replacements: true
   dry_run: false
+
+rules:
+  - name: "Inject Opper API Key"
+    hostnames:
+      - "api.opper.ai"
+      - "*.opper.ai"
+    content_patterns:
+      - field: "headers"
+        header_name: "Authorization"
+        regex: "(?<=Bearer\\s)(?:OPPER_API_KEY_PLACEHOLDER|opper-api-key)"
+    replace_with:
+      strategy: "static"
+      value: "${ENV:OPPER_API_KEY}"

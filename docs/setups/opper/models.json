@@ -1,0 +1,62 @@
+{
+  "providers": {
+    "opper": {
+      "baseUrl": "https://api.opper.ai/v3/compat",
+      "api": "openai-completions",
+      "apiKey": "OPPER_API_KEY_PLACEHOLDER",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": true,
+        "supportsUsageInStreaming": true,
+        "supportsStrictMode": false,
+        "supportsLongCacheRetention": false,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "anthropic/claude-sonnet-4-6",
+          "name": "Claude Sonnet 4.6 (Opper)",
+          "contextWindow": 200000,
+          "compactionThreshold": 180000,
+          "maxTokens": 8192,
+          "streaming": true,
+          "toolCalling": true,
+          "vision": true,
+          "reasoning": true
+        },
+        {
+          "id": "openai/gpt-5-mini",
+          "name": "GPT-5 Mini (Opper)",
+          "contextWindow": 128000,
+          "compactionThreshold": 115000,
+          "maxTokens": 8192,
+          "streaming": true,
+          "toolCalling": true,
+          "vision": true
+        },
+        {
+          "id": "deepseek-ai/deepseek-v3",
+          "name": "DeepSeek V3 (Opper)",
+          "contextWindow": 64000,
+          "compactionThreshold": 58000,
+          "maxTokens": 8192,
+          "streaming": true,
+          "toolCalling": true,
+          "vision": false
+        },
+        {
+          "id": "claude-sonnet-4-6",
+          "name": "Claude Sonnet (Opper Dynamic Failover Pool)",
+          "contextWindow": 200000,
+          "compactionThreshold": 180000,
+          "maxTokens": 8192,
+          "streaming": true,
+          "toolCalling": true,
+          "vision": true
+        }
+      ]
+    }
+  }
+}
+

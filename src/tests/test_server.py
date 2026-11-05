@@ -264,14 +264,43 @@ class TestServerStartNewProcess:
         mock_proc = MagicMock()
         mock_proc.pid = 1234
         mock_proc.poll.return_value = 1  # died immediately
+        mock_proc.returncode = 1
+
+        # Simulate llama-server writing CLI error to log file
+        s.paths["log_file"].parent.mkdir(parents=True, exist_ok=True)
+        s.paths["log_file"].write_text("error: invalid argument: --no-mmap\n")
 
         with (
             patch("server.subprocess.Popen", return_value=mock_proc),
             patch("server.get_free_port", return_value=18080),
             patch("server.stop_process_group"),
-            pytest.raises(Exception, match="died immediately"),
+            pytest.raises(Exception, match="error: invalid argument: --no-mmap"),
         ):
             s._start_new_server_process()
+
+    def test_read_recent_log_tail(self, tmp_path):
+        s = self._make_server(tmp_path)
+        assert s._read_recent_log_tail() == ""
+
+        s.paths["log_file"].parent.mkdir(parents=True, exist_ok=True)
+        s.paths["log_file"].write_text("line 1\nline 2\nline 3\n")
+        tail = s._read_recent_log_tail(max_lines=2)
+        assert tail == "  line 2\n  line 3"
+
+    def test_wait_for_server_logs_tail_when_process_dies(self, tmp_path):
+        s = self._make_server(tmp_path)
+        s.server_pid = 9999
+        s.port = 18080
+        s.paths["log_file"].parent.mkdir(parents=True, exist_ok=True)
+        s.paths["log_file"].write_text("Fatal error: model corrupted\n")
+
+        with (
+            patch("server.os.kill", side_effect=OSError),
+            patch("server.logger.error") as mock_log_error,
+        ):
+            result = s.wait_for_server(timeout=2)
+            assert result is False
+            assert any("Fatal error: model corrupted" in call.args[0] for call in mock_log_error.call_args_list)
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +470,29 @@ class TestConfigFingerprint:
     def test_instance_key_starts_with_server_id(self, tmp_path):
         a = self._server(tmp_path, ServerConfig.from_dict({"hfModels": {}, "flags": []}))
         assert a.instance_key.startswith("local-gemma-")
+
+    def test_custom_logs_dir(self, tmp_path):
+        custom_logs = tmp_path / "custom_logs"
+        mc = ModelConfig.from_dict(
+            {
+                "fileFlag": "--model",
+                "repo": "o/r",
+                "file": "m.gguf",
+                "dir": "d",
+                "additionalServerFlags": [],
+                "sha256": None,
+            }
+        )
+        s = Server(
+            config=ServerConfig(hf_models={"main": mc}, flags=[]),
+            models_dir=tmp_path / "models",
+            llama_bin="/bin/true",
+            lock_dir=tmp_path / "locks",
+            repo_root=tmp_path,
+            server_id="test",
+            logs_dir=custom_logs,
+        )
+        assert s.paths["log_file"].parent == custom_logs / s.instance_key
 
     def test_alias_uses_plain_server_id_not_instance_key(self, tmp_path):
         mc = ModelConfig.from_dict(

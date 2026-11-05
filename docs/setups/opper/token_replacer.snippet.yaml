@@ -1,0 +1,12 @@
+# Append to the rules list in .pi-container/token_replacer.yaml:
+- name: "Inject Opper API Key"
+  hostnames:
+    - "api.opper.ai"
+  content_patterns:
+    - field: "headers"
+      header_name: "Authorization"
+      regex: "(?<=Bearer\\s)OPPER_API_KEY_PLACEHOLDER"
+  replace_with:
+    strategy: "static"
+    value: "${ENV:OPPER_API_KEY}"
+
