@@ -193,3 +193,15 @@ baseUrl: "https://api.opper.ai/v3/compat"
     defs = list_gateway_defs(gw_dir)
     assert len(defs) == 1
     assert defs[0].id == "opper"
+
+
+def test_list_defs_strictly_yaml(tmp_path: Path):
+    gw_dir = tmp_path / "gateways"
+    gw_dir.mkdir(parents=True)
+    (gw_dir / "valid.yaml").write_text("id: valid\nbaseUrl: https://api.example.com\n")
+    (gw_dir / "ignored.yml").write_text("id: ignored\nbaseUrl: https://api.example.com\n")
+    (gw_dir / "ignored.json").write_text('{"id": "ignored", "baseUrl": "https://api.example.com"}')
+
+    defs = list_gateway_defs(gw_dir)
+    assert len(defs) == 1
+    assert defs[0].id == "valid"

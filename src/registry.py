@@ -277,13 +277,3 @@ def list_model_defs(registry_dir: Path | None = None) -> list[LlamaServerModelDe
             if m_def:
                 defs.append(m_def)
     return defs
-    if not target_dir.exists():
-        return []
-
-    defs: list[LlamaServerModelDef] = []
-    for path in sorted(target_dir.iterdir()):
-        if path.suffix in (".yaml", ".yml", ".json") and path.is_file():
-            m_def = load_model_def(path.stem, target_dir)
-            if m_def:
-                defs.append(m_def)
-    return defs
