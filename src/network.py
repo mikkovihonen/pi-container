@@ -17,7 +17,7 @@ import urllib.request
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from config import ADMIN_PASSWORD, CONFIG_DIR, REPO_ROOT
+from config import ADMIN_PASSWORD, CONFIG_DIR, PROXY_LOCK_DIR
 from runtimes import ContainerRuntime
 from util import (
     get_free_port,
@@ -407,6 +407,7 @@ class ContainerNetworkManager:
         llama_ports: str | None = None,
         llama_hostnames: str | None = None,
         ipv6: bool = False,
+        lock_dir: Path | None = None,
     ) -> None:
         # Accept either a runtime name (used by tests) or a ready ContainerRuntime.
         self.runtime: ContainerRuntime = (
@@ -427,11 +428,11 @@ class ContainerNetworkManager:
         # attaching to an already-running one. See ``mitmweb_url``.
         self.mitmweb_port: int | None = None
 
-        # Directory for cross-process synchronization. Kept under the repo (not a
+        # Directory for cross-process synchronization. Kept under user cache (not a
         # user workspace) so lock files never pollute projects. The proxy is
         # per-project, so refcount files are keyed by proxy_name — each workspace
         # refcounts (and tears down) its own proxy independently.
-        self.lock_dir: Path = REPO_ROOT / "pi-coding-agent-proxy" / ".locks"
+        self.lock_dir: Path = lock_dir if lock_dir is not None else PROXY_LOCK_DIR
         self.paths: dict[str, Path] = {
             "lock_dir": self.lock_dir,
             "ref_count_lock": self.lock_dir / f".{self.proxy_name}.lock",
@@ -456,6 +457,7 @@ class ContainerNetworkManager:
             )
             return {}
 
+        from secret_store import resolve_secret
         from yaml_strict import load_yaml_file
 
         config = load_yaml_file(config_path) or {}
@@ -467,14 +469,16 @@ class ContainerNetworkManager:
 
         secrets: dict[str, str] = {}
         for var in required_vars:
-            value = os.environ.get(var, "")
+            value = resolve_secret(var)
             if value:
                 secrets[var] = value
+                os.environ[var] = value
             else:
                 logger.warning(
                     f"Required secret '{var}' (referenced by token replacer config) "
-                    f"is not set in the host environment. The container will use "
-                    f"the config's fallback default, if any."
+                    f"is not set in the host environment or user keyring. The container will use "
+                    f"the config's fallback default, if any. "
+                    f"To store in keyring: uv run keyring set pi-container {var}"
                 )
         return secrets
 
@@ -911,6 +915,13 @@ class ContainerNetworkManager:
                     f"({running_hosts!r} != {expected_hosts!r}); restarting proxy."
                 )
                 return False
+
+            # Verify that running proxy secrets match expected secrets from config
+            expected_secrets = self._pull_secrets_from_config()
+            for sec_name, sec_val in expected_secrets.items():
+                if env_dict.get(sec_name) != sec_val:
+                    logger.info(f"Running proxy {self.proxy_name} has stale secret {sec_name}; restarting proxy.")
+                    return False
 
         except Exception as e:
             logger.debug(f"Could not inspect running proxy env: {e}")

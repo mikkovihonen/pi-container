@@ -6,7 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.6.0] - 2026-09-05
+
 ### Added
+- **Opper AI cloud gateway and user keyring secret integration.** Added support for external API-key model gateways (such as [Opper AI](https://platform.opper.ai/)) via `type: api-key` in `GatewayAuth`, with seamless secret resolution from the host environment or OS user keyring (macOS Keychain, Linux GNOME Keyring / Secret Service, Windows Credential Manager). Added `src/secret_store.py` for cross-platform keyring management, gateway hostname allowlist preflight warnings in `src/containers.py`, and ready-made setup templates in `docs/setups/opper/`.
+- **Decoupled global model registry (`~/.config/pi-container/models/`) and gateway support.** Decoupled `llama-server` and Hugging Face model definitions from `.pi-container/agent/models.json` into a global registry under `~/.config/pi-container/models/<id>.yaml`. Relocated runtime weights, locks, and logs to `~/.cache/pi-container/`. Added support for external model gateways (e.g. `https://gw.nitor.app`) with interactive browser OpenID Connect authentication (PKCE) and secure token caching in `~/.cache/pi-container/tokens/`. Default template seeding updated to Qwen3.6 and retired Ornith.
 - **Comprehensive security hardening configuration (`security:`).** Added a dedicated `security:` section to `config.yaml` and `schema_common.py` providing defense-in-depth safeguards:
     - `security.read_only_git_hooks` (default: `true`): Automatically mounts `/workspace/.git/hooks` as read-only (`:ro`) inside the container, preventing prompt-injected or untrusted agent code from planting malicious Git hooks that would execute with native developer privileges on the host machine.
     - `security.blocked_mount_paths`: Validates extra bind mounts configured in `agent.mounts` against a list of dangerous host directories (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.azure`, `~/.config/gcloud`, `~/.kube`, `~/.docker`, `/var/run/docker.sock`, `/var/run/podman/podman.sock`, `/etc/shadow`, `/etc/passwd`, `/etc/sudoers`, `/root`), failing fast with an actionable security error if any are requested.
@@ -25,6 +29,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Modularized `src/run.py` into dedicated subsystems.** Extracted workspace project scoping and template seeding into `src/project.py`, image hashing, caching, and pruning into `src/images.py`, shadow and nested container volumes into `src/volumes.py`, and container orphan cleanup, port probing, and registry allowlist checks into `src/containers.py`. `src/run.py` now serves as a clean, lightweight application entrypoint, and unit test suites have been partitioned into dedicated per-module test files.
 - **Concise purpose-focused docstrings across codebase.** Refactored module, class, and function docstrings across `src/` to be concise and focused on function purpose, inputs, outputs, and usage rather than historical implementation essays.
 - **Code deduplication and unused argument cleanup.** Unified client refcount calculation into `get_ref_count()` in `src/util.py` across `network.py` and `server.py`, deduplicated `_validate_models_schema` in `src/schema_common.py`, removed unused `pi_commands_path` parameter from `build_project_image()` in `src/build.py`, and removed unused `project_dir` parameter from `_cleanup_stale_project_images()` in `src/run.py`.
+
+### Fixed
+- **`llama-server` stderr capture and startup error visibility.** `Server._start_new_server_process()` now redirects `llama-server` stderr to the server instance's log file (`llama-server.log`) rather than discarding it to `/dev/null`. When `llama-server` fails to start (e.g. due to invalid CLI arguments, Metal/CUDA errors, or model corruption), the recent log output is surfaced directly in the exception message and logged to console, eliminating silent 0-byte log files.
+- **Updated default `llama-server` flags for modern versions.** Updated `pi-coding-agent/default/agent/models.json`, `docs/configuration.md`, and preset setup templates to replace deprecated/removed flags (`--no-mmap` and `--mlock` replaced with `--load-mode mlock`, `--top_p` with `--top-p`, `--top_k` with `--top-k`, and `--chat-template-kwargs` thinking flags with `--reasoning on`), resolving immediate startup crashes on `llama-server` 0.8.0+.
 
 ## [0.5.6] - 2026-08-28
 

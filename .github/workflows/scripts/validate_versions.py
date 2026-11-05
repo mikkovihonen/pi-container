@@ -35,12 +35,13 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import yaml  # noqa: E402  (must import after sys.path insertion)
 
+from registry import DEFAULT_QWEN_MODEL_DEF
 from schema_common import (
     MODELS_SCHEMA,
     SCHEMA,
     _validate_schema,
 )
-from template_paths import _check_chat_template_paths, _resolve_chat_template_path
+from template_paths import check_chat_template_paths
 from version import get_git_tag_version
 from yaml_strict import load_yaml_strict
 
@@ -286,55 +287,14 @@ def main() -> int:
     # ── Check 6: chat-template-file path existence ───────────────────────
     print()
     print("Validating chat-template-file references...")
-    models_path = seed_dir / "agent" / "models.json"
-    template_path_errors: list[str] = []
-
-    if not models_path.exists():
-        _info("No models.json found — skipping chat-template-file checks.")
-        models_data = None
-    else:
-        try:
-            import json as _json
-            with models_path.open("r") as f:
-                models_data = _json.load(f)
-        except Exception as e:
-            _error(f"Failed to parse models.json: {e}")
-            all_pass = False
-            models_data = None
-
-        if models_data is not None:
-            providers = models_data.get("providers", {})
-            for provider_name, provider_cfg in providers.items():
-                server_params = provider_cfg.get("serverCustomParameters", {})
-                flags = server_params.get("flags", [])
-
-                if not isinstance(flags, list):
-                    continue
-
-                for i, flag in enumerate(flags):
-                    if flag == "--chat-template-file":
-                        if i + 1 >= len(flags):
-                            template_path_errors.append(
-                                f"[{provider_name}] --chat-template-file at index {i} "
-                                f"has no following path value"
-                            )
-                            continue
-
-                        template_path = flags[i + 1]
-                        if not isinstance(template_path, str):
-                            template_path_errors.append(
-                                f"[{provider_name}] --chat-template-file at index {i} "
-                                f"is not a string (got {type(template_path).__name__})"
-                            )
-                            continue
-
-                        resolved = _resolve_chat_template_path(template_path, models_path)
-
-                        if not resolved.exists():
-                            template_path_errors.append(
-                                f"[{provider_name}] --chat-template-file: "
-                                f"'{template_path}' resolves to '{resolved}' which does not exist"
-                            )
+    qwen_def = yaml.safe_load(DEFAULT_QWEN_MODEL_DEF)
+    raw_flags = qwen_def.get("flags", [])
+    # Translate .pi-container/ path to seed_dir for template existence verification
+    adjusted_flags = [
+        f.replace(".pi-container/", f"{seed_dir}/") if isinstance(f, str) and f.startswith(".pi-container/") else f
+        for f in raw_flags
+    ]
+    template_path_errors = check_chat_template_paths(adjusted_flags, REPO_ROOT)
 
     if template_path_errors:
         _error(f"Found {len(template_path_errors)} invalid chat-template-file reference(s):")
@@ -345,19 +305,19 @@ def main() -> int:
         _info("All --chat-template-file paths exist")
 
     # ── Check 7: Seed models.json schema validation ─────────────────────
-    if models_data is not None:
-        print()
-        print("Validating seed models.json schema...")
-        models_schema_errors = _validate_schema(models_data, MODELS_SCHEMA)
-        if models_schema_errors:
-            _error(f"Seed models.json has {len(models_schema_errors)} error(s):")
-            for err in models_schema_errors:
-                print(f"    {err}")
-            all_pass = False
-        else:
-            _info("Seed models.json: schema valid")
+    print()
+    print("Validating seed models.json schema...")
+    models_path = seed_dir / "agent" / "models.json"
+    from config_schema import validate_models
+
+    is_valid, models_schema_errors = validate_models(models_path)
+    if not is_valid:
+        _error(f"Seed models.json has {len(models_schema_errors)} error(s):")
+        for err in models_schema_errors:
+            print(f"    {err}")
+        all_pass = False
     else:
-        _info("No models.json found — skipping models schema validation.")
+        _info("Seed models.json: schema valid")
 
     # ── Summary ──────────────────────────────────────────────────────────
     print()

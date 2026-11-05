@@ -6,12 +6,9 @@ import yaml
 from schema_common import (
     MODELS_SCHEMA,
     SCHEMA,
-    _validate_hf_models,
-    _validate_models_flags,
-    _validate_provider_base_urls,
+    _validate_models_providers,
     _validate_schema,
 )
-from template_paths import _check_chat_template_paths
 from version import get_git_tag_version
 from yaml_strict import DuplicateKeyError, check_duplicate_keys, load_yaml_strict
 
@@ -108,14 +105,13 @@ def validate_project_yaml(config_dir: Path) -> list[str]:
 
 
 # ─── Models.json validation ──────────────────────────────────────────────────
-# All helpers and schemas are imported from ``schema_common.py``.
 
 
 def validate_models(
     models_path: Path,
-    check_chat_template_paths: bool = True,
+    gateways_dir: Path | None = None,
 ) -> tuple[bool, list[str]]:
-    """Validate `.pi-container/agent/models.json` structure, provider custom parameters, flags, and base URLs."""
+    """Validate `.pi-container/agent/models.json` structure, provider definitions, and base URLs."""
     errors: list[str] = []
 
     if not models_path.exists():
@@ -131,44 +127,24 @@ def validate_models(
         errors.append(f"Models file is not valid JSON: {e}")
         return False, errors
 
+    if not isinstance(data, dict):
+        errors.append("Models file must be a JSON object")
+        return False, errors
+
     # Validate top-level structure
     schema_errors = _validate_schema(data, MODELS_SCHEMA)
     if schema_errors:
         errors.extend(schema_errors)
         return False, errors
 
-    # Validate flags arrays
-    providers = data.get("providers", {})
-    for provider_name, provider_cfg in providers.items():
-        if not isinstance(provider_cfg, dict) or "serverCustomParameters" not in provider_cfg:
-            continue
-        server_params = provider_cfg.get("serverCustomParameters", {})
-        flags = server_params.get("flags", [])
-        if not isinstance(flags, list):
-            continue
+    providers = data.get("providers")
+    if not isinstance(providers, dict):
+        errors.append("  providers: required dictionary missing")
+        return False, errors
 
-        flag_errors = _validate_models_flags(flags, f"providers.{provider_name}.serverCustomParameters.flags")
-        if flag_errors:
-            errors.extend(flag_errors)
-
-    # Validate hfModels entries
-    for provider_name, provider_cfg in providers.items():
-        if not isinstance(provider_cfg, dict) or "serverCustomParameters" not in provider_cfg:
-            continue
-        server_params = provider_cfg.get("serverCustomParameters", {})
-        hf_models = server_params.get("hfModels")
-        hf_errors = _validate_hf_models(hf_models, provider_name)
-        if hf_errors:
-            errors.extend(hf_errors)
-
-    # Validate baseUrl on providers with serverCustomParameters
-    base_url_errors = _validate_provider_base_urls(providers)
-    if base_url_errors:
-        errors.extend(base_url_errors)
-
-    # Validate --chat-template-file paths if requested
-    if check_chat_template_paths:
-        _check_chat_template_paths(data, models_path, errors)
+    provider_errors = _validate_models_providers(providers, gateways_dir=gateways_dir)
+    if provider_errors:
+        errors.extend(provider_errors)
 
     is_valid = len(errors) == 0
     return is_valid, errors

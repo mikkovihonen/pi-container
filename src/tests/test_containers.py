@@ -88,6 +88,34 @@ class TestWarnAboutRegistryAllowlist:
         assert caplog.records == []
 
 
+class TestWarnAboutGatewayAllowlist:
+    def test_warns_when_gateway_host_not_in_allowlist(self, tmp_path: Path, caplog: pytest.LogCaptureFixture):
+        (tmp_path / "allowlist.yaml").write_text("global:\n  rules:\n    - hostnames: ['pypi.org']\n")
+        gateways = [{"name": "opper", "baseUrl": "https://api.opper.ai/v3/compat"}]
+        with caplog.at_level("WARNING"):
+            containers.warn_about_gateway_allowlist(tmp_path, gateways)
+        assert any("api.opper.ai" in r.message for r in caplog.records)
+
+    def test_silent_when_gateway_host_allowed(self, tmp_path: Path, caplog: pytest.LogCaptureFixture):
+        (tmp_path / "allowlist.yaml").write_text("global:\n  rules:\n    - hostnames: ['api.opper.ai']\n")
+        gateways = [{"name": "opper", "baseUrl": "https://api.opper.ai/v3/compat"}]
+        with caplog.at_level("WARNING"):
+            containers.warn_about_gateway_allowlist(tmp_path, gateways)
+        assert caplog.records == []
+
+    def test_silent_when_no_gateways(self, tmp_path: Path, caplog: pytest.LogCaptureFixture):
+        with caplog.at_level("WARNING"):
+            containers.warn_about_gateway_allowlist(tmp_path, [])
+        assert caplog.records == []
+
+    def test_ignores_localhost_gateway(self, tmp_path: Path, caplog: pytest.LogCaptureFixture):
+        (tmp_path / "allowlist.yaml").write_text("global:\n  rules: []\n")
+        gateways = [{"name": "local", "baseUrl": "http://127.0.0.1:8000/v1"}]
+        with caplog.at_level("WARNING"):
+            containers.warn_about_gateway_allowlist(tmp_path, gateways)
+        assert caplog.records == []
+
+
 class TestHostnameAllowed:
     """Glob/regex semantics must match the proxy addon's `_matches_hostname`."""
 
@@ -240,71 +268,88 @@ class TestPortHolders:
 
 
 class TestExtractServerConfigs:
-    def test_extract_single_provider(self):
+    def test_extract_single_provider(self, tmp_path):
+        models_dir = tmp_path / "models"
+        models_dir.mkdir(parents=True)
+        (models_dir / "ornith.yaml").write_text(
+            "id: ornith\nflags: []\nhfModels:\n  main:\n    fileFlag: '--model'\n    repo: 'r'\n    file: 'f'\n    dir: 'd'\n"
+        )
         data = {
             "providers": {
                 "local-ornith": {
                     "baseUrl": "http://llama:9999/v1",
-                    "serverCustomParameters": {
-                        "flags": [],
-                        "hfModels": {
-                            "main": {
-                                "fileFlag": "--model",
-                                "repo": "r",
-                                "file": "f",
-                                "dir": "d",
-                            }
-                        },
-                    },
+                    "models": [{"id": "ornith"}],
                 }
             }
         }
-        configs, hostnames = containers.extract_server_configs(data)
+        configs, hostnames, _ = containers.extract_server_configs(data, models_dir=models_dir)
         assert len(configs) == 1
         assert configs[0]["name"] == "local-ornith"
         assert configs[0]["baseUrl"] == "http://llama:9999/v1"
         assert hostnames == {"llama", "local-ornith"}
 
-    def test_extract_multiple_providers_with_custom_hostnames(self):
+    def test_extract_multiple_providers_with_custom_hostnames(self, tmp_path):
+        models_dir = tmp_path / "models"
+        models_dir.mkdir(parents=True)
+        (models_dir / "ornith.yaml").write_text(
+            "id: ornith\nflags: []\nhfModels:\n  main:\n    fileFlag: '--model'\n    repo: 'r'\n    file: 'f'\n    dir: 'd'\n"
+        )
+        (models_dir / "gemma.yaml").write_text(
+            "id: gemma\nflags: []\nhfModels:\n  main:\n    fileFlag: '--model'\n    repo: 'r'\n    file: 'f'\n    dir: 'd'\n"
+        )
         data = {
             "providers": {
                 "local-ornith": {
                     "baseUrl": "http://llama:9999/v1",
-                    "serverCustomParameters": {
-                        "flags": [],
-                        "hfModels": {
-                            "main": {
-                                "fileFlag": "--model",
-                                "repo": "r",
-                                "file": "f",
-                                "dir": "d",
-                            }
-                        },
-                    },
+                    "models": [{"id": "ornith"}],
                 },
                 "local-gemma": {
                     "baseUrl": "http://gemma-server:9998/v1",
-                    "serverCustomParameters": {
-                        "flags": [],
-                        "hfModels": {
-                            "main": {
-                                "fileFlag": "--model",
-                                "repo": "r",
-                                "file": "f",
-                                "dir": "d",
-                            }
-                        },
-                    },
+                    "models": [{"id": "gemma"}],
                 },
                 "anthropic": {
                     "baseUrl": "https://api.anthropic.com/v1",
                 },
             }
         }
-        configs, hostnames = containers.extract_server_configs(data)
+        configs, hostnames, _ = containers.extract_server_configs(data, models_dir=models_dir)
         assert len(configs) == 2
         assert {c["name"] for c in configs} == {"local-ornith", "local-gemma"}
         assert hostnames == {"llama", "local-ornith", "local-gemma", "gemma-server"}
+
+    def test_extract_decoupled_models_from_registry(self, tmp_path):
+        models_dir = tmp_path / "models"
+        gateways_dir = tmp_path / "gateways"
+        models_dir.mkdir(parents=True)
+        gateways_dir.mkdir(parents=True)
+        from registry import seed_default_models
+
+        seed_default_models(models_dir)
+
+        (gateways_dir / "nitor.yaml").write_text("id: nitor\ntype: nitor\nbaseUrl: 'https://gw.nitor.app/v1'\n")
+
+        data = {
+            "providers": {
+                "local-qwen": {
+                    "baseUrl": "http://llama:9999/v1",
+                    "models": [{"id": "Qwen3.6-35B-A3B-UD-Q6_K_XL"}],
+                },
+                "nitor": {
+                    "baseUrl": "https://gw.nitor.app/v1",
+                    "models": [{"id": "claude-sonnet-4-6"}, {"id": "gpt-5-mini"}],
+                },
+            }
+        }
+        configs, hostnames, gateways = containers.extract_server_configs(
+            data, models_dir=models_dir, gateways_dir=gateways_dir
+        )
+        assert len(configs) == 1
+        assert configs[0]["name"] == "local-qwen"
+        assert hostnames == {"llama", "local-qwen"}
+        assert len(gateways) == 1
+        assert gateways[0]["name"] == "nitor"
+        assert gateways[0]["gatewayDef"].id == "nitor"
+        assert gateways[0]["gatewayDef"].base_url == "https://gw.nitor.app/v1"
 
 
 class TestCleanupOrphanedAgentContainers:

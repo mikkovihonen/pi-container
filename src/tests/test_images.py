@@ -238,6 +238,16 @@ class TestGetImageLabel:
         result = images.get_image_label("test-image:latest", "pi-container.hash", runtime="podman")
         assert result == "abc123def456"
 
+    def test_returns_none_when_no_value(self, monkeypatch):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "<no value>\n"
+        mock_result.stderr = ""
+
+        monkeypatch.setattr(images.subprocess, "run", lambda *args, **kwargs: mock_result)
+        result = images.get_image_label("test-image:latest", "pi-container.hash", runtime="podman")
+        assert result is None
+
 
 class TestImageIsCurrent:
     def test_returns_true_when_label_matches(self, monkeypatch, tmp_path):
@@ -493,41 +503,6 @@ class TestCleanupStaleProjectImages:
             "newhash1234567890",
         )
         assert result == []
-
-
-class TestGetImageLabelJsonFallback:
-    def test_falls_back_to_json_when_format_fails(self, monkeypatch):
-        call_count = [0]
-
-        def mock_subprocess_run(*args, **kwargs):
-            m = MagicMock()
-            call_count[0] += 1
-            if call_count[0] == 1:
-                m.returncode = 0
-                m.stdout = ""
-                m.stderr = ""
-            else:
-                m.returncode = 0
-                m.stdout = '[{"Config": {"Labels": {"pi-container.hash": "jsonhash123"}}}]\n'
-                m.stderr = ""
-            return m
-
-        monkeypatch.setattr(images.subprocess, "run", mock_subprocess_run)
-        result = images.get_image_label("test-image:latest", "pi-container.hash", runtime="podman")
-        assert result == "jsonhash123"
-        assert call_count[0] == 2
-
-    def test_returns_none_when_both_fails(self, monkeypatch):
-        def mock_subprocess_run(*args, **kwargs):
-            m = MagicMock()
-            m.returncode = 1
-            m.stdout = ""
-            m.stderr = "error"
-            return m
-
-        monkeypatch.setattr(images.subprocess, "run", mock_subprocess_run)
-        result = images.get_image_label("nonexistent:latest", "pi-container.hash", runtime="podman")
-        assert result is None
 
 
 class TestImageIsCurrentShared:

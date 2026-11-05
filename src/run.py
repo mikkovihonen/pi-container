@@ -26,6 +26,7 @@ from config import (
     BRIDGE_INTERFACE_ENV,
     LLAMA_BIN,
     LLAMA_SERVER_LOCK_DIR,
+    LOGS_DIR,
     MODELS_DIR,
     PROJECT_DIR,
     PROXY_LOCK_DIR,
@@ -98,19 +99,53 @@ def _init_runtime() -> None:
     PROXY_UPSTREAM_NETWORK = RUNTIME.upstream_network
 
 
+def process_gateway_configs(gateway_configs: list[dict], pi_container_dir: Path) -> None:
+    """Preflight, authenticate, and validate allowlist egress for external model gateways."""
+    for gw in gateway_configs:
+        gw_def = gw["gatewayDef"]
+        if not gw_def.auth:
+            continue
+        if gw_def.auth.type == "openid":
+            from auth import ensure_gateway_auth
+
+            token = ensure_gateway_auth(gw["name"], gw_def.auth)
+            var_name = gw_def.auth.env_var or f"{gw['name'].upper().replace('-', '_')}_TOKEN"
+            os.environ[var_name] = token
+        elif gw_def.auth.type == "api-key":
+            from secret_store import DEFAULT_KEYRING_SERVICE, resolve_secret
+
+            var_name = gw_def.auth.env_var or f"{gw['name'].upper().replace('-', '_')}_API_KEY"
+            service = gw_def.auth.keyring_service or DEFAULT_KEYRING_SERVICE
+            account = gw_def.auth.keyring_account or var_name
+
+            token = resolve_secret(var_name, service=service, account=account)
+            if not token:
+                logger.error(
+                    f"Gateway '{gw['name']}' requires secret '{var_name}'.\n"
+                    f'Set via environment:  export {var_name}="<your-api-key>"\n'
+                    f"Or save in OS keyring: uv run keyring set {service} {account}"
+                )
+                sys.exit(1)
+                return
+
+            os.environ[var_name] = token
+
+    containers.warn_about_gateway_allowlist(pi_container_dir, gateway_configs)
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 
 def main() -> None:
     agent_config_dir = project.ensure_project_config()
     warn_missing_gitignore(PROJECT_DIR, logger)
-    config_path: Path = agent_config_dir / "models.json"
-    if not config_path.exists():
-        logger.error(f"Config file not found: {config_path}")
+    pi_container_dir = PROJECT_DIR / ".pi-container"
+    models_path: Path = agent_config_dir / "models.json"
+    if not models_path.exists():
+        logger.error(f"Config file not found: {models_path}")
         sys.exit(1)
 
     # Validate per-project config schema and version compatibility.
-    pi_container_dir = PROJECT_DIR / ".pi-container"
     config_yaml_path = pi_container_dir / "config.yaml"
     is_valid, errors, schema_version = validate_config(config_yaml_path)
     if not is_valid:
@@ -133,7 +168,6 @@ def main() -> None:
         sys.exit(1)
 
     # Validate models.json schema.
-    models_path = pi_container_dir / "agent" / "models.json"
     models_valid, models_errors = validate_models(models_path)
     if not models_valid:
         logger.error("Configuration error in models.json:")
@@ -203,9 +237,11 @@ def main() -> None:
             f"nested_containers.enabled is false; nothing is published."
         )
 
-    with config_path.open("r") as file:
+    with models_path.open("r") as file:
         data = json.load(file)
-        server_configs, llama_hostnames = containers.extract_server_configs(data)
+        server_configs, llama_hostnames, gateway_configs = containers.extract_server_configs(data)
+
+    process_gateway_configs(gateway_configs, pi_container_dir)
 
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, handle_signal)
@@ -229,6 +265,7 @@ def main() -> None:
                     container_port=container_port,
                     startup_timeout=llama_cfg["startup_timeout"],
                     startup_attempts=llama_cfg["startup_attempts"],
+                    logs_dir=LOGS_DIR,
                 )
                 servers.append(server)
 

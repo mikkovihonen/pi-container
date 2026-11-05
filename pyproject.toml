@@ -1,10 +1,11 @@
 [project]
 name = "pi-container"
-version = "0.5.6"
+version = "0.6.0"
 description = "Containerized environment for running the pi-coding-agent with local LLM inference"
 requires-python = ">=3.14"
 dependencies = [
     "pyyaml>=6.0.3",
+    "keyring>=24.0.0",
 ]
 
 [dependency-groups]
@@ -91,6 +92,6 @@ skip-magic-trailing-comma = false
 
 [tool.ruff.lint.isort]
 known-first-party = [
-    "util", "config", "runtimes", "models", "server", "network",
+    "util", "config", "runtimes", "models", "server", "network", "secret_store",
     "allowlist", "token_replacer",  # pi-coding-agent-proxy/addons
 ]

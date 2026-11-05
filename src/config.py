@@ -17,6 +17,8 @@ import os
 import shutil
 from pathlib import Path
 
+from huggingface_hub.constants import HF_HUB_CACHE
+
 from util import load_dotenv
 
 # ─── Paths ──────────────────────────────────────────────────────────────────
@@ -38,11 +40,18 @@ logging.basicConfig(level=log_level, format="%(levelname)s: %(message)s")
 
 # ─── Constants ──────────────────────────────────────────────────────────────
 
+GLOBAL_CONFIG_DIR: Path = Path.home() / ".config" / "pi-container"
+GLOBAL_MODELS_REGISTRY_DIR: Path = GLOBAL_CONFIG_DIR / "models"
+GLOBAL_GATEWAYS_REGISTRY_DIR: Path = GLOBAL_CONFIG_DIR / "gateways"
+GLOBAL_CACHE_DIR: Path = Path.home() / ".cache" / "pi-container"
+
 IMAGE_TAG: str = os.environ.get("IMAGE_TAG", "pi-coding-agent:local")
 LLAMA_BIN: str | None = os.environ.get("LLAMA_BIN") or shutil.which("llama-server")
-MODELS_DIR: Path = REPO_ROOT / "llama-server" / "models"
-LLAMA_SERVER_LOCK_DIR: Path = REPO_ROOT / "llama-server" / ".locks"
-PROXY_LOCK_DIR: Path = REPO_ROOT / "pi-coding-agent-proxy" / ".locks"
+MODELS_DIR: Path = Path(HF_HUB_CACHE)
+LLAMA_SERVER_LOCK_DIR: Path = GLOBAL_CACHE_DIR / "locks" / "servers"
+PROXY_LOCK_DIR: Path = GLOBAL_CACHE_DIR / "locks" / "proxies"
+LOGS_DIR: Path = GLOBAL_CACHE_DIR / "logs"
+TOKENS_DIR: Path = GLOBAL_CACHE_DIR / "tokens"
 ADMIN_PASSWORD: str = os.environ.get("ADMIN_PASSWORD", "")
 
 # Directory on the host where the proxy container's config files live.

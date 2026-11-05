@@ -53,87 +53,88 @@ When you launch pi-container, it looks for workspace-specific overrides in `./.p
 
 Orchestration settings live in a single **`config.yaml`**. The proxy addon configs (`allowlist.yaml`, `token_replacer.yaml`) stay in their own files. The proxy container mounts and parses them.
 
-### The `models.json` file and `serverCustomParameters`
+### The `models.json` file and Global Model Registry
 
-You configure the LLM models that pi-container serves in `.pi-container/agent/models.json`. This file uses pi-coding-agent's own `models.json` format with an extended `serverCustomParameters` block per provider. This block bridges the pi-container orchestration layer and llama-server. It tells pi-container which model files to download, where they live on disk, and which `llama-server` command-line flags to pass when launching the model.
+You configure the LLM models available to the agent in `.pi-container/agent/models.json`. This file uses `pi-coding-agent`'s native format without vendor-specific extensions.
 
-The file structure looks like this:
+Backend server parameters (Hugging Face model downloads and `llama-server` CLI flags) are stored in the **models registry** at `~/.config/pi-container/models/<model-id>.yaml`. External model gateways (endpoints, authentication, and secret resolution) are stored at the provider level in the **gateways registry** at `~/.config/pi-container/gateways/<provider-name>.yaml`.
+
+Model weights are downloaded to and read directly from the standard Hugging Face cache (`~/.cache/huggingface/hub/` or `$HF_HOME`/`$HF_HUB_CACHE`), sharing downloads with `huggingface-cli` and other tools without duplicating storage. Process locks, logs, and authentication tokens are stored under `~/.cache/pi-container/`.
+
+The file structure in `.pi-container/agent/models.json` looks like this:
 
 ```json
 // .pi-container/agent/models.json
 {
   "providers": {
-    "local-ornith": {
+    "local-qwen": {
       "baseUrl": "http://llama:9999/v1",
       "api": "openai-completions",
       "apiKey": "not-required",
       "compat": { ... },
-      "models": [ ... ],
-      "serverCustomParameters": {
-        "hfModels": { ... },
-        "flags": [ ... ]
-      }
+      "models": [
+        {
+          "id": "Qwen3.6-35B-A3B-UD-Q6_K_XL",
+          "name": "Qwen3.6-35B-A3B-UD-Q6_K_XL",
+          "contextWindow": 131072,
+          "maxTokens": 8192
+        }
+      ]
+    },
+    "nitor": {
+      "baseUrl": "https://gw.nitor.app/v1",
+      "api": "openai-completions",
+      "apiKey": "NITOR_GW_TOKEN",
+      "models": [
+        {
+          "id": "nitor-gateway",
+          "name": "Nitor Gateway"
+        }
+      ]
     }
   }
 }
 ```
 
-pi-container reads only a subset of pi-coding-agent's `models.json` fields. pi-coding-agent handles most model metadata (IDs, context windows, tool-calling flags). llama-server does not need them. At startup, `run.py` iterates `providers`. For each entry that has `serverCustomParameters` it extracts:
+#### Models Registry (`~/.config/pi-container/models/`)
 
-| Field | Used by pi-container? | Notes |
-|-------|----------------------|-------|
-| `providers.<name>` (key) | **Yes** — as `server_id` | Becomes the llama-server `--alias` and the sharing key. Must be unique per provider. |
-| `baseUrl` | **Yes** | Required for local providers (`serverCustomParameters`). Must start with `http://` or `https://` and include an explicit container port. Hostnames (`llama`, the provider name, or custom hostnames) are automatically resolved to the proxy. Ports must be unique across local providers (e.g. `9999`, `9998`). Note: `localhost`/`127.0.0.1` cannot be used because it resolves to the container's own loopback. |
-| `serverCustomParameters.hfModels` | **Yes** | Model file download config + per-model additional flags. |
-| `serverCustomParameters.flags` | **Yes** | llama-server CLI flags, passed verbatim. |
-| `api`, `apiKey` | No | pi-coding-agent uses these for API negotiation. pi-container ignores them. |
-| `compat` | No | pi-coding-agent compatibility flags. pi-container ignores them. |
-| `models[].id`, `models[].name`, `models[].contextWindow`, `models[].toolCalling`, `models[].vision`, `models[].reasoning`, `models[].options`, etc. | No | pi-coding-agent model metadata. pi-container does not read these. |
+When pi-container starts, it matches local model `id`s from `models.json` against definitions in `~/.config/pi-container/models/<id>.yaml` (or `.json`).
 
-In short, pi-container only needs `baseUrl` (for the port and hostname routing), the provider name, and `serverCustomParameters`. The rest of the `models.json` structure is for pi-coding-agent's model registry. pi-container passes it through untouched.
+Each definition specifies the Hugging Face weights to download and the CLI flags passed to `llama-server`. pi-container automatically handles the process lifecycle (downloading weights, port allocation, health polling, multi-workspace refcounting, and teardown).
 
-#### Multiple providers
+```yaml
+# ~/.config/pi-container/models/Qwen3.6-35B-A3B-UD-Q6_K_XL.yaml
+id: Qwen3.6-35B-A3B-UD-Q6_K_XL
+kind: llama-server
+description: "Qwen 3.6 35B with speculative decoding"
 
-You can configure multiple local providers (or a mix of local and cloud providers) in `models.json`. When multiple local providers are configured:
-- Each provider with `serverCustomParameters` launches its own `llama-server` process on the host.
-- Each local provider's `baseUrl` must use a **unique container port** (for example, `http://llama:9999/v1` for the first provider, `http://llama:9998/v1` or `http://local-gemma:9998/v1` for the second) so the transparent proxy can forward traffic to the appropriate server.
-- The proxy automatically resolves `llama`, each provider name, and custom hostnames in `baseUrl` to the proxy's internal address.
+hfModels:
+  main:
+    fileFlag: "--model"
+    repo: "unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
+    file: "Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf"
+    dir: "Qwen3.6-35B-A3B-MTP-GGUF"
+    additionalServerFlags:
+      - "--spec-type"
+      - "draft-mtp"
+      - "--spec-draft-n-max"
+      - 2
 
-The `serverCustomParameters` object has two fields:
-
-#### `hfModels` — model files
-
-`hfModels` is a dictionary mapping **labels** (arbitrary short names) to per-model download and flag configuration. Each entry tells pi-container how to fetch a model file from Hugging Face and how to pass it to llama-server:
-
-```json
-"hfModels": {
-  "main": {
-    "fileFlag": "--model",
-    "repo": "deepreinforce-ai/Ornith-1.0-35B-GGUF",
-    "file": "ornith-1.0-35b-Q6_K.gguf",
-    "dir": "Ornith-1.0-35B-GGUF",
-    "additionalServerFlags": [],
-    "sha256": "<optional hex digest>"
-  },
-  "draft": {
-    "fileFlag": "--model-draft",
-    "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
-    "file": "mtp-gemma-4-26B-A4B-it.gguf",
-    "dir": "gemma-4-26B-A4B-it-qat-GGUF",
-    "additionalServerFlags": [
-      "--spec-type", "draft-mtp",
-      "--spec-draft-n-min", 1,
-      "--spec-draft-n-max", 4
-    ]
-  },
-  "mmproj": {
-    "fileFlag": "--mmproj",
-    "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
-    "file": "mmproj-F16.gguf",
-    "dir": "gemma-4-26B-A4B-it-qat-GGUF",
-    "additionalServerFlags": []
-  }
-}
+flags:
+  - "--load-mode"
+  - "mlock"
+  - "--kv-offload"
+  - "--threads"
+  - 8
+  - "--flash-attn"
+  - "on"
+  - "--ctx-size"
+  - 131072
+  - "--jinja"
+  - "--reasoning"
+  - "on"
+  - "--n-gpu-layers"
+  - 999
 ```
 
 You must set each `hfModels` entry:
@@ -155,62 +156,121 @@ Multiple labels are common. Use `main` for the base model, `draft` for a specula
 
 `flags` is an array of strings and numbers passed directly to llama-server. This is where you tune inference behavior:
 
-```json
-"flags": [
-  "--no-mmap",
-  "--mlock",
-  "--kv-offload",
-  "--threads", 10,
-  "--threads-batch", 8,
-  "--parallel", 1,
-  "--batch-size", 4096,
-  "--ubatch-size", 512,
-  "--flash-attn", "on",
-  "--ctx-size", 131072,
-  "--ctx-checkpoints", 32,
-  "--checkpoint-min-step", 256,
-  "--repeat-penalty", 1.0,
-  "--top_p", 0.95,
-  "--top_k", 64,
-  "--prio", 2,
-  "--cache-ram", 4096,
-  "--jinja",
-  "--chat-template-file", ".pi-container/chat-templates/Ornith-1.0-35B-FP8/chat_template.jinja",
-  "--chat-template-kwargs", "{\"enable_thinking\":true}",
-  "--n-gpu-layers", 999
-]
+```yaml
+flags:
+  - "--load-mode"
+  - "mlock"
+  - "--kv-offload"
+  - "--threads"
+  - 8
+  - "--flash-attn"
+  - "on"
+  - "--ctx-size"
+  - 131072
+  - "--jinja"
+  - "--reasoning"
+  - "on"
+  - "--n-gpu-layers"
+  - 999
 ```
-
-Each item is a single CLI token. Strings are flag names or values. The system emits numbers as their numeric string. The system passes the list to llama-server in order. Flag ordering matters for some llama-server options.
 
 Common categories:
 
-- **Memory**: `--no-mmap`, `--mlock`, `--cache-ram`, `--kv-offload`
+- **Memory**: `--load-mode` (`auto`, `none`, `mlock`), `--cache-ram`, `--kv-offload`
 - **Performance**: `--threads`, `--threads-batch`, `--parallel`, `--batch-size`, `--ubatch-size`, `--flash-attn`
 - **Context**: `--ctx-size`, `--ctx-checkpoints`, `--checkpoint-min-step`
-- **Sampling**: `--top_p`, `--top_k`, `--repeat-penalty`
+- **Sampling**: `--top-p`, `--top-k`, `--repeat-penalty`
 - **GPU**: `--n-gpu-layers` (999 = offload all layers to GPU)
-- **Chat template**: `--jinja`, `--chat-template-file`, `--chat-template-kwargs`
+- **Chat template**: `--jinja`, `--chat-template-file`, `--reasoning`
+
+The `--chat-template-file` path resolves relative to the workspace directory. llama-server runs on the host from the workspace. So `.pi-container/chat-templates/<model>/chat_template.jinja` is the typical pattern.
+
+#### Gateways Registry (`~/.config/pi-container/gateways/`)
+
+External model gateways (e.g. corporate gateways or cloud gateways like [Opper AI](https://platform.opper.ai/)) are defined at the **provider level** in `~/.config/pi-container/gateways/<provider-name>.yaml`. When a provider in `.pi-container/agent/models.json` matches a file in this directory, all models under that provider automatically route through the gateway.
+
+pi-container does not manage a local process for gateways, but instead handles authentication, token caching, OS keyring resolution, and proxy secret injection via `token_replacer`.
+
+Two authentication schemes are supported:
+
+##### A. OpenID Connect (`type: openid`)
+
+Used for corporate gateways (e.g. Nitor Gateway) requiring interactive user authentication with PKCE:
+
+```yaml
+# ~/.config/pi-container/gateways/nitor.yaml
+id: nitor
+description: "Nitor Corporate Model Gateway"
+type: nitor
+baseUrl: "https://gw.nitor.app/v1"
+
+auth:
+  type: openid
+  envVar: "NITOR_GW_TOKEN"
+  discoveryUrl: "https://auth.nitor.app/.well-known/openid-configuration"
+  # Or explicit endpoints if discoveryUrl is omitted:
+  # authorizationUrl: "https://auth.nitor.app/oauth/authorize"
+  # tokenUrl: "https://auth.nitor.app/oauth/token"
+  clientId: "pi-container"
+  scopes:
+    - "openid"
+    - "profile"
+    - "offline_access"
+```
+
+For OpenID authentication, pi-container initiates an interactive browser login with PKCE, securely caches the tokens in `~/.cache/pi-container/tokens/` with `0600` permissions, and passes the Bearer token to the proxy. The agent container uses a placeholder token and never accesses the real credential.
+
+##### B. API Key with OS Keyring / Environment (`type: api-key`)
+
+Used for cloud gateways such as [Opper AI](https://platform.opper.ai/) (`https://api.opper.ai/v3/compat`):
+
+```yaml
+# ~/.config/pi-container/gateways/opper.yaml
+id: opper
+description: "Opper AI Model Gateway"
+type: openai-compat
+baseUrl: "https://api.opper.ai/v3/compat"
+
+auth:
+  type: api-key
+  envVar: "OPPER_API_KEY"
+  keyringService: "pi-container"
+  keyringAccount: "OPPER_API_KEY"
+```
+
+Secret resolution follows a clean precedence hierarchy:
+1. **Host environment variable** (`os.environ["OPPER_API_KEY"]`).
+2. **OS user keyring** (macOS Keychain, Linux GNOME Keyring / Secret Service, Windows Credential Manager) queried via `keyringService` and `keyringAccount` (defaulting to service `pi-container`).
+3. Store your API keys in the keyring anytime with:
+```bash
+uv run keyring set pi-container OPPER_API_KEY
+```
+
+The real API key is injected exclusively into the proxy container via `token_replacer.yaml`. The agent container holds only a dummy placeholder string (`OPPER_API_KEY_PLACEHOLDER`) and never has access to the actual secret.
+
+- **Context**: `--ctx-size`, `--ctx-checkpoints`, `--checkpoint-min-step`
+- **Sampling**: `--top-p`, `--top-k`, `--repeat-penalty`
+- **GPU**: `--n-gpu-layers` (999 = offload all layers to GPU)
+- **Chat template**: `--jinja`, `--chat-template-file`, `--reasoning`
 
 The `--chat-template-file` path resolves relative to the workspace directory. llama-server runs on the host from the workspace. So `.pi-container/chat-templates/<model>/chat_template.jinja` is the typical pattern.
 
 #### Server sharing and fingerprints
 
-A llama-server process is a **host-wide shared resource**. It uses the provider name plus a stable fingerprint of its `serverCustomParameters` as its key. Two projects with the same provider name and identical `serverCustomParameters` (model files, flags) share one llama-server process. This saves RAM by avoiding double-loading a model. A same-named provider with different parameters gets its own server. This ensures a project never silently attaches to a llama-server running the wrong model.
+A llama-server process is a **host-wide shared resource**. It uses the provider name plus a stable fingerprint of its model definition (model files, flags in `~/.config/pi-container/models/<id>.yaml`) as its key. Two projects with the same provider name and identical model definition parameters share one llama-server process. This saves RAM by avoiding double-loading a model. A same-named provider with different parameters gets its own server. This ensures a project never silently attaches to a llama-server running the wrong model.
 
 This means:
-- Identical `serverCustomParameters` across projects → one process (efficient).
-- Divergent `serverCustomParameters` (even different flag values) → separate processes.
-- Changing `serverCustomParameters` mid-session restarts the server.
+- Identical model definitions across projects → one process (efficient).
+- Divergent model definitions (even different flag values) → separate processes.
+- Changing model definition parameters mid-session restarts the server.
 
 #### Validation
 
-`run.py` validates `models.json` at startup. Missing `hfModels` entries, empty dicts, or non-string required fields produce clear errors:
+`run.py` validates `models.json` and loaded model definitions at startup. Missing models lists or non-string required fields produce clear errors:
 
 ```
-Models configuration invalid:
-  providers.local-ornith.serverCustomParameters.hfModels: must not be null
-  providers.local-ornith.serverCustomParameters.hfModels.main.repo: must not be null
+Configuration error in models.json:
+  providers.local-ornith.models: required field missing
 
 Fix: update .pi-container/agent/models.json to match the expected schema.
 ```
@@ -225,7 +285,7 @@ Example configurations for popular models are shipped under `docs/setups/`:
 |-------|-------|------|
 | [Qwen3.6-35B-A3B-UD-Q6_K_XL](setups/Qwen3.6-35B-A3B-UD-Q6_K_XL/) | Qwen3.6 35B-A3B (MTP + vision) | `unsloth/Qwen3.6-35B-A3B-MTP-GGUF` |
 | [gemma-4-26b-a4b-it-qat-GGUF](setups/gemma-4-26b-a4b-it-qat-GGUF/) | Gemma 4 26B-A4B (MTP + vision) | `unsloth/gemma-4-26B-A4B-it-qat-GGUF` |
-| [ornith-1.0-35b-Q6_K](setups/ornith-1.0-35b-Q6_K/) | Ornith 1.0 35B (vision) | `deepreinforce-ai/Ornith-1.0-35B-GGUF` |
+| [opper](setups/opper/) | Opper AI Cloud Gateway (Claude, GPT, DeepSeek, failover pools) | `https://api.opper.ai/v3/compat` |
 
 Each setup directory contains a `models.json` you can drop into `.pi-container/agent/`, plus any required chat templates under `chat-templates/`. See each setup's `README.md` for notes and caveats.
 
@@ -585,9 +645,9 @@ nested_containers:
   ports:
     expose: localhost
     publish:
-      - 3000            # host 3000 → agent 3000
-      - 5173
-      - "18080:8080"    # host 18080 → agent 8080
+        - 3000            # host 3000 → agent 3000
+        - 5173
+        - "18080:8080"    # host 18080 → agent 8080
 ```
 
 Two things then have to line up. pi-container only builds the outer hop:
@@ -637,13 +697,13 @@ services:
       # Replaces rather than adds: compose merges volumes keyed on the
       # container-side target path, so the committed mount is superseded
       # while named volumes survive.
-      - ./config/prometheus.pi-container.yml:/etc/prometheus/prometheus.yml:ro
+        - ./config/prometheus.pi-container.yml:/etc/prometheus/prometheus.yml:ro
 
   caddy:
     # Ports do NOT merge that way — a second entry is appended, giving two
     # publishes of the same port. `!override` replaces the list instead.
     ports: !override
-      - "8080:8080"
+        - "8080:8080"
 ```
 
 That asymmetry is worth knowing before writing an overlay. **volumes merge by target and supersede**. **ports append.** Measured with podman-compose 1.6.0: a base `127.0.0.1:8080:8080` plus an overlay `8080:8080` yields both. podman then rejects the duplicate publish. `!override` is the Compose-spec tag for replacing a list outright.
@@ -680,10 +740,10 @@ The same limit bites at **image build** time. The [toolchain image](design-detai
 ERROR: Only 276 MiB of memory is available where images are built, but compiling
        Python needs ~900 MiB for a single compile job. Not starting the build …
 Fix one of:
-  * give the VM more memory:  podman machine stop && podman machine set --memory 4096 && podman machine start
-  * free memory in the VM:    stop containers you are not using (podman ps)
-  * skip the PGO build:       PYTHON_OPTIMIZE=0 ./build.sh  (~10-20% slower Python)
-  * already-cached Python:    PI_MEMORY_PREFLIGHT=0 ./build.sh  (skips this check)
+    * give the VM more memory:  podman machine stop && podman machine set --memory 4096 && podman machine start
+    * free memory in the VM:    stop containers you are not using (podman ps)
+    * skip the PGO build:       PYTHON_OPTIMIZE=0 ./build.sh  (~10-20% slower Python)
+    * already-cached Python:    PI_MEMORY_PREFLIGHT=0 ./build.sh  (skips this check)
 ```
 
 The check reads `MemAvailable` (reclaimable page cache counts). On a warm builder it is an order of magnitude above `MemFree`. The check runs inside the podman VM. It applies to `build.sh` only. `run.py`'s project-image build compiles nothing. The toolchain arrives as a `COPY` from a prebuilt image.
@@ -837,7 +897,14 @@ Add new rules for any additional hostnames the agent needs to reach (e.g. intern
 
 ### Token Replacer Secrets
 
-The `token_replacer.yaml` config in `.pi-container/` may reference `${ENV:VAR}` values. You must set those values in the host environment before running. `run.py` scans this config and injects the values as environment variables into the proxy container. Override `ContainerNetworkManager._pull_secrets_from_config()` (in [`src/network.py`](https://github.com/mikkovihonen/pi-container/blob/main/src/network.py)) to integrate with a secret store (Vault, AWS Secrets Manager, etc.).
+The `token_replacer.yaml` config in `.pi-container/` may reference `${ENV:VAR}` values. At startup, `run.py` resolves these variables with automatic fallback to your **OS user keyring** (macOS Keychain, Linux GNOME Keyring / Secret Service, or Windows Credential Manager under the `pi-container` service).
+
+To store secrets in the OS keyring without putting them in `.env` or shell rc files:
+```bash
+uv run keyring set pi-container OPPER_API_KEY
+```
+
+`run.py` scans `token_replacer.yaml`, resolves each secret (first from `os.environ`, then from the keyring), and injects them securely into the proxy container as environment variables. Override `ContainerNetworkManager._pull_secrets_from_config()` (in [`src/network.py`](https://github.com/mikkovihonen/pi-container/blob/main/src/network.py)) to integrate with an enterprise secret store (Vault, AWS Secrets Manager, Azure Key Vault, etc.).
 
 ### Transient tmpfs Mounts
 
@@ -886,7 +953,7 @@ egress:
 
 ### Chat templates
 
-Some models need an explicit Jinja chat template. Place them under `.pi-container/chat-templates/<model>/`. Reference them from a model's `serverCustomParameters.flags` with a path **relative to the workspace**:
+Some models need an explicit Jinja chat template. Place them under `.pi-container/chat-templates/<model>/`. Reference them from a model's `flags` in `~/.config/pi-container/models/<id>.yaml` with a path **relative to the workspace**:
 
 ```json
 "--chat-template-file", ".pi-container/chat-templates/Ornith-1.0-35B-FP8/chat_template.jinja"

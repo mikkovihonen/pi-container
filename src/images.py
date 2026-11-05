@@ -1,5 +1,4 @@
 import hashlib
-import json
 import logging
 import os
 import subprocess
@@ -103,22 +102,9 @@ def get_image_label(image_tag: str, label_key: str, runtime: str | None = None) 
             check=False,
             timeout=5,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-
-        result = subprocess.run(
-            [rt, "image", "inspect", image_tag],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            data = json.loads(result.stdout)
-            if data and isinstance(data, list) and len(data) > 0:
-                labels = data[0].get("Config", {}).get("Labels", {})
-                if labels and label_key in labels:
-                    return labels[label_key]
+        value = result.stdout.strip()
+        if result.returncode == 0 and value and value != "<no value>":
+            return value
     except Exception:
         pass
 

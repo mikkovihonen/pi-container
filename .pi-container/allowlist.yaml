@@ -60,3 +60,10 @@ global:
         - "packages.debian.org"
         - "*.packages.debian.org"
       ip_ranges: []
+
+    - name: "opper-ai-allow"
+      mode: "allow"
+      hostnames:
+        - "api.opper.ai"
+        - "*.opper.ai"
+      ip_ranges: []

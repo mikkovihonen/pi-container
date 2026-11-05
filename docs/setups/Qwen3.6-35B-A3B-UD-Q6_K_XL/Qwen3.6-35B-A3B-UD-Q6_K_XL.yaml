@@ -1,0 +1,57 @@
+# Place in ~/.config/pi-container/models/Qwen3.6-35B-A3B-UD-Q6_K_XL.yaml
+id: Qwen3.6-35B-A3B-UD-Q6_K_XL
+kind: llama-server
+description: "Qwen 3.6 35B with speculative decoding"
+
+hfModels:
+  main:
+    fileFlag: "--model"
+    repo: "unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
+    file: "Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf"
+    dir: "Qwen3.6-35B-A3B-MTP-GGUF"
+    additionalServerFlags:
+      - "--spec-type"
+      - "draft-mtp"
+      - "--spec-draft-n-max"
+      - 2
+
+flags:
+  - "--load-mode"
+  - "mlock"
+  - "--kv-offload"
+  - "--threads"
+  - 10
+  - "--threads-batch"
+  - 8
+  - "--parallel"
+  - 1
+  - "--batch-size"
+  - 8192
+  - "--ubatch-size"
+  - 512
+  - "--flash-attn"
+  - "on"
+  - "--ctx-size"
+  - 256144
+  - "--ctx-checkpoints"
+  - 32
+  - "--checkpoint-min-step"
+  - 256
+  - "--repeat-penalty"
+  - 1.0
+  - "--top-p"
+  - 0.95
+  - "--top-k"
+  - 64
+  - "--prio"
+  - 2
+  - "--cache-ram"
+  - 4096
+  - "--jinja"
+  - "--chat-template-file"
+  - ".pi-container/chat-templates/Qwen3.6-35B-A3B-UD-Q6_K-XL/chat_template.jinja"
+  - "--reasoning"
+  - "on"
+  - "--n-gpu-layers"
+  - 999
+

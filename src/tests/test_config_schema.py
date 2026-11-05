@@ -306,24 +306,12 @@ class TestValidateModels:
             {
                 "local-test": {
                     "baseUrl": "http://llama:9999/v1",
-                    "serverCustomParameters": {
-                        "flags": [
-                            "--ctx-size",
-                            4096,
-                            "--n-gpu-layers",
-                            999,
-                        ],
-                        "hfModels": {
-                            "main": {
-                                "fileFlag": "--model",
-                                "repo": "test/repo",
-                                "file": "model.gguf",
-                                "dir": "model-dir",
-                                "additionalServerFlags": [],
-                                "sha256": "",
-                            },
-                        },
-                    },
+                    "models": [
+                        {
+                            "id": "model-1",
+                            "name": "Model 1",
+                        }
+                    ],
                 },
             },
         )
@@ -340,38 +328,11 @@ class TestValidateModels:
             {
                 "local-ornith": {
                     "baseUrl": "http://llama:9999/v1",
-                    "serverCustomParameters": {
-                        "flags": ["--ctx-size", 4096],
-                        "hfModels": {
-                            "main": {
-                                "fileFlag": "--model",
-                                "repo": "test/repo1",
-                                "file": "model1.gguf",
-                                "dir": "model-dir1",
-                                "additionalServerFlags": [],
-                                "sha256": "",
-                            },
-                        },
-                    },
+                    "models": [{"id": "ornith"}],
                 },
                 "local-gemma": {
-                    "baseUrl": "http://local-gemma:9998/v1",
-                    "serverCustomParameters": {
-                        "flags": ["--ctx-size", 8192],
-                        "hfModels": {
-                            "main": {
-                                "fileFlag": "--model",
-                                "repo": "test/repo2",
-                                "file": "model2.gguf",
-                                "dir": "model-dir2",
-                                "additionalServerFlags": [],
-                                "sha256": "",
-                            },
-                        },
-                    },
-                },
-                "anthropic": {
-                    "baseUrl": "https://api.anthropic.com/v1",
+                    "baseUrl": "http://gemma-server:9998/v1",
+                    "models": [{"id": "gemma"}],
                 },
             },
         )
@@ -379,636 +340,387 @@ class TestValidateModels:
         assert is_valid is True
         assert errors == []
 
-    def test_duplicate_port_fails(self, tmp_path: Path):
-        """When multiple local providers share the same container port, validation fails."""
-        from config_schema import validate_models
-
-        models_path = self._write_models(
-            tmp_path,
-            {
-                "local-ornith": {
-                    "baseUrl": "http://llama:9999/v1",
-                    "serverCustomParameters": {
-                        "flags": [],
-                        "hfModels": {
-                            "main": {
-                                "fileFlag": "--model",
-                                "repo": "test/repo1",
-                                "file": "model1.gguf",
-                                "dir": "model-dir1",
-                                "additionalServerFlags": [],
-                                "sha256": "",
-                            },
-                        },
-                    },
-                },
-                "local-gemma": {
-                    "baseUrl": "http://llama:9999/v1",
-                    "serverCustomParameters": {
-                        "flags": [],
-                        "hfModels": {
-                            "main": {
-                                "fileFlag": "--model",
-                                "repo": "test/repo2",
-                                "file": "model2.gguf",
-                                "dir": "model-dir2",
-                                "additionalServerFlags": [],
-                                "sha256": "",
-                            },
-                        },
-                    },
-                },
-            },
-        )
-        is_valid, errors = validate_models(models_path)
-        assert is_valid is False
-        assert any("Duplicate container port 9999" in e for e in errors)
-
-    def test_missing_models_file(self, tmp_path: Path):
+    def test_file_not_found(self, tmp_path: Path):
         """When models.json does not exist, validation fails."""
         from config_schema import validate_models
 
-        models_path = tmp_path / "missing.json"
-        is_valid, errors = validate_models(models_path)
+        is_valid, errors = validate_models(tmp_path / "missing.json")
         assert is_valid is False
-        assert any("not found" in e.lower() for e in errors)
+        assert any("not found" in e for e in errors)
 
     def test_invalid_json(self, tmp_path: Path):
-        """When models.json is not valid JSON, validation fails."""
+        """When models.json has syntax errors, validation fails."""
         from config_schema import validate_models
 
-        models_path = tmp_path / "models.json"
-        models_path.write_text("{invalid json")
-        is_valid, errors = validate_models(models_path)
+        p = tmp_path / "models.json"
+        p.write_text("{invalid")
+        is_valid, errors = validate_models(p)
         assert is_valid is False
-        assert any("JSON" in e for e in errors)
+        assert any("not valid JSON" in e for e in errors)
 
-    def test_invalid_flag_type(self, tmp_path: Path):
-        """When flags contain non-string/non-number items, validation fails."""
+    def test_non_dict_json(self, tmp_path: Path):
+        """When models.json is not a dict, validation fails."""
         from config_schema import validate_models
 
-        models_path = self._write_models(
-            tmp_path,
-            {
-                "local-test": {
-                    "serverCustomParameters": {
-                        "flags": [
-                            "--ctx-size",
-                            4096,
-                            None,  # Invalid: None is not str/int/float
-                        ],
-                    },
-                },
-            },
-        )
-        is_valid, errors = validate_models(models_path)
+        p = tmp_path / "models.json"
+        p.write_text("[]")
+        is_valid, errors = validate_models(p)
         assert is_valid is False
-        assert any("NoneType" in e for e in errors)
+        assert any("must be a JSON object" in e for e in errors)
 
-    def test_missing_chat_template_path(self, tmp_path: Path):
-        """When --chat-template-file points to a non-existent file, validation fails."""
-        from config_schema import validate_models
-
-        models_path = self._write_models(
-            tmp_path,
-            {
-                "local-test": {
-                    "serverCustomParameters": {
-                        "flags": [
-                            "--ctx-size",
-                            4096,
-                            "--chat-template-file",
-                            ".pi-container/chat-templates/missing/chat_template.jinja",
-                        ],
-                    },
-                },
-            },
-        )
-        is_valid, errors = validate_models(models_path)
-        assert is_valid is False
-        assert any("does not exist" in e for e in errors)
-
-    def test_chat_template_file_missing_path_value(self, tmp_path: Path):
-        """When --chat-template-file has no following path, validation fails."""
-        from config_schema import validate_models
-
-        models_path = self._write_models(
-            tmp_path,
-            {
-                "local-test": {
-                    "serverCustomParameters": {
-                        "flags": [
-                            "--ctx-size",
-                            4096,
-                            "--chat-template-file",  # No following path
-                        ],
-                    },
-                },
-            },
-        )
-        is_valid, errors = validate_models(models_path)
-        assert is_valid is False
-        assert any("no following path" in e for e in errors)
-
-    def test_chat_template_path_with_seed_dir(self, tmp_path: Path):
-        """With seed_dir, .pi-container/ paths resolve relative to seed_dir."""
-        from template_paths import _resolve_chat_template_path
-
-        seed = tmp_path / "seed"
-        seed.mkdir()
-        resolved = _resolve_chat_template_path(
-            ".pi-container/chat-templates/foo/chat_template.jinja",
-            tmp_path / "models.json",
-            seed_dir=seed,
-        )
-        assert resolved == seed / "chat-templates/foo/chat_template.jinja"
-
-    def test_chat_template_path_with_pi_coding_agent_prefix(self, tmp_path: Path):
-        """Seed templates with pi-coding-agent/default/ prefix resolve under seed_dir."""
-        from template_paths import _resolve_chat_template_path
-
-        seed = tmp_path / "repo"
-        seed.mkdir()
-        # Include pi-coding-agent in the path so the seed-template branch fires
-        models = seed / "pi-coding-agent" / "default" / "agent" / "models.json"
-        models.parent.mkdir(parents=True, exist_ok=True)
-        resolved = _resolve_chat_template_path(
-            ".pi-container/chat-templates/foo/chat_template.jinja",
-            models,
-        )
-        assert resolved == seed / "pi-coding-agent" / "default" / "chat-templates/foo/chat_template.jinja"
-
-    def test_chat_template_path_other_prefix(self, tmp_path: Path):
-        """Other paths resolve relative to models.json parent."""
-        from template_paths import _resolve_chat_template_path
-
-        models = tmp_path / "agent" / "models.json"
-        models.parent.mkdir(parents=True, exist_ok=True)
-        resolved = _resolve_chat_template_path(
-            "relative/template.jinja",
-            models,
-        )
-        assert resolved == tmp_path / "agent" / "relative" / "template.jinja"
-
-    def test_chat_template_path_with_existing_file(self, tmp_path: Path):
-        """When --chat-template-file points to an existing file, validation passes."""
+    def test_missing_providers_key(self, tmp_path: Path):
+        """When models.json has no providers key, validation fails."""
         import json
 
         from config_schema import validate_models
 
-        # Create the directory structure matching the real project:
-        # .pi-container/agent/models.json
-        # .pi-container/chat-templates/test-model/chat_template.jinja
-        pi_container = tmp_path / ".pi-container"
-        agent_dir = pi_container / "agent"
-        agent_dir.mkdir(parents=True)
-
-        template_dir = pi_container / "chat-templates" / "test-model"
-        template_dir.mkdir(parents=True)
-        template_file = template_dir / "chat_template.jinja"
-        template_file.write_text("# template")
-
-        # Create models.json
-        models_path = agent_dir / "models.json"
-        models_path.write_text(
-            json.dumps(
-                {
-                    "providers": {
-                        "local-test": {
-                            "baseUrl": "http://llama:9999/v1",
-                            "serverCustomParameters": {
-                                "flags": [
-                                    "--ctx-size",
-                                    4096,
-                                    "--chat-template-file",
-                                    ".pi-container/chat-templates/test-model/chat_template.jinja",
-                                ],
-                                "hfModels": {
-                                    "main": {
-                                        "fileFlag": "--model",
-                                        "repo": "test/repo",
-                                        "file": "model.gguf",
-                                        "dir": "model-dir",
-                                        "additionalServerFlags": [],
-                                        "sha256": "",
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-                indent=2,
-            )
-        )
-        is_valid, errors = validate_models(models_path)
-        assert is_valid is True
-        assert errors == []
-
-    def test_flags_not_a_list_skipped(self, tmp_path: Path):
-        """When flags is not a list, the provider is skipped (no error)."""
-        from template_paths import _check_chat_template_paths
-
-        errors: list[str] = []
-        data = {
-            "providers": {
-                "local-test": {
-                    "serverCustomParameters": {
-                        "flags": "not-a-list",
-                    },
-                },
-            },
-        }
-        _check_chat_template_paths(data, tmp_path / "models.json", errors)
-        assert errors == []
-
-    def test_chat_template_path_non_string_flag(self, tmp_path: Path):
-        """When --chat-template-file's value is not a string, validation fails."""
-        import json
-
-        from config_schema import validate_models
-
-        pi_container = tmp_path / ".pi-container"
-        agent_dir = pi_container / "agent"
-        agent_dir.mkdir(parents=True)
-        models_path = agent_dir / "models.json"
-        models_path.write_text(
-            json.dumps(
-                {
-                    "providers": {
-                        "local-test": {
-                            "serverCustomParameters": {
-                                "flags": [
-                                    "--chat-template-file",
-                                    42,  # not a string
-                                ],
-                            },
-                        },
-                    },
-                },
-            )
-        )
-        is_valid, errors = validate_models(models_path)
+        p = tmp_path / "models.json"
+        p.write_text(json.dumps({}))
+        is_valid, errors = validate_models(p)
         assert is_valid is False
-        assert any("path is not a string" in e for e in errors)
+        assert any("providers: required field missing" in e for e in errors)
 
-    def test_hf_models_null(self, tmp_path: Path):
-        """When hfModels is null, validation fails."""
-
+    def test_non_dict_provider(self, tmp_path: Path):
+        """When a provider is not a dict, validation fails."""
         from config_schema import validate_models
 
-        models_path = self._write_models(
-            tmp_path,
-            {
-                "local-test": {
-                    "serverCustomParameters": {
-                        "hfModels": None,
-                        "flags": [],
-                    },
-                },
-            },
-        )
-        is_valid, errors = validate_models(models_path)
-        assert is_valid is False
-        assert any("must not be null" in e and "hfModels" in e for e in errors)
-
-    def test_hf_models_empty(self, tmp_path: Path):
-        """When hfModels is empty, validation fails."""
-
-        from config_schema import validate_models
-
-        models_path = self._write_models(
-            tmp_path,
-            {
-                "local-test": {
-                    "serverCustomParameters": {
-                        "hfModels": {},
-                        "flags": [],
-                    },
-                },
-            },
-        )
-        is_valid, errors = validate_models(models_path)
-        assert is_valid is False
-        assert any("must not be empty" in e for e in errors)
-
-    def test_hf_models_missing_required_fields(self, tmp_path: Path):
-        """When hfModels entry is missing required fields, validation fails."""
-
-        from config_schema import validate_models
-
-        models_path = self._write_models(
-            tmp_path,
-            {
-                "local-test": {
-                    "serverCustomParameters": {
-                        "hfModels": {
-                            "main": {
-                                "fileFlag": "--model",
-                                "repo": "test/repo",
-                                # Missing: file, dir
-                            },
-                        },
-                        "flags": [],
-                    },
-                },
-            },
-        )
-        is_valid, errors = validate_models(models_path)
-        assert is_valid is False
-        assert any("file" in e and "must not be null" in e for e in errors)
-        assert any("dir" in e and "must not be null" in e for e in errors)
-
-    def test_hf_models_null_required_field(self, tmp_path: Path):
-        """When hfModels entry has null required field, validation fails."""
-
-        from config_schema import validate_models
-
-        models_path = self._write_models(
-            tmp_path,
-            {
-                "local-test": {
-                    "serverCustomParameters": {
-                        "hfModels": {
-                            "main": {
-                                "fileFlag": None,
-                                "repo": "test/repo",
-                                "file": "model.gguf",
-                                "dir": "model-dir",
-                            },
-                        },
-                        "flags": [],
-                    },
-                },
-            },
-        )
-        is_valid, errors = validate_models(models_path)
-        assert is_valid is False
-        assert any("fileFlag" in e and "must not be null" in e for e in errors)
-
-    def test_hf_models_not_a_dict(self, tmp_path: Path):
-        """When hfModels is not a dict, validation fails."""
-        import json
-
-        from config_schema import validate_models
-
-        pi_container = tmp_path / ".pi-container"
-        agent_dir = pi_container / "agent"
-        agent_dir.mkdir(parents=True)
-        models_path = agent_dir / "models.json"
-        models_path.write_text(
-            json.dumps(
-                {
-                    "providers": {
-                        "local-test": {
-                            "serverCustomParameters": {
-                                "flags": [],
-                                "hfModels": "not-a-dict",
-                            },
-                        },
-                    },
-                },
-            )
-        )
+        models_path = self._write_models(tmp_path, {"local-test": "not-a-dict"})
         is_valid, errors = validate_models(models_path)
         assert is_valid is False
         assert any("expected dict, got str" in e for e in errors)
 
-    def test_hf_models_invalid_field_type(self, tmp_path: Path):
-        """When a required hfModels field has wrong type, validation fails."""
-        import json
-
+    def test_server_custom_parameters_rejected(self, tmp_path: Path):
+        """When a provider contains legacy serverCustomParameters, validation fails."""
         from config_schema import validate_models
 
-        pi_container = tmp_path / ".pi-container"
-        agent_dir = pi_container / "agent"
-        agent_dir.mkdir(parents=True)
-        models_path = agent_dir / "models.json"
-        models_path.write_text(
-            json.dumps(
-                {
-                    "providers": {
-                        "local-test": {
-                            "serverCustomParameters": {
-                                "flags": [],
-                                "hfModels": {
-                                    "main": {
-                                        "fileFlag": "--model",
-                                        "repo": "test/repo",
-                                        "file": 42,  # should be string
-                                        "dir": "model-dir",
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            )
+        models_path = self._write_models(
+            tmp_path,
+            {
+                "local-test": {
+                    "baseUrl": "http://llama:9999/v1",
+                    "models": [{"id": "test"}],
+                    "serverCustomParameters": {},
+                }
+            },
         )
         is_valid, errors = validate_models(models_path)
         assert is_valid is False
-        assert any("expected str, got int" in e for e in errors)
+        assert any("serverCustomParameters: obsolete and unsupported" in e for e in errors)
 
-    def test_hf_models_model_config_not_dict(self, tmp_path: Path):
-        """When a model config is not a dict, validation reports error."""
-        import json
-
+    def test_missing_models_key(self, tmp_path: Path):
+        """When a provider has no models key, validation fails."""
         from config_schema import validate_models
 
-        pi_container = tmp_path / ".pi-container"
-        agent_dir = pi_container / "agent"
-        agent_dir.mkdir(parents=True)
-        models_path = agent_dir / "models.json"
-        models_path.write_text(
-            json.dumps(
-                {
-                    "providers": {
-                        "local-test": {
-                            "serverCustomParameters": {
-                                "flags": [],
-                                "hfModels": {
-                                    "main": "not-a-dict",
-                                },
-                            },
-                        },
-                    },
-                },
-            )
+        models_path = self._write_models(tmp_path, {"local-test": {"baseUrl": "http://llama:9999/v1"}})
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("models: required field missing" in e for e in errors)
+
+    def test_models_not_a_list(self, tmp_path: Path):
+        """When a provider models field is not a list, validation fails."""
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path, {"local-test": {"baseUrl": "http://llama:9999/v1", "models": "not-a-list"}}
         )
         is_valid, errors = validate_models(models_path)
         assert is_valid is False
-        assert any("expected dict, got str" in e for e in errors)
+        assert any("models: expected list" in e for e in errors)
 
-    def test_flags_with_non_string_item(self, tmp_path: Path):
-        """When flags contain non-str/int/float items, validation fails."""
-        import json
-
+    def test_models_empty_list(self, tmp_path: Path):
+        """When a provider models list is empty, validation fails."""
         from config_schema import validate_models
 
-        pi_container = tmp_path / ".pi-container"
-        agent_dir = pi_container / "agent"
-        agent_dir.mkdir(parents=True)
-        models_path = agent_dir / "models.json"
-        models_path.write_text(
-            json.dumps(
-                {
-                    "providers": {
-                        "local-test": {
-                            "serverCustomParameters": {
-                                "flags": [
-                                    "--ctx-size",
-                                    4096,
-                                    None,  # invalid
-                                ],
-                            },
-                        },
-                    },
-                },
-            )
+        models_path = self._write_models(tmp_path, {"local-test": {"baseUrl": "http://llama:9999/v1", "models": []}})
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("models: must not be empty" in e for e in errors)
+
+    def test_model_item_not_dict(self, tmp_path: Path):
+        """When a model item is not a dict, validation fails."""
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path, {"local-test": {"baseUrl": "http://llama:9999/v1", "models": ["not-a-dict"]}}
         )
         is_valid, errors = validate_models(models_path)
         assert is_valid is False
-        assert any("expected str/int/float, got NoneType" in e for e in errors)
+        assert any("models[0]: expected dict" in e for e in errors)
+
+    def test_model_item_missing_id(self, tmp_path: Path):
+        """When a model item is missing id, validation fails."""
+        from config_schema import validate_models
+
+        models_path = self._write_models(
+            tmp_path, {"local-test": {"baseUrl": "http://llama:9999/v1", "models": [{"name": "Missing ID"}]}}
+        )
+        is_valid, errors = validate_models(models_path)
+        assert is_valid is False
+        assert any("models[0].id: required non-empty string missing" in e for e in errors)
 
 
-class TestSchemaCommonDirect:
-    """Direct tests for schema_common helpers (bypassing validate_models)."""
+class TestModelsBaseUrls:
+    """Tests for baseUrl validation on providers."""
 
-    def test_validate_models_flags_with_invalid_item(self):
-        """When flags contain non-str/int/float items, validation fails."""
-        from schema_common import _validate_models_flags
+    def test_missing_base_url_for_local_provider(self, tmp_path: Path):
+        """When a local provider lacks baseUrl, validation fails."""
+        from config_schema import validate_models
 
-        errors = _validate_models_flags(["--ctx-size", 4096, None], "test.flags")
-        assert len(errors) == 1
-        assert "expected str/int/float, got NoneType" in errors[0]
+        p = tmp_path / "models.json"
+        import json
 
-    def test_validate_hf_models_with_non_dict(self):
-        """When hfModels is not a dict, validation fails."""
-        from schema_common import _validate_hf_models
+        p.write_text(json.dumps({"providers": {"local-test": {"models": [{"id": "m1"}]}}}))
+        is_valid, errors = validate_models(p)
+        assert is_valid is False
+        assert any("baseUrl: required field missing for local provider" in e for e in errors)
 
-        errors = _validate_hf_models("not-a-dict", "test-provider")
-        assert len(errors) == 1
-        assert "expected dict, got str" in errors[0]
-
-    def test_validate_hf_models_with_none(self):
-        """When hfModels is None, validation fails."""
-        from schema_common import _validate_hf_models
-
-        errors = _validate_hf_models(None, "test-provider")
-        assert len(errors) == 1
-        assert "must not be null" in errors[0]
-
-    def test_validate_provider_base_urls_valid_multiple(self):
-        """When multiple local providers have valid distinct ports, validation passes."""
-        from schema_common import _validate_provider_base_urls
-
-        providers = {
-            "local-ornith": {
-                "baseUrl": "http://llama:9999/v1",
-                "serverCustomParameters": {"hfModels": {}},
-            },
-            "local-gemma": {
-                "baseUrl": "http://local-gemma:9998/v1",
-                "serverCustomParameters": {"hfModels": {}},
-            },
-            "anthropic": {
-                "baseUrl": "https://api.anthropic.com/v1",
-            },
-        }
-        errors = _validate_provider_base_urls(providers)
-        assert errors == []
-
-    def test_validate_provider_base_urls_missing(self):
-        """When local provider is missing baseUrl, validation fails."""
-        from schema_common import _validate_provider_base_urls
-
-        providers = {
-            "local-ornith": {
-                "serverCustomParameters": {"hfModels": {}},
-            }
-        }
-        errors = _validate_provider_base_urls(providers)
-        assert len(errors) == 1
-        assert "required field missing" in errors[0]
-
-    def test_validate_provider_base_urls_non_string(self):
+    def test_non_string_base_url(self, tmp_path: Path):
         """When baseUrl is not a string, validation fails."""
-        from schema_common import _validate_provider_base_urls
+        from config_schema import validate_models
 
-        providers = {
-            "local-ornith": {
-                "baseUrl": 12345,
-                "serverCustomParameters": {"hfModels": {}},
-            }
-        }
-        errors = _validate_provider_base_urls(providers)
-        assert len(errors) == 1
-        assert "must be a non-empty string URL" in errors[0]
+        p = tmp_path / "models.json"
+        import json
 
-    def test_validate_provider_base_urls_invalid_scheme(self):
+        p.write_text(json.dumps({"providers": {"local-test": {"baseUrl": 12345, "models": [{"id": "m1"}]}}}))
+        is_valid, errors = validate_models(p)
+        assert is_valid is False
+        assert any("baseUrl: must be a non-empty string URL" in e for e in errors)
+
+    def test_invalid_scheme(self, tmp_path: Path):
         """When baseUrl has invalid scheme, validation fails."""
-        from schema_common import _validate_provider_base_urls
+        from config_schema import validate_models
 
-        providers = {
-            "local-ornith": {
-                "baseUrl": "ftp://llama:9999/v1",
-                "serverCustomParameters": {"hfModels": {}},
-            }
-        }
-        errors = _validate_provider_base_urls(providers)
-        assert len(errors) == 1
-        assert "must start with http:// or https://" in errors[0]
+        p = tmp_path / "models.json"
+        import json
 
-    def test_validate_provider_base_urls_missing_port(self):
-        """When baseUrl has no port, validation fails."""
-        from schema_common import _validate_provider_base_urls
+        p.write_text(
+            json.dumps({"providers": {"local-test": {"baseUrl": "ftp://llama:9999/v1", "models": [{"id": "m1"}]}}})
+        )
+        is_valid, errors = validate_models(p)
+        assert is_valid is False
+        assert any("must start with http:// or https://" in e for e in errors)
 
-        providers = {
-            "local-ornith": {
-                "baseUrl": "http://llama/v1",
-                "serverCustomParameters": {"hfModels": {}},
-            }
-        }
-        errors = _validate_provider_base_urls(providers)
-        assert len(errors) == 1
-        assert "port is required" in errors[0]
+    def test_missing_port(self, tmp_path: Path):
+        """When local provider baseUrl has no port, validation fails."""
+        from config_schema import validate_models
 
-    def test_validate_provider_base_urls_localhost_rejected(self):
-        """When baseUrl uses localhost or 127.0.0.1, validation fails with helpful message."""
-        from schema_common import _validate_provider_base_urls
+        p = tmp_path / "models.json"
+        import json
 
-        providers = {
-            "local-ornith": {
-                "baseUrl": "http://localhost:9999/v1",
-                "serverCustomParameters": {"hfModels": {}},
-            },
-            "local-gemma": {
-                "baseUrl": "http://127.0.0.1:9998/v1",
-                "serverCustomParameters": {"hfModels": {}},
-            },
-        }
-        errors = _validate_provider_base_urls(providers)
-        assert len(errors) == 2
+        p.write_text(
+            json.dumps({"providers": {"local-test": {"baseUrl": "http://llama/v1", "models": [{"id": "m1"}]}}})
+        )
+        is_valid, errors = validate_models(p)
+        assert is_valid is False
+        assert any("baseUrl: port is required" in e for e in errors)
+
+    def test_invalid_port_range(self, tmp_path: Path):
+        """When baseUrl port is out of range, validation fails."""
+        from config_schema import validate_models
+
+        p = tmp_path / "models.json"
+        import json
+
+        p.write_text(
+            json.dumps({"providers": {"local-test": {"baseUrl": "http://llama:99999/v1", "models": [{"id": "m1"}]}}})
+        )
+        is_valid, errors = validate_models(p)
+        assert is_valid is False
+        assert any("invalid port" in e for e in errors)
+
+    def test_localhost_rejected(self, tmp_path: Path):
+        """When baseUrl uses localhost, 127.0.0.1, or ::1, validation fails."""
+        from config_schema import validate_models
+
+        p = tmp_path / "models.json"
+        import json
+
+        p.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "local-test": {"baseUrl": "http://localhost:9999/v1", "models": [{"id": "m1"}]},
+                        "local-test2": {"baseUrl": "http://127.0.0.1:9998/v1", "models": [{"id": "m2"}]},
+                    }
+                }
+            )
+        )
+        is_valid, errors = validate_models(p)
+        assert is_valid is False
         assert any("cannot be reached from inside the container" in e and "localhost" in e for e in errors)
         assert any("cannot be reached from inside the container" in e and "127.0.0.1" in e for e in errors)
 
-    def test_validate_provider_base_urls_duplicate_port(self):
-        """When multiple local providers share the same container port, validation fails."""
-        from schema_common import _validate_provider_base_urls
+    def test_duplicate_port_rejected(self, tmp_path: Path):
+        """When two local providers use the same container port, validation fails."""
+        from config_schema import validate_models
 
-        providers = {
-            "local-ornith": {
-                "baseUrl": "http://llama:9999/v1",
-                "serverCustomParameters": {"hfModels": {}},
+        p = tmp_path / "models.json"
+        import json
+
+        p.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "local-p1": {"baseUrl": "http://llama:9999/v1", "models": [{"id": "m1"}]},
+                        "local-p2": {"baseUrl": "http://llama:9999/v1", "models": [{"id": "m2"}]},
+                    }
+                }
+            )
+        )
+        is_valid, errors = validate_models(p)
+        assert is_valid is False
+        assert any("Duplicate container port 9999" in e for e in errors)
+
+    def test_gateway_provider_can_omit_port(self, tmp_path: Path):
+        """An external gateway provider is not required to specify a custom container port."""
+        from config_schema import validate_models
+        from registry import GatewayDef
+
+        p = tmp_path / "models.json"
+        import json
+
+        p.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "opper": {
+                            "baseUrl": "https://api.opper.ai/v3/compat",
+                            "models": [{"id": "claude"}],
+                        }
+                    }
+                }
+            )
+        )
+        mock_gw = GatewayDef(id="opper", base_url="https://api.opper.ai/v3/compat")
+        with patch("registry.load_gateway_def", return_value=mock_gw):
+            is_valid, errors = validate_models(p)
+        assert is_valid is True
+        assert errors == []
+
+
+class TestModelDefinitionValidation:
+    """Tests for validate_model_def_data in schema_common.py."""
+
+    def test_valid_model_def_data(self):
+        from schema_common import validate_model_def_data
+
+        data = {
+            "hfModels": {
+                "main": {
+                    "fileFlag": "--model",
+                    "repo": "org/repo",
+                    "file": "model.gguf",
+                    "dir": "model-dir",
+                }
             },
-            "local-gemma": {
-                "baseUrl": "http://llama:9999/v1",
-                "serverCustomParameters": {"hfModels": {}},
-            },
+            "flags": ["--ctx-size", 4096],
         }
-        errors = _validate_provider_base_urls(providers)
-        assert len(errors) == 1
-        assert "Duplicate container port 9999" in errors[0]
-        assert "local-ornith" in errors[0] and "local-gemma" in errors[0]
+        errors = validate_model_def_data(data, model_id="test-model")
+        assert errors == []
+
+    def test_hf_models_null(self):
+        from schema_common import validate_model_def_data
+
+        errors = validate_model_def_data({"hfModels": None}, model_id="test")
+        assert any("hfModels must not be null" in e for e in errors)
+
+    def test_hf_models_not_dict(self):
+        from schema_common import validate_model_def_data
+
+        errors = validate_model_def_data({"hfModels": "not-a-dict"}, model_id="test")
+        assert any("hfModels expected dict" in e for e in errors)
+
+    def test_hf_models_empty(self):
+        from schema_common import validate_model_def_data
+
+        errors = validate_model_def_data({"hfModels": {}}, model_id="test")
+        assert any("hfModels must not be empty" in e for e in errors)
+
+    def test_hf_models_missing_main(self):
+        from schema_common import validate_model_def_data
+
+        errors = validate_model_def_data({"hfModels": {"draft": {}}}, model_id="test")
+        assert any("hfModels.main is required" in e for e in errors)
+
+    def test_hf_models_missing_required_fields(self):
+        from schema_common import validate_model_def_data
+
+        data = {
+            "hfModels": {
+                "main": {
+                    "fileFlag": "--model",
+                    # Missing: repo, file, dir
+                }
+            }
+        }
+        errors = validate_model_def_data(data, model_id="test")
+        assert any("repo must be a non-empty string" in e for e in errors)
+        assert any("file must be a non-empty string" in e for e in errors)
+        assert any("dir must be a non-empty string" in e for e in errors)
+
+    def test_flags_invalid_item_type(self):
+        from schema_common import validate_model_def_data
+
+        data = {
+            "hfModels": {
+                "main": {
+                    "fileFlag": "--model",
+                    "repo": "r",
+                    "file": "f",
+                    "dir": "d",
+                }
+            },
+            "flags": ["--ctx-size", 4096, None],
+        }
+        errors = validate_model_def_data(data, model_id="test")
+        assert any("flags[2] expected str/int/float, got NoneType" in e for e in errors)
+
+
+class TestChatTemplatePaths:
+    """Tests for check_chat_template_paths and resolve_chat_template_path in template_paths.py."""
+
+    def test_valid_chat_template_path(self, tmp_path: Path):
+        from template_paths import check_chat_template_paths
+
+        template_file = tmp_path / "template.jinja"
+        template_file.write_text("jinja")
+
+        flags = ["--chat-template-file", str(template_file)]
+        errors = check_chat_template_paths(flags, repo_root=tmp_path)
+        assert errors == []
+
+    def test_relative_chat_template_path(self, tmp_path: Path):
+        from template_paths import check_chat_template_paths
+
+        rel_path = "templates/chat.jinja"
+        full_path = tmp_path / rel_path
+        full_path.parent.mkdir(parents=True)
+        full_path.write_text("jinja")
+
+        flags = ["--chat-template-file", rel_path]
+        errors = check_chat_template_paths(flags, repo_root=tmp_path)
+        assert errors == []
+
+    def test_missing_path_value(self, tmp_path: Path):
+        from template_paths import check_chat_template_paths
+
+        flags = ["--chat-template-file"]
+        errors = check_chat_template_paths(flags, repo_root=tmp_path)
+        assert any("has no following path" in e for e in errors)
+
+    def test_non_string_path(self, tmp_path: Path):
+        from template_paths import check_chat_template_paths
+
+        flags = ["--chat-template-file", 12345]
+        errors = check_chat_template_paths(flags, repo_root=tmp_path)
+        assert any("path is not a string" in e for e in errors)
+
+    def test_nonexistent_file(self, tmp_path: Path):
+        from template_paths import check_chat_template_paths
+
+        flags = ["--chat-template-file", "missing/chat.jinja"]
+        errors = check_chat_template_paths(flags, repo_root=tmp_path)
+        assert any("path does not exist" in e for e in errors)
 
 
 class TestVolumesSchema:

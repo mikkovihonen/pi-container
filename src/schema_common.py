@@ -155,42 +155,12 @@ SCHEMA: dict = {
 
 # ─── models.json schema ─────────────────────────────────────────────────────
 #
-# Schema for models.json serverCustomParameters structure.
-# Validates hfModels and flags arrays within each provider.
+# Schema for models.json provider definitions and client-facing model manifests.
 
 
 MODELS_SCHEMA: dict = {
     "providers": {
         "type": dict,
-        "keys": {
-            "baseUrl": {
-                "type": str,
-                "required": False,
-            },
-            "serverCustomParameters": {
-                "type": dict,
-                "required": False,
-                "keys": {
-                    "hfModels": {
-                        "type": dict,
-                        "required": True,
-                        "keys": {
-                            "fileFlag": {"type": str},
-                            "repo": {"type": str},
-                            "file": {"type": str},
-                            "dir": {"type": str},
-                            "additionalServerFlags": {"type": list},
-                            "sha256": {"type": str},
-                        },
-                    },
-                    "flags": {
-                        "type": list,
-                        "required": False,
-                        "item_type": {"type": (str, int, float)},
-                    },
-                },
-            },
-        },
     },
 }
 
@@ -198,93 +168,63 @@ MODELS_SCHEMA: dict = {
 # ─── Models schema validation ──────────────────────────────────────────────
 
 
-def _validate_models_flags(flags: list, path: str) -> list[str]:
-    """Validate the flags array in serverCustomParameters.
-
-    Each item must be a string (flag name) or number (flag value).
-    Returns a list of error messages (empty = valid).
-    """
-    errors: list[str] = []
-    for i, item in enumerate(flags):
-        if not isinstance(item, (str, int, float)):
-            errors.append(f"  {path}[{i}]: expected str/int/float, got {type(item).__name__}")
-    return errors
-
-
-def _validate_hf_models(
-    hf_models: dict | None,
-    provider_name: str,
-) -> list[str]:
-    """Validate hfModels entries have required non-null fields.
-
-    Returns a list of error messages (empty = valid).
-    """
-    errors: list[str] = []
-    if hf_models is None:
-        errors.append(f"  providers.{provider_name}.serverCustomParameters.hfModels: must not be null")
-        return errors
-
-    if not isinstance(hf_models, dict):
-        errors.append(
-            f"  providers.{provider_name}.serverCustomParameters.hfModels: "
-            f"expected dict, got {type(hf_models).__name__}"
-        )
-        return errors
-
-    if len(hf_models) == 0:
-        errors.append(f"  providers.{provider_name}.serverCustomParameters.hfModels: must not be empty")
-        return errors
-
-    required_fields = ("fileFlag", "repo", "file", "dir")
-    for model_name, model_cfg in hf_models.items():
-        if not isinstance(model_cfg, dict):
-            errors.append(
-                f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}: "
-                f"expected dict, got {type(model_cfg).__name__}"
-            )
-            continue
-
-        for field in required_fields:
-            value = model_cfg.get(field)
-            if value is None:
-                errors.append(
-                    f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}.{field}: "
-                    f"must not be null"
-                )
-            elif not isinstance(value, str):
-                errors.append(
-                    f"  providers.{provider_name}.serverCustomParameters.hfModels.{model_name}.{field}: "
-                    f"expected str, got {type(value).__name__}"
-                )
-
-    return errors
-
-
-def _validate_provider_base_urls(providers: dict) -> list[str]:
-    """Validate baseUrl for providers that have serverCustomParameters.
+def _validate_models_providers(providers: dict, gateways_dir: Any = None) -> list[str]:
+    """Validate providers mapping in models.json.
 
     Checks:
-    1. baseUrl is present and non-empty string for local providers.
-    2. baseUrl starts with http:// or https://.
-    3. Hostname in baseUrl is not localhost / 127.0.0.1 / ::1.
-    4. baseUrl specifies an explicit port.
-    5. Container ports are unique across all local providers.
+    1. Each provider is a dictionary with a non-empty 'models' list.
+    2. Each model entry has a non-empty string 'id'.
+    3. Rejects obsolete 'serverCustomParameters'.
+    4. Validates 'baseUrl':
+       - Must start with http:// or https://.
+       - Hostname cannot be localhost / 127.0.0.1 / ::1.
+       - Local providers (not in gateways) require an explicit port (1-65535).
+       - Local container ports must be unique across providers.
     """
     errors: list[str] = []
     ports_seen: dict[int, list[str]] = {}
 
+    from registry import load_gateway_def
+
     for provider_name, provider_cfg in providers.items():
         if not isinstance(provider_cfg, dict):
-            continue
-        if "serverCustomParameters" not in provider_cfg:
+            errors.append(f"  providers.{provider_name}: expected dict, got {type(provider_cfg).__name__}")
             continue
 
-        base_url = provider_cfg.get("baseUrl")
-        if base_url is None:
+        if "serverCustomParameters" in provider_cfg:
             errors.append(
-                f"  providers.{provider_name}.baseUrl: required field missing for local provider (e.g. 'http://llama:9999/v1')"
+                f"  providers.{provider_name}.serverCustomParameters: obsolete and unsupported; "
+                f"define local models under ~/.config/pi-container/models/<id>.yaml instead"
             )
+
+        models = provider_cfg.get("models")
+        if models is None:
+            errors.append(f"  providers.{provider_name}.models: required field missing")
+        elif not isinstance(models, list):
+            errors.append(f"  providers.{provider_name}.models: expected list, got {type(models).__name__}")
+        elif len(models) == 0:
+            errors.append(f"  providers.{provider_name}.models: must not be empty")
+        else:
+            for i, m in enumerate(models):
+                if not isinstance(m, dict):
+                    errors.append(f"  providers.{provider_name}.models[{i}]: expected dict, got {type(m).__name__}")
+                    continue
+                m_id = m.get("id")
+                if not m_id or not isinstance(m_id, str):
+                    errors.append(f"  providers.{provider_name}.models[{i}].id: required non-empty string missing")
+
+        # Base URL validation
+        base_url = provider_cfg.get("baseUrl")
+        gw_def = load_gateway_def(provider_name, registry_dir=gateways_dir)
+        is_gateway = gw_def is not None
+
+        if base_url is None:
+            if not is_gateway:
+                errors.append(
+                    f"  providers.{provider_name}.baseUrl: required field missing for local provider (e.g. 'http://llama:9999/v1')"
+                )
             continue
+
         if not isinstance(base_url, str) or not base_url.strip():
             errors.append(
                 f"  providers.{provider_name}.baseUrl: must be a non-empty string URL (e.g. 'http://llama:9999/v1')"
@@ -315,16 +255,22 @@ def _validate_provider_base_urls(providers: dict) -> list[str]:
             )
             continue
 
-        port = parsed.port
-        if port is None:
-            errors.append(f"  providers.{provider_name}.baseUrl: port is required (e.g. 'http://llama:9999/v1')")
+        try:
+            port = parsed.port
+        except ValueError as e:
+            errors.append(f"  providers.{provider_name}.baseUrl: invalid port in '{base_url}': {e}")
             continue
 
-        if not (1 <= port <= 65535):
-            errors.append(f"  providers.{provider_name}.baseUrl: invalid port {port} (must be between 1 and 65535)")
-            continue
+        if not is_gateway:
+            if port is None:
+                errors.append(f"  providers.{provider_name}.baseUrl: port is required (e.g. 'http://llama:9999/v1')")
+                continue
 
-        ports_seen.setdefault(port, []).append(provider_name)
+            if not (1 <= port <= 65535):
+                errors.append(f"  providers.{provider_name}.baseUrl: invalid port {port} (must be between 1 and 65535)")
+                continue
+
+            ports_seen.setdefault(port, []).append(provider_name)
 
     for port, prov_list in ports_seen.items():
         if len(prov_list) > 1:
@@ -333,5 +279,42 @@ def _validate_provider_base_urls(providers: dict) -> list[str]:
                 f"  Duplicate container port {port} in baseUrl for providers: {prov_str}; "
                 f"each local provider must use a unique port (e.g. 9999, 9998)"
             )
+
+    return errors
+
+
+def validate_model_def_data(data: dict, model_id: str = "") -> list[str]:
+    """Validate local model definition dictionary (~/.config/pi-container/models/<id>.yaml)."""
+    errors: list[str] = []
+    hf_models = data.get("hfModels")
+    if hf_models is None:
+        errors.append(f"model definition '{model_id}': hfModels must not be null")
+    elif not isinstance(hf_models, dict):
+        errors.append(f"model definition '{model_id}': hfModels expected dict, got {type(hf_models).__name__}")
+    elif len(hf_models) == 0:
+        errors.append(f"model definition '{model_id}': hfModels must not be empty")
+    else:
+        if "main" not in hf_models:
+            errors.append(f"model definition '{model_id}': hfModels.main is required")
+        required_fields = ("fileFlag", "repo", "file", "dir")
+        for m_name, m_cfg in hf_models.items():
+            if not isinstance(m_cfg, dict):
+                errors.append(f"model definition '{model_id}': hfModels.{m_name} expected dict")
+                continue
+            for f in required_fields:
+                val = m_cfg.get(f)
+                if val is None or not isinstance(val, str) or not val.strip():
+                    errors.append(f"model definition '{model_id}': hfModels.{m_name}.{f} must be a non-empty string")
+
+    flags = data.get("flags")
+    if flags is not None:
+        if not isinstance(flags, list):
+            errors.append(f"model definition '{model_id}': flags expected list")
+        else:
+            for i, item in enumerate(flags):
+                if not isinstance(item, (str, int, float)):
+                    errors.append(
+                        f"model definition '{model_id}': flags[{i}] expected str/int/float, got {type(item).__name__}"
+                    )
 
     return errors

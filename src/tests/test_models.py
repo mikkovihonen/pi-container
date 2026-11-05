@@ -283,6 +283,26 @@ class TestModelDownload:
         model = Model(label="test", config=mc, models_dir=tmp_path)
         assert model.path == tmp_path / "subdir" / "model.gguf"
 
+    def test_path_resolves_hf_cache(self, tmp_path):
+        cached_file = tmp_path / "hub" / "snapshot" / "model.gguf"
+        cached_file.parent.mkdir(parents=True, exist_ok=True)
+        cached_file.write_text("cached")
+
+        mc = ModelConfig.from_dict(
+            {
+                "fileFlag": "--model",
+                "repo": "org/repo",
+                "file": "model.gguf",
+                "dir": "subdir",
+                "additionalServerFlags": [],
+                "sha256": None,
+            }
+        )
+        model = Model(label="test", config=mc, models_dir=tmp_path)
+
+        with patch("models.try_to_load_from_cache", return_value=str(cached_file)):
+            assert model.path == cached_file
+
 
 # ---------------------------------------------------------------------------
 # ModelCleanupLockDir

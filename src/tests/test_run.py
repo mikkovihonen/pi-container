@@ -1,7 +1,7 @@
 """Unit tests for src/run.py — entrypoint validation and initialization."""
 
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import run
 
@@ -96,3 +96,41 @@ class TestVolumeMountOptions:
         dest_path = "/workspace/.venv"
         arg = ("--volume", f"{vol_name}:{dest_path}:nodev,nosuid")
         assert arg == ("--volume", "pi-vol-12345-venv:/workspace/.venv:nodev,nosuid")
+
+
+class TestProcessGatewayConfigs:
+    def test_api_key_missing_exits(self, tmp_path, monkeypatch):
+        from registry import GatewayAuth, GatewayDef
+
+        gw_def = GatewayDef(
+            id="opper",
+            base_url="https://api.opper.ai/v3/compat",
+            auth=GatewayAuth(type="api-key", env_var="MISSING_OPPER_KEY"),
+        )
+        gateways = [{"name": "opper", "gatewayDef": gw_def, "baseUrl": gw_def.base_url}]
+
+        exited = []
+        monkeypatch.setattr(run.sys, "exit", lambda code: exited.append(code))
+        with monkeypatch.context() as m:
+            m.delenv("MISSING_OPPER_KEY", raising=False)
+            with patch("keyring.get_password", return_value=None):
+                run.process_gateway_configs(gateways, tmp_path)
+
+        assert exited == [1]
+
+    def test_api_key_found_sets_env(self, tmp_path, monkeypatch):
+        from registry import GatewayAuth, GatewayDef
+
+        gw_def = GatewayDef(
+            id="opper",
+            base_url="https://api.opper.ai/v3/compat",
+            auth=GatewayAuth(type="api-key", env_var="TEST_OPPER_KEY"),
+        )
+        gateways = [{"name": "opper", "gatewayDef": gw_def, "baseUrl": gw_def.base_url}]
+
+        monkeypatch.delenv("TEST_OPPER_KEY", raising=False)
+
+        with patch("keyring.get_password", return_value="opp_secret_abc"):
+            run.process_gateway_configs(gateways, tmp_path)
+
+        assert run.os.environ.get("TEST_OPPER_KEY") == "opp_secret_abc"

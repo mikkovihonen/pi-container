@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download, try_to_load_from_cache
+from huggingface_hub.constants import HF_HUB_CACHE
 
 from config import LLAMA_SERVER_LOCK_DIR
 
@@ -70,6 +71,15 @@ class Model:
 
     @property
     def path(self) -> Path:
+        cache_dir = str(self.models_dir) if self.models_dir != Path(HF_HUB_CACHE) else None
+        cached = try_to_load_from_cache(
+            repo_id=self.config.repo,
+            filename=self.config.file,
+            cache_dir=cache_dir,
+        )
+        if isinstance(cached, str) and Path(cached).exists():
+            return Path(cached)
+
         return self.models_dir / self.config.directory / self.config.file
 
     def _verify_sha256(self) -> None:
@@ -124,13 +134,13 @@ class Model:
                     return
 
                 logger.info(f"[Model: {self.label}] Downloading {self.config.file} from {self.config.repo}...")
-                self.path.parent.mkdir(exist_ok=True, parents=True)
-                hf_hub_download(
+                cache_dir = str(self.models_dir) if self.models_dir != Path(HF_HUB_CACHE) else None
+                downloaded = hf_hub_download(
                     repo_id=self.config.repo,
                     filename=self.config.file,
-                    local_dir=str(self.models_dir / self.config.directory),
+                    cache_dir=cache_dir,
                 )
-                logger.info(f"[Model: {self.label}] Download complete.")
+                logger.info(f"[Model: {self.label}] Download complete: {downloaded}")
 
             # Verify integrity after download
             self._verify_sha256()

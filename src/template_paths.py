@@ -1,66 +1,44 @@
-from typing import TYPE_CHECKING
+from __future__ import annotations
 
-if TYPE_CHECKING:
-    from pathlib import Path
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+
+"""Chat template file path resolution and existence validation."""
 
 
-def _resolve_chat_template_path(
+def resolve_chat_template_path(
     template_path: str,
-    models_path: Path,
-    seed_dir: Path | None = None,
+    repo_root: Path,
 ) -> Path:
-    """Resolve a `--chat-template-file` flag path to an absolute path on disk."""
-    if template_path.startswith(".pi-container/"):
-        suffix = template_path[len(".pi-container/") :]
-        if seed_dir is not None:
-            return seed_dir / suffix
-        # Seeded config: .pi-container is grandparent of models.json
-        if models_path.parent.name == "agent" and "pi-coding-agent" in str(models_path):
-            # Seed template: models.json is at pi-coding-agent/default/agent/models.json
-            return models_path.parent.parent.parent / "default" / suffix
-        return models_path.parent.parent / suffix
-
-    if seed_dir is not None and template_path.startswith("pi-coding-agent/default/"):
-        return seed_dir / template_path[len("pi-coding-agent/default/") :]
-
-    return models_path.parent / template_path
+    """Resolve a `--chat-template-file` flag path relative to repo_root if not absolute."""
+    p = Path(template_path)
+    if not p.is_absolute():
+        p = (repo_root / p).resolve()
+    return p
 
 
-def _check_chat_template_paths(
-    data: dict,
-    models_path: Path,
-    errors: list[str],
-    seed_dir: Path | None = None,
-) -> None:
+def check_chat_template_paths(
+    flags: list,
+    repo_root: Path,
+) -> list[str]:
     """Validate that `--chat-template-file` paths specified in server flags exist on disk."""
-    providers = data.get("providers", {})
-    for provider_name, provider_cfg in providers.items():
-        server_params = provider_cfg.get("serverCustomParameters", {})
-        flags = server_params.get("flags", [])
-        if not isinstance(flags, list):
-            continue
+    errors: list[str] = []
+    for i, flag in enumerate(flags):
+        if flag == "--chat-template-file":
+            if i + 1 >= len(flags):
+                errors.append(f"flags[{i}]: --chat-template-file has no following path")
+                continue
 
-        for i, flag in enumerate(flags):
-            if flag == "--chat-template-file":
-                if i + 1 >= len(flags):
-                    errors.append(
-                        f"  providers.{provider_name}.serverCustomParameters.flags[{i}] "
-                        f"--chat-template-file has no following path"
-                    )
-                    continue
+            template_path = flags[i + 1]
+            if not isinstance(template_path, str):
+                errors.append(
+                    f"flags[{i}]: --chat-template-file path is not a string (got {type(template_path).__name__})"
+                )
+                continue
 
-                template_path = flags[i + 1]
-                if not isinstance(template_path, str):
-                    errors.append(
-                        f"  providers.{provider_name}.serverCustomParameters.flags[{i}] "
-                        f"--chat-template-file path is not a string"
-                    )
-                    continue
-
-                resolved = _resolve_chat_template_path(template_path, models_path, seed_dir)
-
-                if not resolved.exists():
-                    errors.append(
-                        f"  providers.{provider_name}.serverCustomParameters.flags[{i}] "
-                        f"--chat-template-file path does not exist: {resolved}"
-                    )
+            resolved = resolve_chat_template_path(template_path, repo_root)
+            if not resolved.exists():
+                errors.append(f"flags[{i}]: --chat-template-file path does not exist: {resolved}")
+    return errors
