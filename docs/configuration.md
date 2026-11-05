@@ -319,6 +319,8 @@ proxy:
   expose_ui: localhost        # mitmweb UI bind: localhost | lan
   max_view_flows: 2000        # max allowed flows in mitmweb RAM (denied flows always kept)
   stream_large_bodies: 10m    # stream bodies > threshold directly (e.g. 10m, off)
+tools:
+  include: []                 # optional builder toolchains: [go, rust]
 agent:
   env: {}                     # extra --env vars for the agent container
   mounts: []                  # extra bind mounts (absolute host paths)
@@ -582,6 +584,25 @@ if [ -n "$PI_CONTAINER" ]; then …; fi
 The system deliberately makes `PI_CONTAINER` **not** a general "am I in a container" test. `/run/.containerenv` and `/.dockerenv` answer that. They are true inside nested containers too. `PI_CONTAINER` means *this* container: the agent, with its isolated network, its proxy-only egress, and the workspace bind-mounted at `/workspace`.
 
 Two properties worth relying on. The variables are set at the image and `run` layers. They survive `podman exec` and any shell the agent spawns. They do **not** propagate into nested containers. A container the agent starts gets a clean environment. This makes `PI_CONTAINER` mean "I am the agent" rather than "I am somewhere under it".
+
+### Declarative toolchain selection (`tools:`)
+
+The shared agent base image includes the core runtime baseline: **Python 3.14 (with `uv`)**, **Node.js 26**, **Podman 6**, and **Netavark/Aardvark-dns**.
+
+To keep the base image lightweight, additional toolchains built by `pi-coding-agent-builder` are opt-in per workspace under `tools.include` in `.pi-container/config.yaml`:
+
+```yaml
+tools:
+  include:
+    - go       # Go compiler toolchain (go, gofmt)
+    - rust     # Rust compiler toolchain (rustc, cargo)
+```
+
+**Available tools:**
+- `go`: The official Go toolchain (staged at `/usr/local/go`, symlinked into `/usr/local/bin`).
+- `rust`: The official Rust toolchain (staged at `/usr/local`, providing `rustc`, `cargo`, and `rustfmt`).
+
+When `tools.include` is non-empty, pi-container builds a project-specific container image that overlays the pre-staged trees from `pi-coding-agent-builder:local` in seconds (no recompilation).
 
 <a name="nested-containers"></a>
 ### Nested containers

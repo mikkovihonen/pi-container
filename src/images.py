@@ -10,6 +10,7 @@ sys.dont_write_bytecode = True
 
 import project
 from config import IMAGE_TAG, PROXY_IMAGE_TAG, REPO_ROOT
+from yaml_strict import load_yaml_strict
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,23 @@ def now_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def read_project_tools(project_dir: Path) -> list[str]:
+    """Read the list of tools enabled in .pi-container/config.yaml."""
+    cfg_path = project_dir / ".pi-container" / "config.yaml"
+    if not cfg_path.exists():
+        return []
+    try:
+        data = load_yaml_strict(cfg_path.read_text()) or {}
+        tools_sec = data.get("tools")
+        if isinstance(tools_sec, dict):
+            include = tools_sec.get("include")
+            if isinstance(include, list):
+                return sorted([t for t in include if isinstance(t, str)])
+    except Exception:
+        pass
+    return []
+
+
 def compute_image_hash(project_dir: Path, repo_root: Path | None = None) -> str | None:
     """Compute content hash for files affecting the project-specific container image."""
     r_root = repo_root or REPO_ROOT
@@ -49,7 +67,8 @@ def compute_image_hash(project_dir: Path, repo_root: Path | None = None) -> str 
         if cmd_path.exists() and cmd_path.stat().st_size > 0:
             files_to_hash.append(cmd_file)
 
-    if not files_to_hash:
+    tools = read_project_tools(project_dir)
+    if not files_to_hash and not tools:
         return None
 
     files_to_hash.sort()
@@ -59,6 +78,9 @@ def compute_image_hash(project_dir: Path, repo_root: Path | None = None) -> str 
         file_path = agent_dir / cmd_file if cmd_file in _IMAGE_DEFINITION_FILES else deps_root / cmd_file
         file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
         combined_hash.update(file_hash.encode())
+
+    if tools:
+        combined_hash.update(f"tools:{','.join(tools)}".encode())
 
     return combined_hash.hexdigest()[:16]
 
@@ -116,7 +138,9 @@ def has_dependency_files(project_dir: Path) -> bool:
 
 def resolve_agent_image(project_dir: Path, repo_root: Path | None = None) -> tuple[str, bool]:
     """Resolve the agent container image tag for this workspace."""
-    if not has_dependency_files(project_dir):
+    has_deps = has_dependency_files(project_dir)
+    tools = read_project_tools(project_dir)
+    if not has_deps and not tools:
         return IMAGE_TAG, False
 
     project_hash, _ = project.project_scope(project_dir)

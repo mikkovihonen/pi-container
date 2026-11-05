@@ -835,3 +835,74 @@ class TestSecuritySchema:
         assert is_valid is False
         assert any("read_only_git_hooks" in e for e in errors)
         assert any("blocked_mount_paths" in e for e in errors)
+
+
+class TestToolsSchema:
+    def test_valid_tools_section(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["tools"] = {
+            "include": ["go", "rust"],
+        }
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is True
+        assert errors == []
+
+    def test_empty_tools_include(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["tools"] = {
+            "include": [],
+        }
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is True
+        assert errors == []
+
+    def test_unknown_tool_rejected(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["tools"] = {
+            "include": ["unknown_lang"],
+        }
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is False
+        assert any("unknown tool 'unknown_lang'" in e for e in errors)
+
+    def test_invalid_tools_types(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["tools"] = {
+            "include": "not_a_list",
+        }
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is False
+        assert any("tools.include" in e for e in errors)
+
+        data["tools"] = {
+            "include": [123],
+        }
+        valid_config.write_text(yaml.dump(data))
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is False
+        assert any("expected string tool name" in e for e in errors)

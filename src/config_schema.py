@@ -38,6 +38,34 @@ SCHEMA_VERSION_MISMATCH = "schema_version mismatch"
 # All helpers are imported from ``schema_common.py``.
 
 
+#: Available prebuilt toolchains that can be declared under ``tools.include``.
+AVAILABLE_TOOLS = frozenset({"go", "rust"})
+
+
+def _validate_tools(data: dict) -> list[str]:
+    """Validate tools.include items against AVAILABLE_TOOLS."""
+    errors: list[str] = []
+    tools_section = data.get("tools")
+    if not isinstance(tools_section, dict):
+        return errors
+
+    include = tools_section.get("include")
+    if include is None:
+        return errors
+    if not isinstance(include, list):
+        errors.append(f"  tools.include: expected list, got {type(include).__name__} (value: {include!r})")
+        return errors
+
+    for item in include:
+        if not isinstance(item, str):
+            errors.append(f"  tools.include: expected string tool name, got {type(item).__name__} (value: {item!r})")
+        elif item not in AVAILABLE_TOOLS:
+            errors.append(
+                f"  tools.include: unknown tool '{item}'. Available tools: {', '.join(sorted(AVAILABLE_TOOLS))}"
+            )
+    return errors
+
+
 def validate_config(config_path: Path) -> tuple[bool, list[str], str | None]:
     """Validate `config.yaml` structure, required fields, and schema version against git release tag.
 
@@ -83,6 +111,11 @@ def validate_config(config_path: Path) -> tuple[bool, list[str], str | None]:
     schema_errors = _validate_schema(data, SCHEMA)
     if schema_errors:
         errors.extend(schema_errors)
+
+    # Validate tools
+    tool_errors = _validate_tools(data)
+    if tool_errors:
+        errors.extend(tool_errors)
 
     is_valid = len(errors) == 0
     return is_valid, errors, schema_version_str

@@ -90,6 +90,13 @@ SCHEMA: dict = {
             "stream_large_bodies": {"type": (str, int, type(None)), "required": False},
         },
     },
+    "tools": {
+        "type": dict,
+        "required": False,
+        "keys": {
+            "include": {"type": list, "required": False},
+        },
+    },
     "agent": {
         "type": dict,
         "keys": {

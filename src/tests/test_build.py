@@ -467,6 +467,20 @@ class TestBuildProjectImage:
                     assert cmd[i + 1] != "PROJECT_HASH="
                     assert cmd[i + 1] != "BUILD_TIMESTAMP="
 
+    def test_build_project_image_with_tools(self):
+        """When tools are provided, matching WITH_* build args should be passed."""
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
+            build_project_image(
+                "podman",
+                "/path/to/root/commands.sh",
+                "test.local",
+                "abc123",
+                tools=["go", "rust"],
+            )
+            cmd = mock_popen.call_args[0][0]
+            assert "WITH_GO=true" in cmd
+            assert "WITH_RUST=true" in cmd
+
 
 # ---------------------------------------------------------------------------
 # Build-memory preflight

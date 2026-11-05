@@ -294,8 +294,9 @@ def build_project_image(
     project_hash: str = "",
     project_path: str = "",
     build_timestamp: str = "",
+    tools: list[str] | None = None,
 ) -> None:
-    """Build a project-specific agent image with baked-in command scripts.
+    """Build a project-specific agent image with baked-in command scripts and optional tools.
 
     Args:
         runtime: Container runtime (podman).
@@ -306,6 +307,7 @@ def build_project_image(
         project_hash: Project identity hash → set as pi-container.project.hash label.
         project_path: Absolute project directory path → set as pi-container.project.path label.
         build_timestamp: ISO 8601 timestamp → set as pi-container.build.time label.
+        tools: Optional list of tools to enable (e.g. ["go", "rust"]).
     """
     logger.info(f"Building project-specific agent image ({runtime}): {image_tag}")
     cmd = [
@@ -319,6 +321,11 @@ def build_project_image(
         "--build-arg",
         f"LABEL_HASH={label_hash}",
     ]
+    tools_set = set(tools or [])
+    if "go" in tools_set:
+        cmd += ["--build-arg", "WITH_GO=true"]
+    if "rust" in tools_set:
+        cmd += ["--build-arg", "WITH_RUST=true"]
     if project_hash:
         cmd += ["--build-arg", f"PROJECT_HASH={project_hash}"]
     if project_path:

@@ -46,6 +46,12 @@ proxy:
   # Stream bodies larger than this threshold directly without full RAM buffering (e.g. "10m", "50m", or null/off).
   stream_large_bodies: 10m
 
+# Toolchains staged by pi-coding-agent-builder to include in the agent container.
+# By default, only the core baseline (Python 3.14, Node 26, Podman 6, Netavark)
+# is included. Add extra toolchains here (e.g. "go", "rust") to include them:
+tools:
+  include: []
+
 # Extra agent-container options (rarely needed).
 agent:
   # Extra environment variables passed to the agent container.

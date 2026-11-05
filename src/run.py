@@ -20,7 +20,7 @@ import containers
 import images
 import project
 import volumes
-from build import build_agent, build_project_image, build_proxy
+from build import DEFAULT_ROOT_COMMANDS, build_agent, build_project_image, build_proxy
 from config import (
     ADMIN_PASSWORD,
     BRIDGE_INTERFACE_ENV,
@@ -372,7 +372,12 @@ def main() -> None:
                 )
                 if reason is not None:
                     logger.info(f"Building project-specific agent image: {agent_image_tag} ({reason})")
-                    root_commands_path = str(PROJECT_DIR / ".pi-container" / "dependencies" / "root" / "commands.sh")
+                    root_commands_file = PROJECT_DIR / ".pi-container" / "dependencies" / "root" / "commands.sh"
+                    if root_commands_file.exists() and root_commands_file.stat().st_size > 0:
+                        root_commands_path = str(root_commands_file)
+                    else:
+                        root_commands_path = str(DEFAULT_ROOT_COMMANDS)
+                    project_tools = images.read_project_tools(PROJECT_DIR)
                     build_project_image(
                         CONTAINER_RUNTIME,
                         root_commands_path,
@@ -381,6 +386,7 @@ def main() -> None:
                         project_hash=project_hash,
                         project_path=project_path,
                         build_timestamp=images.now_iso(),
+                        tools=project_tools,
                     )
                 else:
                     logger.info(f"Using cached project-specific image: {agent_image_tag}")

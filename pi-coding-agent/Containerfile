@@ -118,6 +118,17 @@ COPY --from=pi-coding-agent-builder:local /node/ /
 COPY --from=pi-coding-agent-builder:local /podman/ /
 COPY --from=pi-coding-agent-builder:local /network/ /
 
+# ─── Optional toolchains from the builder image ──────────────────────────────
+# Enabled per-project in .pi-container/config.yaml under tools.include: [go, rust].
+# When false (default for shared image), layers are no-ops to keep image size minimal.
+ARG WITH_GO=false
+RUN --mount=type=bind,from=pi-coding-agent-builder:local,src=/go,target=/mnt/go \
+    if [ "${WITH_GO}" = "true" ]; then cp -a /mnt/go/* /; fi
+
+ARG WITH_RUST=false
+RUN --mount=type=bind,from=pi-coding-agent-builder:local,src=/rust,target=/mnt/rust \
+    if [ "${WITH_RUST}" = "true" ]; then cp -a /mnt/rust/* /; fi
+
 # uv reads the system trust store, which carries the mitmproxy CA (installed below).
 ENV UV_SYSTEM_CERTS=1
 
@@ -138,6 +149,8 @@ RUN ldconfig \
  && podman --version \
  && /usr/local/libexec/podman/netavark --version \
  && /usr/local/libexec/podman/aardvark-dns --version \
+ && if [ -x /usr/local/bin/go ]; then /usr/local/bin/go version; fi \
+ && if [ -x /usr/local/bin/rustc ]; then /usr/local/bin/rustc --version && /usr/local/bin/cargo --version; fi \
  && cat /usr/local/share/pi-container/toolchain-versions.d/*.txt \
       | sort > /usr/local/share/pi-container/toolchain-versions.txt \
  && cat /usr/local/share/pi-container/toolchain-versions.txt

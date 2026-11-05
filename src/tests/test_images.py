@@ -114,6 +114,45 @@ class TestComputeImageHash:
         result = images.compute_image_hash(repo)
         assert result is None
 
+    def test_tools_inclusion_changes_hash(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        cfg_dir = repo / ".pi-container"
+        cfg_dir.mkdir()
+        hash_none = images.compute_image_hash(repo)
+        assert hash_none is not None
+
+        (cfg_dir / "config.yaml").write_text("tools:\n  include: ['go']\n")
+        hash_go = images.compute_image_hash(repo)
+        assert hash_go != hash_none
+
+        (cfg_dir / "config.yaml").write_text("tools:\n  include: ['go', 'rust']\n")
+        hash_go_rust = images.compute_image_hash(repo)
+        assert hash_go_rust != hash_go
+
+    def test_read_project_tools(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        assert images.read_project_tools(repo) == []
+
+        cfg_dir = repo / ".pi-container"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.yaml").write_text("tools:\n  include: ['rust', 'go']\n")
+        assert images.read_project_tools(repo) == ["go", "rust"]
+
+    def test_resolve_agent_image_with_tools_only(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        tag, is_project = images.resolve_agent_image(repo)
+        assert is_project is False
+
+        cfg_dir = repo / ".pi-container"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.yaml").write_text("tools:\n  include: ['go']\n")
+        tag, is_project = images.resolve_agent_image(repo)
+        assert is_project is True
+        assert "pi-container-project-" in tag
+
 
 class TestComputeProxyImageHash:
     def test_entrypoint_change_changes_hash(self, tmp_path):
