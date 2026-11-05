@@ -558,15 +558,18 @@ class TestMainWithTools:
             assert mock_tool.call_count == len(ON_DEMAND_TOOLS)
 
     def test_main_with_unknown_tool(self):
+        import sys
+
         from build import main
 
         with (
             patch("build.validate_environment", return_value="podman"),
             patch("build.check_build_memory", return_value=True),
-            patch("sys.exit") as mock_exit,
+            patch.object(sys, "exit", side_effect=SystemExit(1)),
         ):
-            main(["--tools", "unknown_tool"])
-            mock_exit.assert_called_once_with(1)
+            with pytest.raises(SystemExit) as exc_info:
+                main(["--tools", "unknown_tool"])
+            assert exc_info.value.code == 1
 
 
 # ---------------------------------------------------------------------------
