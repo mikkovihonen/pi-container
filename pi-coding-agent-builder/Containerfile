@@ -48,10 +48,10 @@
 # Declared before the first FROM, consumed by the rust stage (and overridable via
 # --build-arg RUST_VERSION=...). Hashes come from
 # https://static.rust-lang.org/dist/channel-rust-stable.toml.
-ARG RUST_VERSION=1.97.1
-ARG RUST_DIST_DATE=2026-07-16
-ARG RUST_SHA256_X86_64=b4cdbc7cc6b0ee0a2666b1872769fdb2ad8393b28b63952f6493b4b400e4832b
-ARG RUST_SHA256_AARCH64=2f2496c70bd336a66a4c8baf2d303ba161f3552f192444c3639ba903c7c1e2c5
+ARG RUST_VERSION=1.99.1
+ARG RUST_DIST_DATE=2026-10-15
+ARG RUST_SHA256_X86_64=aded4e6c1d580415e7b594a3080d8e23e9cbe06f159f97e300aa6875211f71bf
+ARG RUST_SHA256_AARCH64=703b190f0d723ae68985797f3bb5f62f01b1723f138464c6f30f32b766eb0abf
 
 FROM debian:13.7-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS deps
 
@@ -113,29 +113,105 @@ ARG PYTHON_SHA256=74d0d71d0600e477651a077101d6e62d1e2e69b8e992ba18c993dd643b7ba2
 # each *_SHA256 is a space-separated list. build-python.sh reassembles them into
 # --hash=sha256: arguments; a requirement with an empty list is an error, not an
 # unpinned install. Get them from `pip download --no-deps` or PyPI's JSON API.
-ARG UV_VERSION=0.11.30
+ARG UV_VERSION=0.13.7
 ARG UV_SHA256="\
-    cc28cb55c2b3c80a26ea374a172fec70b0561ada211e6fb23936ccea3ecb80b2 \
-    ea5f0d4fe452dc3daf915c714504eb2f1e570f8ebac752abf51f9e6f58a1ff68 \
-    7c41e83a2811c22e04ae50d0986932318ba82e6f9e29f0fca727d855df6bd959 \
-    988133c7f44c6c64f6fef482483014995260cdb3a68270805256ddb9e6fed9e8 \
-    7d9d922cfef27757156f1023eb057abab192e3e9f5436ba60eac57ffbc2b5c23 \
-    a2aff328164d7e8fbcf6b82182cc16f7a729ec7edfce77b4d0c2908fca12bd63 \
-    6a29031ff95150ea6156607394db8f79dfb06d5287f46ff07e3f60b9df76121c"
+    89df450624dec8c48b8b5a7adb654928cc50e95753f869c70cd65ef8333f2197 \
+    a90f5d95716ab83091f0f73a8e7ec64e557abf2a28537fcd719b2ac88e6f725a \
+    952dcae9b1a7742f2fab28e82391fbfabe8807e4e9363f674b0f6be1053b8dd4 \
+    94f65a8ac5826dff76a93cb3cafbaad15def1788c63da2ce5ce09e0bd1303e7a \
+    57ff66891d9a738ec087c23fdde842ac8e5eb63189ffed6ee95caee1b82ceb54 \
+    917733990ebc178318af0321d6873823ed5da707e1c4b1e5060ac2065a81f1f3 \
+    1bc8543d930464bbb22ac01bb1a660a448235e558014914de1e1cd5b993361b8 \
+    2c9bdc4a872b60a93c5f26c0791089ea11585a4f9d3b3c017d78eb8487505e25 \
+    08f16fd463926786b702b497473511deae4b3e17a2fa6d22180950d6059a120d \
+    d30cafb7070901ba35353ec64cf228ae46caf79ac0f6fae329f95468b1482531 \
+    158953b8669bee6f4bc2babdd997e34ff9f0d57170093cfe907f64448292b7c3 \
+    8fc6019740794df995085f7b278d99dc11ccacffad9c63957278d3a6e272280b \
+    8b8ac028ae4ebb2a3f9d04907c61794f2cf8d7a7002bfbb4019a3dee28351fb2"
 ARG PODMAN_COMPOSE_VERSION=1.6.0
 ARG PODMAN_COMPOSE_SHA256="\
     98e48af25d44c10ecef948163bfcca002e32aa8bbb7e66593fbd4faff7270c30 \
     c83fd9bcbaa635100d581ce52a7a4b712ee0d457481232aff392efe3ebc5a217"
 # podman-compose's two runtime dependencies. Pinned because pip requires hashes for the
 # whole resolved set once any requirement has one — not because we chose these versions.
-ARG PYTHON_DOTENV_VERSION=1.2.2
+ARG PYTHON_DOTENV_VERSION=1.2.4
 ARG PYTHON_DOTENV_SHA256="\
-    1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a \
-    2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3"
+    42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc \
+    f0d53e69935a851c0dcc78f3ab7aaccd8cabef0b92382b576b824212902873c0"
 ARG PYYAML_VERSION=6.0.3
 ARG PYYAML_SHA256="\
+    214ed4befebe12df36bcc8bc2b64b396ca31be9304b8f59e25c11cf94a4c033b \
+    02ea2dfa234451bbb8772601d7b8e426c2bfa197136796224e50e35a78777956 \
+    b30236e45cf30d2b8e7b3e85881719e98507abed1011bf463a8fa23e9c3e98a8 \
+    66291b10affd76d76f54fad28e22e51719ef9ba22b29e1d7d03d6777a9174198 \
+    9c7708761fccb9397fe64bbc0395abcae8c4bf7b0eac081e12b809bf47700d0b \
+    418cf3f2111bc80e0933b2cd8cd04f286338bb88bdc7bc8e6dd775ebde60b5e0 \
+    5e0b74767e5f8c593e8c9b5912019159ed0533c70051e9cce3e8b6aa699fcd69 \
+    28c8d926f98f432f88adc23edf2e6d4921ac26fb084b028c733d01868d19007e \
+    bdb2c67c6c1390b63c6ff89f210c8fd09d9a1217a465701eac7316313c915e4c \
+    44edc647873928551a01e7a563d7452ccdebee747728c1080d881d68af7b997e \
+    652cb6edd41e718550aad172851962662ff2681490a8a711af6a4d288dd96824 \
+    10892704fc220243f5305762e276552a0395f7beb4dbf9b14ec8fd43b57f126c \
+    850774a7879607d3a6f50d36d04f00ee69e7fc816450e5f7e58d7f17f1ae5c00 \
+    b8bb0864c5a28024fac8a632c443c87c5aa6f215c0b126c449ae1a150412f31d \
+    1d37d57ad971609cf3c53ba6a7e365e40660e3be0e5175fa9f2365a379d6095a \
+    37503bfbfc9d2c40b344d06b2199cf0e96e97957ab1c1b546fd4f87e53e5d3e4 \
+    8098f252adfa6c80ab48096053f512f2321f0b998f98150cea9bd23d83e1467b \
+    9f3bfb4965eb874431221a3ff3fdcddc7e74e3b07799e0e84ca4a0f867d449bf \
+    7f047e29dcae44602496db43be01ad42fc6f1cc0d8cd6c83d342306c32270196 \
+    fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0 \
+    9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28 \
+    5fdec68f91a0c6739b380c83b951e2c72ac0197ace422360e6d5a959d8d97b2c \
+    ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc \
+    8dc52c23056b9ddd46818a57b78404882310fb473d63f17b07d5c40421e47f8e \
+    41715c910c881bc081f1e8872880d3c650acf13dfa8214bad49ed4cede7c34ea \
+    96b533f0e99f6579b3d4d4995707cf36df9100d67e0c8303a0c55b27b5f99bc5 \
+    5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b \
+    64386e5e707d03a7e172c0701abfb7e10f0fb753ee1d773128192742712a98fd \
+    8da9669d359f02c0b91ccc01cac4a67f16afec0dac22c2ad09f46bee0697eba8 \
+    2283a07e2c21a2aa78d9c4442724ec1eb15f5e42a723b99cb3d822d48f5f7ad1 \
+    ee2922902c45ae8ccada2c5b501ab86c36525b883eff4255313a253a3160861c \
+    a33284e20b78bd4a18c8c2282d549d10bc8408a2a7ff57653c0cf0b9be0afce5 \
+    0f29edc409a6392443abf94b9cf89ce99889a1dd5376d94316ae5145dfedd5d6 \
+    f7057c9a337546edc7973c0d3ba84ddcdf0daa14533c2065749c9075001090e6 \
+    eda16858a3cab07b80edaf74336ece1f986ba330fdb8ee0d6c0d68fe82bc96be \
+    d0eae10f8159e8fdad514efdc92d74fd8d682c933a6dd088030f3834bc8e6b26 \
+    79005a0d97d5ddabfeeea4cf676af11e647e41d81c9a7722a193022accdb6b7c \
+    5498cd1645aa724a7c71c8f378eb29ebe23da2fc0d7a08071d89469bf1d2defb \
+    8d1fab6bb153a416f9aeb4b8763bc0f22a5586065f86f7664fc23339fc1c1fac \
+    34d5fcd24b8445fadc33f9cf348c1047101756fd760b4dacb5c3e99755703310 \
     501a031947e3a9025ed4405a168e6ef5ae3126c59f90ce0cd6f2bfc477be31b7 \
+    b3bc83488de33889877a0f2543ade9f70c67d66d9ebb4ac959502e12de895788 \
     c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5 \
+    7c6610def4f163542a622a73fb39f534f8c101d690126992300bf3207eab9764 \
+    5190d403f121660ce8d1d2c1bb2ef1bd05b5f68533fc5c2ea899bd15f4399b35 \
+    02893d100e99e03eda1c8fd5c441d8c60103fd175728e23e431db1b589cf5ab3 \
+    c1ff362665ae507275af2853520967820d9124984e0f7466736aea23d8611fba \
+    6adc77889b628398debc7b65c073bcb99c4a0237b248cacaf3fe8a557563ef6c \
+    a80cb027f6b349846a3bf6d73b5e95e782175e52f22108cfa17876aaeff93702 \
+    00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \
+    66e1674c3ef6f541c35191caae2d429b967b99e02040f5ba928632d9a7f0f065 \
+    16249ee61e95f858e83976573de0f5b2893b3677ba71c9dd36b9cf8be9ac6d65 \
+    4ad1906908f2f5ae4e5a8ddfce73c320c2a1429ec52eafd27138b7f1cbe341c9 \
+    ebc55a14a21cb14062aa4162f906cd962b28e2e9ea38f9b4391244cd8de4ae0b \
+    4a2e8cebe2ff6ab7d1050ecd59c25d4c8bd7e6f400f5f82b96557ac0abafd0ac \
+    93dda82c9c22deb0a405ea4dc5f2d0cda384168e466364dec6255b293923b2f3 \
+    c2514fceb77bc5e7a2f7adfaa1feb2fb311607c9cb518dbc378688ec73d8292f \
+    9c57bb8c96f6d1808c030b1687b9b5fb476abaa47f0db9c0101f5e9f394e97f4 \
+    efd7b85f94a6f21e4932043973a7ba2613b059c4a000551892ac9f1d11f5baf3 \
+    22ba7cfcad58ef3ecddc7ed1db3409af68d023b7f940da23c6c2a1890976eda6 \
+    6344df0d5755a2c9a276d4473ae6b90647e216ab4757f8426893b5dd2ac3f369 \
+    3ff07ec89bae51176c0549bc4c63aa6202991da2d9a6129d7aef7f1407d3f295 \
+    5cf4e27da7e3fbed4d6c3d8e797387aaad68102272f8f9752883bc32d61cb87b \
+    b865addae83924361678b652338317d1bd7e79b1f4596f96b96c77a5a34b34da \
+    c3355370a2c156cffb25e876646f149d5d68f5e0a3ce86a5084dd0b64a994917 \
+    3c5677e12444c15717b902a5798264fa7909e41153cdf9ef7ad571b704a63dd9 \
+    5ed875a24292240029e4483f9d4a4b8a1ae08843b9c54f43fcc11e404532a8a5 \
+    0150219816b6a1fa26fb4699fb7daa9caf09eb1999f3b70fb6e786805e80375a \
+    fa160448684b4e94d80416c0fa4aac48967a969efe22931448d853ada8baf926 \
+    27c0abcb4a5dac13684a37f76e701e054692a9b2d3064b70f5e4eb54810553d7 \
+    1ebe39cb5fc479422b83de611d14e2c0d3bb2a18bbcb01f229ab3cfbd8fee7a0 \
+    2e71d11abed7344e42a8849600193d15b6def118602c4c176f748e4583246007 \
     d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f"
 ARG PYTHON_OPTIMIZE=1
 ARG MAKE_JOBS=""
@@ -145,9 +221,9 @@ RUN bash /build/build-python.sh
 # ─── Go ──────────────────────────────────────────────────────────────────────
 FROM deps AS go
 # Podman 6 needs Go >= 1.25 and trixie has 1.24. Hashes from https://go.dev/dl/.
-ARG GO_VERSION=1.26.5
-ARG GO_SHA256_AMD64=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
-ARG GO_SHA256_ARM64=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
+ARG GO_VERSION=1.27.3
+ARG GO_SHA256_AMD64=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+ARG GO_SHA256_ARM64=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
 COPY pi-coding-agent-builder/build-go.sh /build/
 RUN bash /build/build-go.sh
 
@@ -172,10 +248,10 @@ FROM deps AS node
 # release, so that pin was missing fixes. All three hashes come from
 # https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt — the source tarball for
 # NODE_SOURCE=build, the per-arch binaries for prebuilt. Bump all four together.
-ARG NODE_VERSION=26.6.0
-ARG NODE_SRC_SHA256=ecb6eec812505c9292529087a2436ec6c891ffe0e3a897833416e5d7436d659f
-ARG NODE_BIN_SHA256_X64=e53a8c8ca2ee7135de38e63859bd4f43002ae2d222f5b3a98ac1945db9f544bb
-ARG NODE_BIN_SHA256_ARM64=974e6f0332fb26179b34d49c57f35339e089a89faf8b82a81e44c0e1164b7923
+ARG NODE_VERSION=26.13.0
+ARG NODE_SRC_SHA256=986ead18ef18256831bae3e57d94aef680a7b84cfd4044f3e8471f833fbd7191
+ARG NODE_BIN_SHA256_X64=d28a96af6c38596f6d9d97c0ee531c13d238d757742387d1928de822d959e997
+ARG NODE_BIN_SHA256_ARM64=406fe3fbde1c054adff8b297c16fdb5af6659db327c1ac8acd46b56ef1af9a92
 ARG NODE_SOURCE=prebuilt
 ARG MAKE_JOBS=""
 COPY --from=rust /out/ /
@@ -187,8 +263,8 @@ FROM deps AS podman
 # PODMAN_COMMIT is the pin that matters; the tag is a mutable pointer and the build
 # fails if it ever resolves elsewhere. It must be the COMMIT, not the annotated tag
 # object — see clone_verified in common.sh for how to get it.
-ARG PODMAN_VERSION=v6.0.2
-ARG PODMAN_COMMIT=b28edb9ad70ce4317dc762ee9ce0a6d081d154e9
+ARG PODMAN_VERSION=v6.1.4
+ARG PODMAN_COMMIT=464c15fec06f0074c916f9eff87c4806869c2833
 COPY --from=go /out/ /
 COPY pi-coding-agent-builder/build-podman.sh /build/
 RUN bash /build/build-podman.sh
@@ -197,20 +273,20 @@ RUN bash /build/build-podman.sh
 FROM deps AS network
 # Both must be 2.0.0 to match podman 6 — see build-network.sh. The vendor sha256 is the
 # value published in each release's own `sha256sum` asset.
-ARG NETAVARK_VERSION=v2.0.0
-ARG NETAVARK_COMMIT=dd456fba828316d602f9ea8a6f1ac9b9a8441b4c
-ARG NETAVARK_VENDOR_SHA256=86de7eb3a4e9ecc4acd5addc462879e8f2bac3562a4b99f12a4be67e5218c2cb
-ARG AARDVARK_VERSION=v2.0.0
-ARG AARDVARK_COMMIT=d98c5990d9bfe25ba8e85cb4202c3272a6e4a5d7
-ARG AARDVARK_VENDOR_SHA256=c5ca49d98c535fa3c8d0d195512faf1f8610ad9ca4f62bec73c7bbfc4ddcc0b6
+ARG NETAVARK_VERSION=v2.1.0
+ARG NETAVARK_COMMIT=8e91ad1d947ed325327b638f0cb906bea1f7d0ab
+ARG NETAVARK_VENDOR_SHA256=532779573b7f4c2606e43f8471132bb9072417feed9ee06a4e309cf3fa066ab8
+ARG AARDVARK_VERSION=v2.1.0
+ARG AARDVARK_COMMIT=cd7417681229219059939bdd9f0b3bd9ac9abb08
+ARG AARDVARK_VENDOR_SHA256=6e6366828d4cd2ccf3cfe07657d8aba083045605696b4f74967c2c8340f51500
 COPY --from=rust /out/ /
 COPY pi-coding-agent-builder/build-network.sh /build/
 RUN bash /build/build-network.sh
 
 # ─── Optional Tool: mold ────────────────────────────────────────────────────
 FROM deps AS mold
-ARG MOLD_VERSION=v2.36.0
-ARG MOLD_COMMIT=c3a957c4dc0788ba1e05eea8129c0784cf65fc59
+ARG MOLD_VERSION=v3.0.0
+ARG MOLD_COMMIT=8de38c35a2df16a25f7ff87ac3ad07156a925beb
 RUN apt-get update && apt-get install -y --no-install-recommends cmake ninja-build && rm -rf /var/lib/apt/lists/*
 COPY pi-coding-agent-builder/tools/mold/build.sh /build/tools/mold/
 RUN bash /build/tools/mold/build.sh
@@ -220,8 +296,8 @@ COPY --from=mold /out/ /
 
 # ─── Optional Tool: git ──────────────────────────────────────────────────────
 FROM deps AS git
-ARG GIT_VERSION=2.48.1
-ARG GIT_SHA256=1c5d545f5dc1eb51e95d2c50d98fdf88b1a36ba1fa30e9ae5d5385c6024f82ad
+ARG GIT_VERSION=2.56.0
+ARG GIT_SHA256=26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3
 RUN apt-get update && apt-get install -y --no-install-recommends libdeflate-dev libpcre2-dev libcurl4-openssl-dev gettext && rm -rf /var/lib/apt/lists/*
 COPY pi-coding-agent-builder/tools/git/build.sh /build/tools/git/
 RUN bash /build/tools/git/build.sh
@@ -231,8 +307,8 @@ COPY --from=git /out/ /
 
 # ─── Optional Tool: ripgrep ──────────────────────────────────────────────────
 FROM deps AS ripgrep
-ARG RIPGREP_VERSION=14.1.1
-ARG RIPGREP_COMMIT=4649aa9700619f94cf9c66876e9549d83420e16c
+ARG RIPGREP_VERSION=15.2.0
+ARG RIPGREP_COMMIT=e89fff89ac9af12e8d4ce9d5fd07beb408ca730f
 RUN apt-get update && apt-get install -y --no-install-recommends libpcre2-dev && rm -rf /var/lib/apt/lists/*
 COPY --from=rust /out/ /
 COPY pi-coding-agent-builder/tools/ripgrep/build.sh /build/tools/ripgrep/
@@ -243,8 +319,8 @@ COPY --from=ripgrep /out/ /
 
 # ─── Optional Tool: fd ──────────────────────────────────────────────────────
 FROM deps AS fd
-ARG FD_VERSION=v10.2.0
-ARG FD_COMMIT=b19136871310b01500b4f09eadd7387b8476be47
+ARG FD_VERSION=v10.5.1
+ARG FD_COMMIT=193d0df1d0ad455e44506953a2cd80428203ff35
 COPY --from=rust /out/ /
 COPY pi-coding-agent-builder/tools/fd/build.sh /build/tools/fd/
 RUN bash /build/tools/fd/build.sh
@@ -254,8 +330,8 @@ COPY --from=fd /out/ /
 
 # ─── Optional Tool: ast-grep ────────────────────────────────────────────────
 FROM deps AS ast-grep
-ARG AST_GREP_VERSION=0.38.6
-ARG AST_GREP_COMMIT=3a84f1e80c5e8191a5b955281f7061e8a8084d0a
+ARG AST_GREP_VERSION=0.51.1
+ARG AST_GREP_COMMIT=5a204b1ef3facef94de125d990dddc7cf90011c0
 COPY --from=rust /out/ /
 COPY pi-coding-agent-builder/tools/ast-grep/build.sh /build/tools/ast-grep/
 RUN bash /build/tools/ast-grep/build.sh
@@ -265,8 +341,8 @@ COPY --from=ast-grep /out/ /
 
 # ─── Optional Tool: tree-sitter-cli ─────────────────────────────────────────
 FROM deps AS tree-sitter-cli
-ARG TREE_SITTER_VERSION=v0.25.3
-ARG TREE_SITTER_COMMIT=2a835ee029dca1c325e6f1c01dbce40396f6123e
+ARG TREE_SITTER_VERSION=v0.27.1
+ARG TREE_SITTER_COMMIT=10eb5ac119eec9cb4267a8e035066473983f5f3a
 COPY --from=rust /out/ /
 COPY pi-coding-agent-builder/tools/tree-sitter-cli/build.sh /build/tools/tree-sitter-cli/
 RUN bash /build/tools/tree-sitter-cli/build.sh
@@ -287,8 +363,8 @@ COPY --from=colgrep /out/ /
 
 # ─── Optional Tool: qdrant ──────────────────────────────────────────────────
 FROM deps AS qdrant
-ARG QDRANT_VERSION=v1.13.4
-ARG QDRANT_COMMIT=7abc684361fb81d8b62cf1554d8bf4fb65a706d7
+ARG QDRANT_VERSION=v1.20.0
+ARG QDRANT_COMMIT=222b2e44ab1c3f17e8246396ead6558e45041df7
 RUN apt-get update && apt-get install -y --no-install-recommends clang cmake && rm -rf /var/lib/apt/lists/*
 COPY --from=rust /out/ /
 COPY pi-coding-agent-builder/tools/qdrant/build.sh /build/tools/qdrant/
@@ -299,8 +375,8 @@ COPY --from=qdrant /out/ /
 
 # ─── Optional Tool: sqlite-vec ──────────────────────────────────────────────
 FROM deps AS sqlite-vec
-ARG SQLITE_VEC_VERSION=v0.1.6
-ARG SQLITE_VEC_COMMIT=639fca5739fe056fdc98f3d539c4cd79328d7dc7
+ARG SQLITE_VEC_VERSION=v0.1.9
+ARG SQLITE_VEC_COMMIT=e9f598abfa0c06b328d8fe5da9c3760cce74be10
 COPY pi-coding-agent-builder/tools/sqlite-vec/build.sh /build/tools/sqlite-vec/
 RUN bash /build/tools/sqlite-vec/build.sh
 
@@ -309,8 +385,8 @@ COPY --from=sqlite-vec /out/ /
 
 # ─── Optional Tool: rust-analyzer ───────────────────────────────────────────
 FROM deps AS rust-analyzer
-ARG RUST_ANALYZER_VERSION=2025-02-24
-ARG RUST_ANALYZER_COMMIT=6d68c475c7aaf7534251182662456a4bf4216dfe
+ARG RUST_ANALYZER_VERSION=2026-11-02
+ARG RUST_ANALYZER_COMMIT=b98172d80f0da12bbde3d6733c274e17cb6417aa
 COPY --from=rust /out/ /
 COPY pi-coding-agent-builder/tools/rust-analyzer/build.sh /build/tools/rust-analyzer/
 RUN bash /build/tools/rust-analyzer/build.sh
@@ -320,8 +396,8 @@ COPY --from=rust-analyzer /out/ /
 
 # ─── Optional Tool: gopls ───────────────────────────────────────────────────
 FROM deps AS gopls
-ARG GOPLS_VERSION=gopls/v0.18.1
-ARG GOPLS_COMMIT=0b62b3fcb903046d1ed6e0c50a94871e9fdcae2a
+ARG GOPLS_VERSION=gopls/v0.24.0
+ARG GOPLS_COMMIT=1f9922d1dcc5836d5c5bcb552c8fed230f885372
 COPY --from=go /out/ /
 COPY pi-coding-agent-builder/tools/gopls/build.sh /build/tools/gopls/
 RUN bash /build/tools/gopls/build.sh
@@ -331,8 +407,8 @@ COPY --from=gopls /out/ /
 
 # ─── Optional Tool: clangd ──────────────────────────────────────────────────
 FROM deps AS clangd
-ARG CLANGD_VERSION=llvmorg-19.1.7
-ARG CLANGD_COMMIT=cd708029e0b2869e80abe31ddb175f7c35361f90
+ARG CLANGD_VERSION=llvmorg-23.1.5
+ARG CLANGD_COMMIT=392dfff97d29b59d77e5cac6d4b6ef2585fe7117
 RUN apt-get update && apt-get install -y --no-install-recommends cmake ninja-build && rm -rf /var/lib/apt/lists/*
 COPY pi-coding-agent-builder/tools/clangd/build.sh /build/tools/clangd/
 RUN bash /build/tools/clangd/build.sh
@@ -342,11 +418,11 @@ COPY --from=clangd /out/ /
 
 # ─── Optional Tool: zls ─────────────────────────────────────────────────────
 FROM deps AS zls
-ARG ZLS_VERSION=0.14.0
-ARG ZLS_COMMIT=7485feeeda45d1ad09422ae83af73307ab9e6c9e
-ARG ZIG_VERSION=0.14.0
-ARG ZIG_SHA256_AMD64=473ec26806133cf4d1918caf1a410f8403a13d979726a9045b421b685031a982
-ARG ZIG_SHA256_ARM64=ab64e3ea277f6fc5f3d723dcd95d9ce1ab282c8ed0f431b4de880d30df891e4f
+ARG ZLS_VERSION=0.17.0
+ARG ZLS_COMMIT=542462c4ddf045493fa9ca028ee6bc3f38b2754a
+ARG ZIG_VERSION=0.17.0
+ARG ZIG_SHA256_AMD64=1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026
+ARG ZIG_SHA256_ARM64=9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8
 COPY pi-coding-agent-builder/tools/zls/build.sh /build/tools/zls/
 RUN bash /build/tools/zls/build.sh
 
@@ -355,8 +431,8 @@ COPY --from=zls /out/ /
 
 # ─── Optional Tool: ruby ────────────────────────────────────────────────────
 FROM deps AS ruby
-ARG RUBY_VERSION=3.4.2
-ARG RUBY_SHA256=ebf1c2eb58f5da17c23e965d658dd7e6202c5c50f5179154c5574452bef4b3e0
+ARG RUBY_VERSION=3.4.12
+ARG RUBY_SHA256=db6c147940d7ad0b706823d42c8e6713c36dec70a1f83f635f1d3a7f0599ec90
 RUN apt-get update && apt-get install -y --no-install-recommends libjemalloc-dev libyaml-dev && rm -rf /var/lib/apt/lists/*
 COPY --from=rust /out/ /
 COPY pi-coding-agent-builder/tools/ruby/build.sh /build/tools/ruby/
