@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+- **T3 Code (t3.codes) integration.** Added support for the T3 Code provider in pi-container. Added `t3-code` to `.pi-container/config.yaml` and `pi-coding-agent/default/config.yaml`, updated the proxy allowlist in `.pi-container/allowlist.yaml` and `pi-coding-agent/default/allowlist.yaml`, added a `tools/t3/build.sh` builder recipe, extended `src/network.py`, `src/run.py`, `src/runtimes.py`, and `src/schema_common.py` with T3-specific logic, added tests in `src/tests/test_network.py`, `src/tests/test_run.py`, and `src/tests/test_runtimes.py`, and published full documentation in `docs/t3-code.md`.
+
 ## [0.6.2] - 2026-11-05
 
 ### Added
