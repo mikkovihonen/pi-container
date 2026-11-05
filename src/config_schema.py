@@ -36,10 +36,7 @@ SCHEMA_VERSION_MISMATCH = "schema_version mismatch"
 
 # ─── Validation ─────────────────────────────────────────────────────────────
 # All helpers are imported from ``schema_common.py``.
-
-
-#: Available prebuilt toolchains that can be declared under ``tools.include``.
-AVAILABLE_TOOLS = frozenset({"go", "rust"})
+from toolchains import AVAILABLE_TOOLS
 
 
 def _validate_tools(data: dict) -> list[str]:

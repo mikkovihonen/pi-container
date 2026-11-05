@@ -154,6 +154,8 @@ class TestBuildBuilder:
             cmd = mock_popen.call_args[0][0]
             assert cmd[:2] == ["podman", "build"]
             assert build_mod.BUILDER_IMAGE_TAG in cmd
+            assert "--target" in cmd
+            assert cmd[cmd.index("--target") + 1] == "stage"
             assert any("pi-coding-agent-builder" in str(c) and "Containerfile" in str(c) for c in cmd)
 
     def test_carries_a_build_time_label(self):
@@ -468,18 +470,103 @@ class TestBuildProjectImage:
                     assert cmd[i + 1] != "BUILD_TIMESTAMP="
 
     def test_build_project_image_with_tools(self):
-        """When tools are provided, matching WITH_* build args should be passed."""
+        """When tools are provided, matching WITH_* build args and build contexts should be passed."""
         with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
             build_project_image(
                 "podman",
                 "/path/to/root/commands.sh",
                 "test.local",
                 "abc123",
-                tools=["go", "rust"],
+                tools=["go", "rust", "mold", "ripgrep"],
             )
             cmd = mock_popen.call_args[0][0]
             assert "WITH_GO=true" in cmd
             assert "WITH_RUST=true" in cmd
+            assert "WITH_MOLD=true" in cmd
+            assert "WITH_RIPGREP=true" in cmd
+            assert "--build-context" in cmd
+            contexts = [cmd[i + 1] for i, c in enumerate(cmd) if c == "--build-context"]
+            assert "tool_mold=docker-image://localhost/pi-coding-agent-tool-mold:local" in contexts
+            assert "tool_ripgrep=docker-image://localhost/pi-coding-agent-tool-ripgrep:local" in contexts
+
+
+class TestBuildTool:
+    @staticmethod
+    def _mock_popen():
+        mock_process = MagicMock()
+        mock_process.stdout = iter([])
+        mock_process.wait.return_value = 0
+        return mock_process
+
+    def test_build_tool_valid(self):
+        from build import build_tool
+
+        with patch("build.subprocess.Popen", return_value=self._mock_popen()) as mock_popen:
+            build_tool("podman", "mold")
+            cmd = mock_popen.call_args[0][0]
+            assert cmd[:2] == ["podman", "build"]
+            assert "--target" in cmd
+            assert cmd[cmd.index("--target") + 1] == "stage-mold"
+            assert "--tag" in cmd
+            assert cmd[cmd.index("--tag") + 1] == "pi-coding-agent-tool-mold:local"
+            labels = [cmd[i + 1] for i, c in enumerate(cmd) if c == "--label"]
+            assert "pi-container.type=tool" in labels
+            assert "pi-container.tool=mold" in labels
+            assert any(lbl.startswith("pi-container.hash=") for lbl in labels)
+
+    def test_build_tool_invalid(self):
+        import pytest
+
+        from build import build_tool
+
+        with pytest.raises(ValueError, match="Unknown on-demand tool"):
+            build_tool("podman", "invalid-tool")
+
+        # Core tools are not built via build_tool
+        with pytest.raises(ValueError, match="Unknown on-demand tool"):
+            build_tool("podman", "go")
+
+
+class TestMainWithTools:
+    def test_main_with_tools_flag(self):
+        from build import main
+
+        with (
+            patch("build.validate_environment", return_value="podman"),
+            patch("build.check_build_memory", return_value=True),
+            patch("build.build_builder") as mock_builder,
+            patch("build.build_tool") as mock_tool,
+        ):
+            main(["--tools", "mold,git"])
+            mock_builder.assert_called_once_with("podman")
+            assert mock_tool.call_count == 2
+            mock_tool.assert_any_call("podman", "mold")
+            mock_tool.assert_any_call("podman", "git")
+
+    def test_main_with_tools_all(self):
+        from build import main
+        from toolchains import ON_DEMAND_TOOLS
+
+        with (
+            patch("build.validate_environment", return_value="podman"),
+            patch("build.check_build_memory", return_value=True),
+            patch("build.build_builder") as mock_builder,
+            patch("build.build_tool") as mock_tool,
+        ):
+            main(["--tools", "all"])
+            mock_builder.assert_called_once_with("podman")
+            assert mock_tool.call_count == len(ON_DEMAND_TOOLS)
+
+    def test_main_with_unknown_tool(self):
+        from build import main
+
+        with (
+            patch("build.validate_environment", return_value="podman"),
+            patch("build.check_build_memory", return_value=True),
+            patch("sys.exit") as mock_exit,
+        ):
+            main(["--tools", "unknown_tool"])
+            mock_exit.assert_called_once_with(1)
 
 
 # ---------------------------------------------------------------------------
@@ -649,7 +736,10 @@ def _containerfile_stages() -> dict[str, dict]:
         elif stripped.startswith("RUN ") and current is not None:
             for token in stripped.split():
                 if token.endswith(".sh"):
-                    current["scripts"].add(Path(token).name)
+                    if token.startswith("/build/"):
+                        current["scripts"].add(token[len("/build/") :])
+                    else:
+                        current["scripts"].add(Path(token).name)
 
     return stages
 

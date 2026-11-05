@@ -207,6 +207,164 @@ COPY --from=rust /out/ /
 COPY pi-coding-agent-builder/build-network.sh /build/
 RUN bash /build/build-network.sh
 
+# ─── Optional Tool: mold ────────────────────────────────────────────────────
+FROM deps AS mold
+ARG MOLD_VERSION=v2.36.0
+ARG MOLD_COMMIT=c3a957c4dc0788ba1e05eea8129c0784cf65fc59
+RUN apt-get update && apt-get install -y --no-install-recommends cmake ninja-build && rm -rf /var/lib/apt/lists/*
+COPY pi-coding-agent-builder/tools/mold/build.sh /build/tools/mold/
+RUN bash /build/tools/mold/build.sh
+
+FROM scratch AS stage-mold
+COPY --from=mold /out/ /
+
+# ─── Optional Tool: git ──────────────────────────────────────────────────────
+FROM deps AS git
+ARG GIT_VERSION=2.48.1
+ARG GIT_SHA256=1c5d545f5dc1eb51e95d2c50d98fdf88b1a36ba1fa30e9ae5d5385c6024f82ad
+RUN apt-get update && apt-get install -y --no-install-recommends libdeflate-dev libpcre2-dev libcurl4-openssl-dev gettext && rm -rf /var/lib/apt/lists/*
+COPY pi-coding-agent-builder/tools/git/build.sh /build/tools/git/
+RUN bash /build/tools/git/build.sh
+
+FROM scratch AS stage-git
+COPY --from=git /out/ /
+
+# ─── Optional Tool: ripgrep ──────────────────────────────────────────────────
+FROM deps AS ripgrep
+ARG RIPGREP_VERSION=14.1.1
+ARG RIPGREP_COMMIT=4649aa9700619f94cf9c66876e9549d83420e16c
+RUN apt-get update && apt-get install -y --no-install-recommends libpcre2-dev && rm -rf /var/lib/apt/lists/*
+COPY --from=rust /out/ /
+COPY pi-coding-agent-builder/tools/ripgrep/build.sh /build/tools/ripgrep/
+RUN bash /build/tools/ripgrep/build.sh
+
+FROM scratch AS stage-ripgrep
+COPY --from=ripgrep /out/ /
+
+# ─── Optional Tool: fd ──────────────────────────────────────────────────────
+FROM deps AS fd
+ARG FD_VERSION=v10.2.0
+ARG FD_COMMIT=b19136871310b01500b4f09eadd7387b8476be47
+COPY --from=rust /out/ /
+COPY pi-coding-agent-builder/tools/fd/build.sh /build/tools/fd/
+RUN bash /build/tools/fd/build.sh
+
+FROM scratch AS stage-fd
+COPY --from=fd /out/ /
+
+# ─── Optional Tool: ast-grep ────────────────────────────────────────────────
+FROM deps AS ast-grep
+ARG AST_GREP_VERSION=0.38.6
+ARG AST_GREP_COMMIT=3a84f1e80c5e8191a5b955281f7061e8a8084d0a
+COPY --from=rust /out/ /
+COPY pi-coding-agent-builder/tools/ast-grep/build.sh /build/tools/ast-grep/
+RUN bash /build/tools/ast-grep/build.sh
+
+FROM scratch AS stage-ast-grep
+COPY --from=ast-grep /out/ /
+
+# ─── Optional Tool: tree-sitter-cli ─────────────────────────────────────────
+FROM deps AS tree-sitter-cli
+ARG TREE_SITTER_VERSION=v0.25.3
+ARG TREE_SITTER_COMMIT=2a835ee029dca1c325e6f1c01dbce40396f6123e
+COPY --from=rust /out/ /
+COPY pi-coding-agent-builder/tools/tree-sitter-cli/build.sh /build/tools/tree-sitter-cli/
+RUN bash /build/tools/tree-sitter-cli/build.sh
+
+FROM scratch AS stage-tree-sitter-cli
+COPY --from=tree-sitter-cli /out/ /
+
+# ─── Optional Tool: colgrep ─────────────────────────────────────────────────
+FROM deps AS colgrep
+ARG COLGREP_VERSION=v0.1.0
+ARG COLGREP_COMMIT=c6c091d7ee14c81206bb28af90d8ff506fd0235e
+COPY --from=rust /out/ /
+COPY pi-coding-agent-builder/tools/colgrep/build.sh /build/tools/colgrep/
+RUN bash /build/tools/colgrep/build.sh
+
+FROM scratch AS stage-colgrep
+COPY --from=colgrep /out/ /
+
+# ─── Optional Tool: qdrant ──────────────────────────────────────────────────
+FROM deps AS qdrant
+ARG QDRANT_VERSION=v1.13.4
+ARG QDRANT_COMMIT=7abc684361fb81d8b62cf1554d8bf4fb65a706d7
+RUN apt-get update && apt-get install -y --no-install-recommends clang cmake && rm -rf /var/lib/apt/lists/*
+COPY --from=rust /out/ /
+COPY pi-coding-agent-builder/tools/qdrant/build.sh /build/tools/qdrant/
+RUN bash /build/tools/qdrant/build.sh
+
+FROM scratch AS stage-qdrant
+COPY --from=qdrant /out/ /
+
+# ─── Optional Tool: sqlite-vec ──────────────────────────────────────────────
+FROM deps AS sqlite-vec
+ARG SQLITE_VEC_VERSION=v0.1.6
+ARG SQLITE_VEC_COMMIT=639fca5739fe056fdc98f3d539c4cd79328d7dc7
+COPY pi-coding-agent-builder/tools/sqlite-vec/build.sh /build/tools/sqlite-vec/
+RUN bash /build/tools/sqlite-vec/build.sh
+
+FROM scratch AS stage-sqlite-vec
+COPY --from=sqlite-vec /out/ /
+
+# ─── Optional Tool: rust-analyzer ───────────────────────────────────────────
+FROM deps AS rust-analyzer
+ARG RUST_ANALYZER_VERSION=2025-02-24
+ARG RUST_ANALYZER_COMMIT=6d68c475c7aaf7534251182662456a4bf4216dfe
+COPY --from=rust /out/ /
+COPY pi-coding-agent-builder/tools/rust-analyzer/build.sh /build/tools/rust-analyzer/
+RUN bash /build/tools/rust-analyzer/build.sh
+
+FROM scratch AS stage-rust-analyzer
+COPY --from=rust-analyzer /out/ /
+
+# ─── Optional Tool: gopls ───────────────────────────────────────────────────
+FROM deps AS gopls
+ARG GOPLS_VERSION=gopls/v0.18.1
+ARG GOPLS_COMMIT=0b62b3fcb903046d1ed6e0c50a94871e9fdcae2a
+COPY --from=go /out/ /
+COPY pi-coding-agent-builder/tools/gopls/build.sh /build/tools/gopls/
+RUN bash /build/tools/gopls/build.sh
+
+FROM scratch AS stage-gopls
+COPY --from=gopls /out/ /
+
+# ─── Optional Tool: clangd ──────────────────────────────────────────────────
+FROM deps AS clangd
+ARG CLANGD_VERSION=llvmorg-19.1.7
+ARG CLANGD_COMMIT=cd708029e0b2869e80abe31ddb175f7c35361f90
+RUN apt-get update && apt-get install -y --no-install-recommends cmake ninja-build && rm -rf /var/lib/apt/lists/*
+COPY pi-coding-agent-builder/tools/clangd/build.sh /build/tools/clangd/
+RUN bash /build/tools/clangd/build.sh
+
+FROM scratch AS stage-clangd
+COPY --from=clangd /out/ /
+
+# ─── Optional Tool: zls ─────────────────────────────────────────────────────
+FROM deps AS zls
+ARG ZLS_VERSION=0.14.0
+ARG ZLS_COMMIT=7485feeeda45d1ad09422ae83af73307ab9e6c9e
+ARG ZIG_VERSION=0.14.0
+ARG ZIG_SHA256_AMD64=473ec26806133cf4d1918caf1a410f8403a13d979726a9045b421b685031a982
+ARG ZIG_SHA256_ARM64=ab64e3ea277f6fc5f3d723dcd95d9ce1ab282c8ed0f431b4de880d30df891e4f
+COPY pi-coding-agent-builder/tools/zls/build.sh /build/tools/zls/
+RUN bash /build/tools/zls/build.sh
+
+FROM scratch AS stage-zls
+COPY --from=zls /out/ /
+
+# ─── Optional Tool: ruby ────────────────────────────────────────────────────
+FROM deps AS ruby
+ARG RUBY_VERSION=3.4.2
+ARG RUBY_SHA256=ebf1c2eb58f5da17c23e965d658dd7e6202c5c50f5179154c5574452bef4b3e0
+RUN apt-get update && apt-get install -y --no-install-recommends libjemalloc-dev libyaml-dev && rm -rf /var/lib/apt/lists/*
+COPY --from=rust /out/ /
+COPY pi-coding-agent-builder/tools/ruby/build.sh /build/tools/ruby/
+RUN bash /build/tools/ruby/build.sh
+
+FROM scratch AS stage-ruby
+COPY --from=ruby /out/ /
+
 # ─── The shipped artefact ────────────────────────────────────────────────────
 # Nothing but the staged trees: no toolchains, no package manager, no shell. This
 # image exists to be COPYed --from, and keeping it at exactly its payload (rather than

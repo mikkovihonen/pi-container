@@ -233,6 +233,39 @@ class TestProxyImageIsCurrent:
         assert images.proxy_image_is_current() is True
 
 
+class TestToolImageIsCurrent:
+    def test_returns_false_when_image_missing(self, monkeypatch):
+        monkeypatch.setattr(images, "image_exists", lambda *a, **kw: False)
+        assert images.tool_image_is_current("mold") is False
+
+    def test_returns_false_when_label_missing(self, monkeypatch):
+        monkeypatch.setattr(images, "image_exists", lambda *a, **kw: True)
+        monkeypatch.setattr(images, "get_image_label", lambda *a, **kw: None)
+        assert images.tool_image_is_current("mold") is False
+
+    def test_returns_false_when_hash_mismatch(self, monkeypatch):
+        monkeypatch.setattr(images, "image_exists", lambda *a, **kw: True)
+        monkeypatch.setattr(images, "get_image_label", lambda *a, **kw: "oldhash12345678")
+        monkeypatch.setattr("toolchains.compute_tool_hash", lambda *a, **kw: "newhash12345678")
+        assert images.tool_image_is_current("mold") is False
+
+    def test_returns_true_when_hash_matches(self, monkeypatch):
+        monkeypatch.setattr(images, "image_exists", lambda *a, **kw: True)
+        monkeypatch.setattr(images, "get_image_label", lambda *a, **kw: "matchhash123456")
+        monkeypatch.setattr("toolchains.compute_tool_hash", lambda *a, **kw: "matchhash123456")
+        assert images.tool_image_is_current("mold") is True
+
+
+class TestEnsureToolImages:
+    def test_builds_missing_on_demand_tools(self, monkeypatch):
+        built = []
+        monkeypatch.setattr("build.build_tool", lambda runtime, tool: built.append(tool))
+        monkeypatch.setattr(images, "tool_image_is_current", lambda tool, **kw: tool == "git")
+
+        images.ensure_tool_images(["mold", "git", "go"], runtime="podman")
+        assert built == ["mold"]
+
+
 class TestHasDependencyFiles:
     def test_returns_false_when_no_files(self, tmp_path):
         repo = tmp_path / "repo"

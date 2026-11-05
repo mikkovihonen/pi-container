@@ -836,12 +836,12 @@ class TestSecuritySchema:
 
 class TestToolsSchema:
     def test_valid_tools_section(self, valid_config: Path):
-        from config_schema import validate_config
+        from config_schema import AVAILABLE_TOOLS, validate_config
 
         with valid_config.open("r") as f:
             data = yaml.safe_load(f)
         data["tools"] = {
-            "include": ["go", "rust"],
+            "include": sorted(AVAILABLE_TOOLS),
         }
         valid_config.write_text(yaml.dump(data))
 

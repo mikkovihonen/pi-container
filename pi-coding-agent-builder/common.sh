@@ -123,7 +123,12 @@ run_logged() {
 # fragments into /usr/local/share/pi-container/toolchain-versions.txt.
 stage_record() {
     local fragment_dir="${PI_STAGE}/usr/local/share/pi-container/toolchain-versions.d"
-    local fragment="${fragment_dir}/$(basename "$0" .sh).txt"
+    local name
+    name="$(basename "$0" .sh)"
+    if [ "${name}" = "build" ]; then
+        name="$(basename "$(dirname "$0")")"
+    fi
+    local fragment="${fragment_dir}/${name}.txt"
 
     mkdir -p "${fragment_dir}"
     printf '%-14s %s\n' "$1" "$2" >> "${fragment}"

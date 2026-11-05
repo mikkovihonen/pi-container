@@ -587,20 +587,58 @@ Two properties worth relying on. The variables are set at the image and `run` la
 
 The shared agent base image includes the core runtime baseline: **Python 3.14 (with `uv`)**, **Node.js 26**, **Podman 6**, and **Netavark/Aardvark-dns**.
 
-To keep the base image lightweight, additional toolchains built by `pi-coding-agent-builder` are opt-in per workspace under `tools.include` in `.pi-container/config.yaml`:
+To keep the baseline image lightweight and fast to build, additional toolchains built by `pi-coding-agent-builder` are opt-in per workspace under `tools.include` in `.pi-container/config.yaml`:
 
 ```yaml
 tools:
   include:
-    - go       # Go compiler toolchain (go, gofmt)
-    - rust     # Rust compiler toolchain (rustc, cargo)
+    # Build compilers & linkers
+    - go
+    - rust
+    - mold
+    # Search & AST code intelligence
+    - ripgrep
+    - fd
+    - ast-grep
+    - tree-sitter-cli
+    - colgrep
+    # Vector databases & search
+    - qdrant
+    - sqlite-vec
+    # Language Server Protocols (LSPs)
+    - rust-analyzer
+    - gopls
+    - clangd
+    - zls
+    # VCS & language runtimes
+    - git
+    - ruby
 ```
 
 **Available tools:**
-- `go`: The official Go toolchain (staged at `/usr/local/go`, symlinked into `/usr/local/bin`).
-- `rust`: The official Rust toolchain (staged at `/usr/local`, providing `rustc`, `cargo`, and `rustfmt`).
+- **Compilers & Linkers:**
+    - `go`: Official Go toolchain (provides `/usr/local/bin/go`, `gofmt`).
+    - `rust`: Official Rust toolchain (provides `/usr/local/bin/rustc`, `cargo`, `rustfmt`).
+    - `mold`: Modern high-speed linker with mimalloc and LTO (provides `/usr/local/bin/mold`).
+- **Search & AST Code Intelligence:**
+    - `ripgrep`: SIMD-accelerated regex search with PCRE2 support (provides `/usr/local/bin/rg`).
+    - `fd`: Native fast directory traversal and file finding (provides `/usr/local/bin/fd`).
+    - `ast-grep`: Structural Tree-sitter AST search and rewrite engine (provides `/usr/local/bin/ast-grep`, `sg`).
+    - `tree-sitter-cli`: Parser generator and AST syntax inspector (provides `/usr/local/bin/tree-sitter`).
+    - `colgrep`: Multi-vector semantic code search with native SIMD acceleration (provides `/usr/local/bin/colgrep`).
+- **Vector Storage & Semantic Retrieval:**
+    - `qdrant`: Embedded Rust vector database with SIMD distance metrics (provides `/usr/local/bin/qdrant`).
+    - `sqlite-vec`: Native C SIMD vector search extension for SQLite (provides `/usr/local/lib/sqlite/vec0.so`).
+- **Language Server Protocols (LSPs):**
+    - `rust-analyzer`: Official Rust language server built against builder's Rust 1.97 and glibc (provides `/usr/local/bin/rust-analyzer`).
+    - `gopls`: Official Go language server built natively with builder's Go 1.26 (provides `/usr/local/bin/gopls`).
+    - `clangd`: C/C++ language server from LLVM (provides `/usr/local/bin/clangd`).
+    - `zls`: Official Zig language server (provides `/usr/local/bin/zls`).
+- **VCS & Language Runtimes:**
+    - `git`: High-performance Git engine built with `libdeflate`, `reftable`, `fsmonitor`, and `PCRE2` (provides `/usr/local/bin/git`).
+    - `ruby`: Ruby 3.4+ compiled with Rust-based YJIT and jemalloc (provides `/usr/local/bin/ruby`, `gem`, `bundle`).
 
-When `tools.include` is non-empty, pi-container builds a project-specific container image that overlays the pre-staged trees from `pi-coding-agent-builder:local` in seconds (no recompilation).
+When `tools.include` is non-empty, pi-container builds or reuses the required tool images and layers them into a project-specific container image in seconds.
 
 <a name="nested-containers"></a>
 ### Nested containers

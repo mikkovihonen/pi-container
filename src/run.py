@@ -378,6 +378,7 @@ def main() -> None:
                     else:
                         root_commands_path = str(DEFAULT_ROOT_COMMANDS)
                     project_tools = images.read_project_tools(PROJECT_DIR)
+                    images.ensure_tool_images(project_tools, CONTAINER_RUNTIME, repo_root=REPO_ROOT)
                     build_project_image(
                         CONTAINER_RUNTIME,
                         root_commands_path,

@@ -1,3 +1,21 @@
+# ─── Optional on-demand tool fallbacks ───────────────────────────────────────
+# Default to empty scratch stages. When enabled in project builds, build-contexts
+# override these with the corresponding tool images.
+FROM scratch AS tool_ripgrep
+FROM scratch AS tool_fd
+FROM scratch AS tool_ast_grep
+FROM scratch AS tool_tree_sitter_cli
+FROM scratch AS tool_colgrep
+FROM scratch AS tool_qdrant
+FROM scratch AS tool_sqlite_vec
+FROM scratch AS tool_rust_analyzer
+FROM scratch AS tool_gopls
+FROM scratch AS tool_clangd
+FROM scratch AS tool_zls
+FROM scratch AS tool_mold
+FROM scratch AS tool_git
+FROM scratch AS tool_ruby
+
 # Plain Debian, not node:<ver>-trixie-slim. Node is built in
 # pi-coding-agent-builder/ like everything else and arrives through the COPY below, so
 # the base image no longer decides which Node this is — nor carries anything else on
@@ -129,6 +147,63 @@ ARG WITH_RUST=false
 RUN --mount=type=bind,from=pi-coding-agent-builder:local,src=/rust,target=/mnt/rust \
     if [ "${WITH_RUST}" = "true" ]; then cp -a /mnt/rust/* /; fi
 
+# ─── Optional on-demand tools from separate tool images ──────────────────────
+ARG WITH_RIPGREP=false
+RUN --mount=type=bind,from=tool_ripgrep,target=/mnt/ripgrep \
+    if [ "${WITH_RIPGREP}" = "true" ] && [ -d /mnt/ripgrep ]; then cp -a /mnt/ripgrep/. /; fi
+
+ARG WITH_FD=false
+RUN --mount=type=bind,from=tool_fd,target=/mnt/fd \
+    if [ "${WITH_FD}" = "true" ] && [ -d /mnt/fd ]; then cp -a /mnt/fd/. /; fi
+
+ARG WITH_AST_GREP=false
+RUN --mount=type=bind,from=tool_ast_grep,target=/mnt/ast_grep \
+    if [ "${WITH_AST_GREP}" = "true" ] && [ -d /mnt/ast_grep ]; then cp -a /mnt/ast_grep/. /; fi
+
+ARG WITH_TREE_SITTER_CLI=false
+RUN --mount=type=bind,from=tool_tree_sitter_cli,target=/mnt/tree_sitter_cli \
+    if [ "${WITH_TREE_SITTER_CLI}" = "true" ] && [ -d /mnt/tree_sitter_cli ]; then cp -a /mnt/tree_sitter_cli/. /; fi
+
+ARG WITH_COLGREP=false
+RUN --mount=type=bind,from=tool_colgrep,target=/mnt/colgrep \
+    if [ "${WITH_COLGREP}" = "true" ] && [ -d /mnt/colgrep ]; then cp -a /mnt/colgrep/. /; fi
+
+ARG WITH_QDRANT=false
+RUN --mount=type=bind,from=tool_qdrant,target=/mnt/qdrant \
+    if [ "${WITH_QDRANT}" = "true" ] && [ -d /mnt/qdrant ]; then cp -a /mnt/qdrant/. /; fi
+
+ARG WITH_SQLITE_VEC=false
+RUN --mount=type=bind,from=tool_sqlite_vec,target=/mnt/sqlite_vec \
+    if [ "${WITH_SQLITE_VEC}" = "true" ] && [ -d /mnt/sqlite_vec ]; then cp -a /mnt/sqlite_vec/. /; fi
+
+ARG WITH_RUST_ANALYZER=false
+RUN --mount=type=bind,from=tool_rust_analyzer,target=/mnt/rust_analyzer \
+    if [ "${WITH_RUST_ANALYZER}" = "true" ] && [ -d /mnt/rust_analyzer ]; then cp -a /mnt/rust_analyzer/. /; fi
+
+ARG WITH_GOPLS=false
+RUN --mount=type=bind,from=tool_gopls,target=/mnt/gopls \
+    if [ "${WITH_GOPLS}" = "true" ] && [ -d /mnt/gopls ]; then cp -a /mnt/gopls/. /; fi
+
+ARG WITH_CLANGD=false
+RUN --mount=type=bind,from=tool_clangd,target=/mnt/clangd \
+    if [ "${WITH_CLANGD}" = "true" ] && [ -d /mnt/clangd ]; then cp -a /mnt/clangd/. /; fi
+
+ARG WITH_ZLS=false
+RUN --mount=type=bind,from=tool_zls,target=/mnt/zls \
+    if [ "${WITH_ZLS}" = "true" ] && [ -d /mnt/zls ]; then cp -a /mnt/zls/. /; fi
+
+ARG WITH_MOLD=false
+RUN --mount=type=bind,from=tool_mold,target=/mnt/mold \
+    if [ "${WITH_MOLD}" = "true" ] && [ -d /mnt/mold ]; then cp -a /mnt/mold/. /; fi
+
+ARG WITH_GIT=false
+RUN --mount=type=bind,from=tool_git,target=/mnt/git \
+    if [ "${WITH_GIT}" = "true" ] && [ -d /mnt/git ]; then cp -a /mnt/git/. /; fi
+
+ARG WITH_RUBY=false
+RUN --mount=type=bind,from=tool_ruby,target=/mnt/ruby \
+    if [ "${WITH_RUBY}" = "true" ] && [ -d /mnt/ruby ]; then cp -a /mnt/ruby/. /; fi
+
 # uv reads the system trust store, which carries the mitmproxy CA (installed below).
 ENV UV_SYSTEM_CERTS=1
 
@@ -151,6 +226,20 @@ RUN ldconfig \
  && /usr/local/libexec/podman/aardvark-dns --version \
  && if [ -x /usr/local/bin/go ]; then /usr/local/bin/go version; fi \
  && if [ -x /usr/local/bin/rustc ]; then /usr/local/bin/rustc --version && /usr/local/bin/cargo --version; fi \
+ && if [ -x /usr/local/bin/rg ]; then /usr/local/bin/rg --version; fi \
+ && if [ -x /usr/local/bin/fd ]; then /usr/local/bin/fd --version; fi \
+ && if [ -x /usr/local/bin/ast-grep ]; then /usr/local/bin/ast-grep --version; fi \
+ && if [ -x /usr/local/bin/tree-sitter ]; then /usr/local/bin/tree-sitter --version; fi \
+ && if [ -x /usr/local/bin/colgrep ]; then /usr/local/bin/colgrep --version; fi \
+ && if [ -x /usr/local/bin/qdrant ]; then /usr/local/bin/qdrant --version; fi \
+ && if [ -f /usr/local/lib/sqlite/vec0.so ]; then echo "sqlite-vec ready"; fi \
+ && if [ -x /usr/local/bin/rust-analyzer ]; then /usr/local/bin/rust-analyzer --version; fi \
+ && if [ -x /usr/local/bin/gopls ]; then /usr/local/bin/gopls version; fi \
+ && if [ -x /usr/local/bin/clangd ]; then /usr/local/bin/clangd --version; fi \
+ && if [ -x /usr/local/bin/zls ]; then /usr/local/bin/zls --version; fi \
+ && if [ -x /usr/local/bin/mold ]; then /usr/local/bin/mold --version; fi \
+ && if [ -x /usr/local/bin/git ]; then /usr/local/bin/git --version; fi \
+ && if [ -x /usr/local/bin/ruby ]; then /usr/local/bin/ruby --version; fi \
  && cat /usr/local/share/pi-container/toolchain-versions.d/*.txt \
       | sort > /usr/local/share/pi-container/toolchain-versions.txt \
  && cat /usr/local/share/pi-container/toolchain-versions.txt

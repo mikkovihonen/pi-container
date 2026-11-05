@@ -81,6 +81,12 @@ def compute_image_hash(project_dir: Path, repo_root: Path | None = None) -> str 
 
     if tools:
         combined_hash.update(f"tools:{','.join(tools)}".encode())
+        from toolchains import ON_DEMAND_TOOLS, compute_tool_hash
+
+        for t in tools:
+            if t in ON_DEMAND_TOOLS:
+                tool_hash = compute_tool_hash(t, r_root)
+                combined_hash.update(f"tool:{t}:{tool_hash}".encode())
 
     return combined_hash.hexdigest()[:16]
 
@@ -124,6 +130,39 @@ def proxy_image_is_current(repo_root: Path | str | None = None, runtime: str | N
 
     current_hash = compute_proxy_image_hash(repo_root=repo_root)
     return stored_hash == current_hash
+
+
+def tool_image_is_current(tool: str, repo_root: Path | str | None = None, runtime: str | None = None) -> bool:
+    """Check if the on-demand tool image exists and matches current recipe hashes."""
+    from toolchains import compute_tool_hash, tool_to_image_tag
+
+    r_root = Path(repo_root) if repo_root else REPO_ROOT
+    tag = tool_to_image_tag(tool)
+    if not image_exists(tag, runtime=runtime):
+        return False
+
+    stored_hash = get_image_label(tag, "pi-container.hash", runtime=runtime)
+    if stored_hash is None:
+        return False
+
+    current_hash = compute_tool_hash(tool, r_root)
+    return stored_hash == current_hash
+
+
+def ensure_tool_images(
+    tools: list[str] | set[str] | frozenset[str],
+    runtime: str,
+    repo_root: Path | str | None = None,
+) -> None:
+    """Ensure all required on-demand tool images are built and current."""
+    from build import build_tool
+    from toolchains import ON_DEMAND_TOOLS
+
+    r_root = Path(repo_root) if repo_root else REPO_ROOT
+    for tool in sorted(tools):
+        if tool in ON_DEMAND_TOOLS and not tool_image_is_current(tool, repo_root=r_root, runtime=runtime):
+            logger.info(f"Tool image for '{tool}' is missing or stale; building...")
+            build_tool(runtime, tool)
 
 
 def has_dependency_files(project_dir: Path) -> bool:

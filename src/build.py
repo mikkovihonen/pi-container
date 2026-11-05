@@ -1,3 +1,4 @@
+import argparse
 import logging
 import os
 import re
@@ -216,12 +217,58 @@ def build_builder(runtime: str) -> None:
             *_build_dns_args(),
             *_python_build_args(),
             *_node_build_args(),
+            "--target",
+            "stage",
             "--label",
             f"pi-container.build.time={build_ts}",
             "--label",
             "pi-container.type=shared",
             "--tag",
             BUILDER_IMAGE_TAG,
+            "--file",
+            str(REPO_ROOT / "pi-coding-agent-builder" / "Containerfile"),
+            str(REPO_ROOT),
+        ],
+    )
+
+
+def build_tool(runtime: str, tool: str) -> None:
+    """Build a specific on-demand toolchain image from the builder Containerfile."""
+    from datetime import UTC, datetime
+
+    from toolchains import (
+        ON_DEMAND_TOOLS,
+        compute_tool_hash,
+        tool_to_image_tag,
+        tool_to_stage_target,
+    )
+
+    if tool not in ON_DEMAND_TOOLS:
+        raise ValueError(f"Unknown on-demand tool '{tool}'. Must be one of {', '.join(sorted(ON_DEMAND_TOOLS))}.")
+
+    build_ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tag = tool_to_image_tag(tool)
+    target = tool_to_stage_target(tool)
+    tool_hash = compute_tool_hash(tool, REPO_ROOT)
+
+    logger.info(f"Building on-demand tool '{tool}' ({runtime}): {tag} [target: {target}]")
+    _run_command_with_logging(
+        [
+            runtime,
+            "build",
+            *_build_dns_args(),
+            "--target",
+            target,
+            "--label",
+            f"pi-container.build.time={build_ts}",
+            "--label",
+            "pi-container.type=tool",
+            "--label",
+            f"pi-container.tool={tool}",
+            "--label",
+            f"pi-container.hash={tool_hash}",
+            "--tag",
+            tag,
             "--file",
             str(REPO_ROOT / "pi-coding-agent-builder" / "Containerfile"),
             str(REPO_ROOT),
@@ -322,10 +369,19 @@ def build_project_image(
         f"LABEL_HASH={label_hash}",
     ]
     tools_set = set(tools or [])
-    if "go" in tools_set:
-        cmd += ["--build-arg", "WITH_GO=true"]
-    if "rust" in tools_set:
-        cmd += ["--build-arg", "WITH_RUST=true"]
+    from toolchains import (
+        ON_DEMAND_TOOLS,
+        tool_to_build_arg,
+        tool_to_context_name,
+        tool_to_image_tag,
+    )
+
+    for tool in sorted(tools_set):
+        cmd += ["--build-arg", f"{tool_to_build_arg(tool)}=true"]
+        if tool in ON_DEMAND_TOOLS:
+            ctx_name = tool_to_context_name(tool)
+            img_tag = tool_to_image_tag(tool)
+            cmd += ["--build-context", f"{ctx_name}=docker-image://localhost/{img_tag}"]
     if project_hash:
         cmd += ["--build-arg", f"PROJECT_HASH={project_hash}"]
     if project_path:
@@ -344,7 +400,19 @@ def build_project_image(
     _run_command_with_logging(cmd)
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command line arguments for image and tool builds."""
+    parser = argparse.ArgumentParser(description="Build pi-container images and on-demand toolchains.")
+    parser.add_argument(
+        "--tools",
+        metavar="TOOLS",
+        help="Comma-separated list of on-demand tools to build (e.g. 'mold,git'), or 'all'.",
+    )
+    return parser.parse_known_args(argv)[0]
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
     try:
         runtime = validate_environment(LLAMA_BIN)
         # Reject a bad NODE_SOURCE before any build starts. build_builder() would raise
@@ -362,6 +430,28 @@ def main() -> None:
         sys.exit(1)
 
     try:
+        if args.tools:
+            from toolchains import AVAILABLE_TOOLS, CORE_TOOLS, ON_DEMAND_TOOLS
+
+            if args.tools.strip().lower() == "all":
+                requested = sorted(ON_DEMAND_TOOLS)
+            else:
+                requested = [t.strip() for t in args.tools.split(",") if t.strip()]
+                for t in requested:
+                    if t not in AVAILABLE_TOOLS:
+                        logger.error(f"Unknown tool '{t}'. Available tools: {', '.join(sorted(AVAILABLE_TOOLS))}")
+                        sys.exit(1)
+
+            # Builder image is the foundation
+            build_builder(runtime)
+            for t in requested:
+                if t in ON_DEMAND_TOOLS:
+                    build_tool(runtime, t)
+                elif t in CORE_TOOLS:
+                    logger.info(f"Tool '{t}' is already included in builder baseline ({BUILDER_IMAGE_TAG}).")
+            logger.info("All requested toolchains built successfully.")
+            return
+
         # Strict dependency order, not a preference: the proxy image COPYs its CPython
         # and uv from the toolchain image, and the agent image COPYs from both. The
         # proxy used to be built first (it is the quick one, and a failure there was
