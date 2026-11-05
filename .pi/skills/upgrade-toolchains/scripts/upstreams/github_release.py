@@ -143,3 +143,99 @@ def resolve_t3() -> ToolReleaseInfo:
         release_url=f"https://github.com/pingdotgg/t3code/releases/tag/{tag}",
     )
 
+
+def resolve_gh() -> ToolReleaseInfo:
+    release_data = _fetch_json("https://api.github.com/repos/cli/cli/releases/latest")
+    tag = release_data["tag_name"]
+    version = tag.removeprefix("v")
+
+    sha_amd64 = ""
+    sha_arm64 = ""
+    for asset in release_data.get("assets", []):
+        if asset["name"] == f"gh_{version}_checksums.txt":
+            txt = _fetch_text(asset["browser_download_url"])
+            for line in txt.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    sha, filename = parts[0], parts[1].lstrip("*")
+                    if filename == f"gh_{version}_linux_amd64.tar.gz":
+                        sha_amd64 = sha
+                    elif filename == f"gh_{version}_linux_arm64.tar.gz":
+                        sha_arm64 = sha
+
+    return ToolReleaseInfo(
+        tool="gh",
+        version=version,
+        args={
+            "GH_VERSION": version,
+            "GH_SHA256_AMD64": sha_amd64,
+            "GH_SHA256_ARM64": sha_arm64,
+        },
+        category="vcs",
+        release_url=f"https://github.com/cli/cli/releases/tag/{tag}",
+    )
+
+
+def resolve_glab() -> ToolReleaseInfo:
+    release_data = _fetch_json("https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases/permalink/latest")
+    tag = release_data["tag_name"]
+    version = tag.removeprefix("v")
+
+    sha_amd64 = ""
+    sha_arm64 = ""
+    for link in release_data.get("assets", {}).get("links", []):
+        if link.get("name") == "checksums.txt":
+            txt = _fetch_text(link["url"])
+            for line in txt.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    sha, filename = parts[0], parts[1].lstrip("*")
+                    if filename == f"glab_{version}_linux_amd64.tar.gz":
+                        sha_amd64 = sha
+                    elif filename == f"glab_{version}_linux_arm64.tar.gz":
+                        sha_arm64 = sha
+
+    return ToolReleaseInfo(
+        tool="glab",
+        version=version,
+        args={
+            "GLAB_VERSION": version,
+            "GLAB_SHA256_AMD64": sha_amd64,
+            "GLAB_SHA256_ARM64": sha_arm64,
+        },
+        category="vcs",
+        release_url=f"https://gitlab.com/gitlab-org/cli/-/releases/{tag}",
+    )
+
+
+def resolve_tea() -> ToolReleaseInfo:
+    release_data = _fetch_json("https://gitea.com/api/v1/repos/gitea/tea/releases/latest")
+    tag = release_data["tag_name"]
+    version = tag.removeprefix("v")
+
+    sha_amd64 = ""
+    sha_arm64 = ""
+    for asset in release_data.get("assets", []):
+        if asset["name"] == "checksums.txt":
+            txt = _fetch_text(asset["browser_download_url"])
+            for line in txt.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    sha, filename = parts[0], parts[1].lstrip("*")
+                    if filename == f"tea-{version}-linux-amd64":
+                        sha_amd64 = sha
+                    elif filename == f"tea-{version}-linux-arm64":
+                        sha_arm64 = sha
+
+    return ToolReleaseInfo(
+        tool="tea",
+        version=version,
+        args={
+            "TEA_VERSION": version,
+            "TEA_SHA256_AMD64": sha_amd64,
+            "TEA_SHA256_ARM64": sha_arm64,
+        },
+        category="vcs",
+        release_url=f"https://gitea.com/gitea/tea/releases/tag/{tag}",
+    )
+

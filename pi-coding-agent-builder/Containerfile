@@ -452,6 +452,65 @@ RUN bash /build/tools/t3/build.sh
 FROM scratch AS stage-t3
 COPY --from=t3 /out/ /
 
+# ─── Optional Tool: gh ──────────────────────────────────────────────────────
+FROM deps AS gh
+ARG GH_VERSION=2.103.3
+ARG GH_SHA256_AMD64=4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d
+ARG GH_SHA256_ARM64=ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63
+COPY pi-coding-agent-builder/tools/gh/ /build/tools/gh/
+RUN bash /build/tools/gh/build.sh
+
+FROM scratch AS stage-gh
+COPY --from=gh /out/ /
+
+# ─── Optional Tool: glab ────────────────────────────────────────────────────
+FROM deps AS glab
+ARG GLAB_VERSION=1.128.0
+ARG GLAB_SHA256_AMD64=bc024819e7598b19429a199cd87f640d98b2b67416d8ad796f19e4260b57a7c7
+ARG GLAB_SHA256_ARM64=60d0512085a8c1be7c5ef51aa7e4ee28213444cea0376b3260707d90489199ea
+COPY pi-coding-agent-builder/tools/glab/ /build/tools/glab/
+RUN bash /build/tools/glab/build.sh
+
+FROM scratch AS stage-glab
+COPY --from=glab /out/ /
+
+# ─── Optional Tool: tea ─────────────────────────────────────────────────────
+FROM deps AS tea
+ARG TEA_VERSION=0.16.0
+ARG TEA_SHA256_AMD64=9c142c8a0b31485eea2387031c1c404f12b7141075eb4ffbd7ced49441590636
+ARG TEA_SHA256_ARM64=0e14a036322eeb1fc55e266acafeb8490e523ed99f9232034ae74861e2339879
+COPY pi-coding-agent-builder/tools/tea/ /build/tools/tea/
+RUN bash /build/tools/tea/build.sh
+
+FROM scratch AS stage-tea
+COPY --from=tea /out/ /
+
+# ─── Optional Tool: az ──────────────────────────────────────────────────────
+FROM deps AS az
+ARG AZ_VERSION=2.92.0
+ARG AZURE_DEVOPS_VERSION=1.0.10
+ARG AZURE_DEVOPS_SHA256=cb38021f76cf93905f759c9d1b4b441bdeecfc98d4141ce26dd7b299af1aa56e
+COPY --from=python /out/ /
+COPY pi-coding-agent-builder/tools/az/ /build/tools/az/
+RUN bash /build/tools/az/build.sh
+
+FROM scratch AS stage-az
+COPY --from=az /out/ /
+
+# ─── Optional Tool: cafe ────────────────────────────────────────────────────
+FROM deps AS cafe
+ARG CAFE_VERSION=0.13.0
+ARG CAFE_SHA256=17d5cb6d72b9db84e1e44043d02f8a7e8212304a2e7fea20ace89b863aec3460
+ARG BUN_VERSION=1.4.4
+ARG BUN_SHA256_AMD64=bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c
+ARG BUN_SHA256_ARM64=baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e
+RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/*
+COPY pi-coding-agent-builder/tools/cafe/ /build/tools/cafe/
+RUN bash /build/tools/cafe/build.sh
+
+FROM scratch AS stage-cafe
+COPY --from=cafe /out/ /
+
 # ─── The shipped artefact ────────────────────────────────────────────────────
 # Nothing but the staged trees: no toolchains, no package manager, no shell. This
 # image exists to be COPYed --from, and keeping it at exactly its payload (rather than

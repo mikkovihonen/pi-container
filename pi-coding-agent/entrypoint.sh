@@ -107,7 +107,25 @@ exec gosu pi bash -c '
         if [ "${T3_LAN:-}" = "true" ] || [ "${T3CODE_LAN:-}" = "true" ]; then
             extra_args+=("--lan")
         fi
-        exec t3 serve --host 0.0.0.0 --port "${T3_PORT:-3773}" "${extra_args[@]}" "$@"
+
+        # Seed T3 Code settings to enable Pi and disable other agents
+        node -e '
+        const fs = require("node:fs");
+        const path = "/home/pi/.pi/agent/t3/userdata/settings.json";
+        fs.mkdirSync(require("node:path").dirname(path), { recursive: true });
+        let settings = {};
+        try { settings = JSON.parse(fs.readFileSync(path, "utf8")); } catch {}
+        settings.providerInstances = settings.providerInstances || {};
+        settings.providerInstances.pi = Object.assign(settings.providerInstances.pi || {}, { driver: "pi", enabled: true });
+        settings.providerInstances.codex = Object.assign(settings.providerInstances.codex || {}, { driver: "codex", enabled: false });
+        settings.providerInstances.claudeAgent = Object.assign(settings.providerInstances.claudeAgent || {}, { driver: "claudeAgent", enabled: false });
+        if (!settings.textGenerationModelSelection || !settings.textGenerationModelSelection.instanceId || settings.textGenerationModelSelection.instanceId === "codex") {
+            settings.textGenerationModelSelection = { instanceId: "pi", model: "pi" };
+        }
+        fs.writeFileSync(path, JSON.stringify(settings, null, 2));
+        ' 2>/dev/null || true
+
+        exec t3 serve --base-dir /home/pi/.pi/agent/t3 --host 0.0.0.0 --port "${T3_PORT:-3773}" "${extra_args[@]}" "$@"
     else
         exec pi "$@"
     fi

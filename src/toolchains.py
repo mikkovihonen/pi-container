@@ -33,6 +33,11 @@ ON_DEMAND_TOOLS: frozenset[str] = frozenset(
         "git",
         "ruby",
         "t3",
+        "gh",
+        "glab",
+        "tea",
+        "az",
+        "cafe",
     }
 )
 

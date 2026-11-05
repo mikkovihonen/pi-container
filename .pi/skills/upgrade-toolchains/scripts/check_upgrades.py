@@ -34,7 +34,7 @@ GROUPS: dict[str, list[str]] = {
     "search": ["ripgrep", "fd", "ast-grep", "tree-sitter-cli", "colgrep"],
     "vector": ["qdrant", "sqlite-vec"],
     "lsp": ["rust-analyzer", "gopls", "clangd", "zls"],
-    "vcs": ["git", "ruby"],
+    "vcs": ["git", "ruby", "gh", "glab", "tea", "az", "cafe"],
     "tools": ["t3"],
     "core": [
         "go",

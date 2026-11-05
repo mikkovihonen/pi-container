@@ -25,8 +25,13 @@ def test_tool_collections():
     assert "mold" in ON_DEMAND_TOOLS
     assert "git" in ON_DEMAND_TOOLS
     assert "t3" in ON_DEMAND_TOOLS
+    assert "gh" in ON_DEMAND_TOOLS
+    assert "glab" in ON_DEMAND_TOOLS
+    assert "tea" in ON_DEMAND_TOOLS
+    assert "az" in ON_DEMAND_TOOLS
+    assert "cafe" in ON_DEMAND_TOOLS
     assert AVAILABLE_TOOLS == (CORE_TOOLS | ON_DEMAND_TOOLS)
-    assert len(AVAILABLE_TOOLS) == 17
+    assert len(AVAILABLE_TOOLS) == 22
 
 
 def test_tool_mapping_helpers():

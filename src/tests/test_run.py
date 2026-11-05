@@ -236,3 +236,25 @@ class TestT3LaunchConfiguration:
 
         assert cli_t3_advertise_host_eq == "custom.domain"
         assert container_argv_eq == []
+
+    def test_t3_policy_content(self):
+        import json
+
+        policy_file = run.REPO_ROOT / "pi-coding-agent" / "t3-policy.json"
+        assert policy_file.is_file()
+        data = json.loads(policy_file.read_text())
+        assert data.get("schemaVersion") == 1
+        assert data.get("limits", {}).get("providers", {}).get("allowedDrivers") == ["pi"]
+
+    def test_t3_settings_seeding_structure(self):
+        settings = {}
+        settings["providerInstances"] = settings.get("providerInstances", {})
+        settings["providerInstances"]["pi"] = {"driver": "pi", "enabled": True}
+        settings["providerInstances"]["codex"] = {"driver": "codex", "enabled": False}
+        settings["providerInstances"]["claudeAgent"] = {"driver": "claudeAgent", "enabled": False}
+        settings["textGenerationModelSelection"] = {"instanceId": "pi", "model": "pi"}
+
+        assert settings["providerInstances"]["pi"]["enabled"] is True
+        assert settings["providerInstances"]["codex"]["enabled"] is False
+        assert settings["providerInstances"]["claudeAgent"]["enabled"] is False
+        assert settings["textGenerationModelSelection"]["instanceId"] == "pi"

@@ -168,3 +168,43 @@ def resolve_ruby() -> ToolReleaseInfo:
         category="vcs",
         release_url=news_url,
     )
+
+
+def resolve_cafe() -> ToolReleaseInfo:
+    import hashlib
+
+    data = json.loads(_fetch_url("https://registry.npmjs.org/@gitcafe/cli/latest").decode("utf-8"))
+    ver = data["version"]
+    tarball_url = data["dist"]["tarball"]
+    tarball_bytes = _fetch_url(tarball_url)
+    cafe_sha = hashlib.sha256(tarball_bytes).hexdigest()
+
+    bun_rel = json.loads(_fetch_url("https://api.github.com/repos/oven-sh/bun/releases/latest").decode("utf-8"))
+    bun_tag = bun_rel["tag_name"]
+    bun_ver = bun_tag.removeprefix("bun-v")
+    sums_url = f"https://github.com/oven-sh/bun/releases/download/{bun_tag}/SHASUMS256.txt"
+    sums_txt = _fetch_url(sums_url).decode("utf-8")
+    bun_amd64 = ""
+    bun_arm64 = ""
+    for line in sums_txt.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            sha, filename = parts[0], parts[1].lstrip("*")
+            if filename == "bun-linux-x64.zip":
+                bun_amd64 = sha
+            elif filename == "bun-linux-aarch64.zip":
+                bun_arm64 = sha
+
+    return ToolReleaseInfo(
+        tool="cafe",
+        version=ver,
+        args={
+            "CAFE_VERSION": ver,
+            "CAFE_SHA256": cafe_sha,
+            "BUN_VERSION": bun_ver,
+            "BUN_SHA256_AMD64": bun_amd64,
+            "BUN_SHA256_ARM64": bun_arm64,
+        },
+        category="vcs",
+        release_url="https://git.cafe",
+    )

@@ -103,3 +103,31 @@ def resolve_pyyaml() -> ToolReleaseInfo:
         release_url=f"https://github.com/yaml/pyyaml/releases/tag/{ver}",
     )
 
+
+def resolve_az() -> ToolReleaseInfo:
+    data = _fetch_pypi_package("azure-cli")
+    ver = data["info"]["version"]
+
+    # Fetch latest azure-devops extension release metadata
+    req = urllib.request.Request(
+        "https://raw.githubusercontent.com/Azure/azure-cli-extensions/main/src/index.json",
+        headers={"User-Agent": "pi-container-upgrade-tools"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        ext_index = json.loads(resp.read().decode())
+    latest_devops = ext_index["extensions"]["azure-devops"][-1]
+    devops_ver = latest_devops["metadata"]["version"]
+    devops_sha = latest_devops["sha256Digest"]
+
+    return ToolReleaseInfo(
+        tool="az",
+        version=ver,
+        args={
+            "AZ_VERSION": ver,
+            "AZURE_DEVOPS_VERSION": devops_ver,
+            "AZURE_DEVOPS_SHA256": devops_sha,
+        },
+        category="vcs",
+        release_url=f"https://github.com/Azure/azure-cli/releases/tag/azure-cli-{ver}",
+    )
+

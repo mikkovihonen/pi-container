@@ -128,11 +128,53 @@ When T3 Code runs inside a container, `t3 serve` must bind to `--host 0.0.0.0` s
     The terminal pairing URL and rendered QR code will then be generated with `http://192.168.1.100:3773/pair#token=...`.
 
 
-### Network Allowlist (`allowlist.yaml`)
+### Agent Specialization (Pi Exclusivity)
 
-Ensure the following upstream rule is present in `.pi-container/allowlist.yaml`:
+By default, upstream T3 Code ships with generic drivers enabled (such as `codex` and `claudeAgent`), while disabling Pi. Inside `pi-container`, T3 Code is strictly specialized for the Pi agent:
+
+1. **Enterprise Policy Enforcement (`/etc/t3code/policy.json`)**:
+    - The agent container bakes an administrative policy with `limits.providers.allowedDrivers: ["pi"]`.
+    - Other drivers (`codex`, `claudeAgent`, `cursor`, `grok`) are permanently disallowed by policy and cannot be scheduled or started.
+2. **Pre-Seeded User Settings (`userdata/settings.json`)**:
+    - On server startup, `entrypoint.sh` seeds `/home/pi/.pi/agent/t3/userdata/settings.json`.
+    - Pi is marked as enabled, alternative drivers are disabled, and the default model instance is set to `pi`.
+3. **Persistent Base Directory (`--base-dir /home/pi/.pi/agent/t3`)**:
+    - Because `/home/pi/.pi/agent` is mounted from the host project's `.pi-container/` directory, all projects, threads, and diff reviews persist across container restarts.
+
+
+### Source Control Provider Toolchains
+
+T3 Code includes integrated PR review, issue tracking, and repository operations for 6 Git hosting providers. You can enable their matching CLI tools in `tools.include`:
+
+| Provider | Mechanism | Optional Tool | Description |
+| :--- | :--- | :--- | :--- |
+| **GitHub** | CLI (`gh`) | `gh` | Official GitHub CLI for pull requests and repo discovery. |
+| **GitLab** | CLI (`glab`) | `glab` | Official GitLab CLI for merge requests and issue tracking. |
+| **Forgejo / Gitea** | CLI (`tea`, `fj`) | `tea` | Official Gitea/Forgejo CLI. |
+| **Azure DevOps** | CLI (`az`) | `az` | Azure CLI with pre-installed `azure-devops` extension. |
+| **GitCafe** | CLI (`cafe`) | `cafe` | Official GitCafe CLI bundled with standalone Bun runtime. |
+| **Bitbucket** | Direct API | *(none needed)* | T3 Code calls `api.bitbucket.org/2.0` natively via API token. |
+
+To enable specific source control CLIs in your workspace, declare them in `.pi-container/config.yaml`:
 
 ```yaml
+tools:
+  include:
+    - t3
+    - gh
+    - glab
+    - tea
+    - az
+    - cafe
+```
+
+
+### Network Allowlist (`allowlist.yaml`)
+
+Ensure upstream rules for T3 Code and your desired source control hosts are present in `.pi-container/allowlist.yaml`:
+
+```yaml
+    # T3 Code (t3.codes) web app and release endpoints
     - name: "t3-codes-allow"
       mode: "allow"
       hostnames:
@@ -140,6 +182,54 @@ Ensure the following upstream rule is present in `.pi-container/allowlist.yaml`:
         - "*.t3.codes"
         - "ping.gg"
         - "*.ping.gg"
+      ip_ranges: []
+
+    # Source control providers supported by T3 Code
+    - name: "gitlab-source-control-allow"
+      mode: "allow"
+      hostnames:
+        - "gitlab.com"
+        - "*.gitlab.com"
+      ip_ranges: []
+
+    - name: "forgejo-gitea-source-control-allow"
+      mode: "allow"
+      hostnames:
+        - "codeberg.org"
+        - "*.codeberg.org"
+        - "gitea.com"
+        - "*.gitea.com"
+        - "forgejo.org"
+        - "*.forgejo.org"
+      ip_ranges: []
+
+    - name: "bitbucket-source-control-allow"
+      mode: "allow"
+      hostnames:
+        - "bitbucket.org"
+        - "*.bitbucket.org"
+        - "api.bitbucket.org"
+        - "auth.atlassian.com"
+        - "id.atlassian.com"
+        - "*.atlassian.com"
+      ip_ranges: []
+
+    - name: "azure-devops-source-control-allow"
+      mode: "allow"
+      hostnames:
+        - "dev.azure.com"
+        - "*.dev.azure.com"
+        - "*.visualstudio.com"
+        - "login.microsoftonline.com"
+        - "management.azure.com"
+      ip_ranges: []
+
+    - name: "gitcafe-source-control-allow"
+      mode: "allow"
+      hostnames:
+        - "git.cafe"
+        - "*.git.cafe"
+        - "api.git.cafe"
       ip_ranges: []
 ```
 

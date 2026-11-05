@@ -149,3 +149,51 @@ global:
         - "ping.gg"
         - "*.ping.gg"
       ip_ranges: []
+
+    # Source control providers supported by T3 Code
+    - name: "gitlab-source-control-allow"
+      mode: "allow"
+      hostnames:
+        - "gitlab.com"
+        - "*.gitlab.com"
+      ip_ranges: []
+
+    - name: "forgejo-gitea-source-control-allow"
+      mode: "allow"
+      hostnames:
+        - "codeberg.org"
+        - "*.codeberg.org"
+        - "gitea.com"
+        - "*.gitea.com"
+        - "forgejo.org"
+        - "*.forgejo.org"
+      ip_ranges: []
+
+    - name: "bitbucket-source-control-allow"
+      mode: "allow"
+      hostnames:
+        - "bitbucket.org"
+        - "*.bitbucket.org"
+        - "api.bitbucket.org"
+        - "auth.atlassian.com"
+        - "id.atlassian.com"
+        - "*.atlassian.com"
+      ip_ranges: []
+
+    - name: "azure-devops-source-control-allow"
+      mode: "allow"
+      hostnames:
+        - "dev.azure.com"
+        - "*.dev.azure.com"
+        - "*.visualstudio.com"
+        - "login.microsoftonline.com"
+        - "management.azure.com"
+      ip_ranges: []
+
+    - name: "gitcafe-source-control-allow"
+      mode: "allow"
+      hostnames:
+        - "git.cafe"
+        - "*.git.cafe"
+        - "api.git.cafe"
+      ip_ranges: []

@@ -613,6 +613,14 @@ tools:
     # VCS & language runtimes
     - git
     - ruby
+    # Source control & forge CLIs
+    - gh
+    - glab
+    - tea
+    - az
+    - cafe
+    # Agent control panels
+    - t3
 ```
 
 **Available tools:**
@@ -637,6 +645,14 @@ tools:
 - **VCS & Language Runtimes:**
     - `git`: High-performance Git engine built with `libdeflate`, `reftable`, `fsmonitor`, and `PCRE2` (provides `/usr/local/bin/git`).
     - `ruby`: Ruby 3.4+ compiled with Rust-based YJIT and jemalloc (provides `/usr/local/bin/ruby`, `gem`, `bundle`).
+- **Source Control Provider CLIs:**
+    - `gh`: Official GitHub CLI for repository and PR workflows (provides `/usr/local/bin/gh`).
+    - `glab`: Official GitLab CLI for MR reviews and pipelines (provides `/usr/local/bin/glab`).
+    - `tea`: Official Gitea and Forgejo CLI (provides `/usr/local/bin/tea`, `/usr/local/bin/fj`).
+    - `az`: Azure CLI with pre-installed `azure-devops` extension (provides `/usr/local/bin/az`).
+    - `cafe`: Official GitCafe CLI powered by standalone Bun runtime (provides `/usr/local/bin/cafe`).
+- **Agent Control Panels:**
+    - `t3`: T3 Code web agent server for local UI control (provides `/usr/local/bin/t3`).
 
 When `tools.include` is non-empty, pi-container builds or reuses the required tool images and layers them into a project-specific container image in seconds.
 

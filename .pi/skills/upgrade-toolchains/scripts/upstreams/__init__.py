@@ -25,11 +25,15 @@ from upstreams.github_git import (
 )
 from upstreams.github_release import (
     resolve_aardvark_dns,
+    resolve_gh,
+    resolve_glab,
     resolve_netavark,
     resolve_t3,
+    resolve_tea,
     resolve_zls,
 )
 from upstreams.language_manifests import (
+    resolve_cafe,
     resolve_git,
     resolve_go,
     resolve_node,
@@ -37,6 +41,7 @@ from upstreams.language_manifests import (
     resolve_rust,
 )
 from upstreams.pypi import (
+    resolve_az,
     resolve_podman_compose,
     resolve_python_dotenv,
     resolve_pyyaml,
@@ -71,4 +76,9 @@ RESOLVERS: dict[str, Callable[[], ToolReleaseInfo]] = {
     "zls": resolve_zls,
     "ruby": resolve_ruby,
     "t3": resolve_t3,
+    "gh": resolve_gh,
+    "glab": resolve_glab,
+    "tea": resolve_tea,
+    "az": resolve_az,
+    "cafe": resolve_cafe,
 }

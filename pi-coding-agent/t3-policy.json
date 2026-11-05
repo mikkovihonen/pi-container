@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "organization": "pi-container",
+  "limits": {
+    "providers": {
+      "allowedDrivers": [
+        "pi"
+      ]
+    }
+  }
+}

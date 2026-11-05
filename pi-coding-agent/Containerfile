@@ -16,6 +16,11 @@ FROM scratch AS tool_mold
 FROM scratch AS tool_git
 FROM scratch AS tool_ruby
 FROM scratch AS tool_t3
+FROM scratch AS tool_gh
+FROM scratch AS tool_glab
+FROM scratch AS tool_tea
+FROM scratch AS tool_az
+FROM scratch AS tool_cafe
 
 # Plain Debian, not node:<ver>-trixie-slim. Node is built in
 # pi-coding-agent-builder/ like everything else and arrives through the COPY below, so
@@ -209,6 +214,26 @@ ARG WITH_T3=false
 RUN --mount=type=bind,from=tool_t3,target=/mnt/t3 \
     if [ "${WITH_T3}" = "true" ] && [ -d /mnt/t3 ]; then cp -a /mnt/t3/. /; fi
 
+ARG WITH_GH=false
+RUN --mount=type=bind,from=tool_gh,target=/mnt/gh \
+    if [ "${WITH_GH}" = "true" ] && [ -d /mnt/gh ]; then cp -a /mnt/gh/. /; fi
+
+ARG WITH_GLAB=false
+RUN --mount=type=bind,from=tool_glab,target=/mnt/glab \
+    if [ "${WITH_GLAB}" = "true" ] && [ -d /mnt/glab ]; then cp -a /mnt/glab/. /; fi
+
+ARG WITH_TEA=false
+RUN --mount=type=bind,from=tool_tea,target=/mnt/tea \
+    if [ "${WITH_TEA}" = "true" ] && [ -d /mnt/tea ]; then cp -a /mnt/tea/. /; fi
+
+ARG WITH_AZ=false
+RUN --mount=type=bind,from=tool_az,target=/mnt/az \
+    if [ "${WITH_AZ}" = "true" ] && [ -d /mnt/az ]; then cp -a /mnt/az/. /; fi
+
+ARG WITH_CAFE=false
+RUN --mount=type=bind,from=tool_cafe,target=/mnt/cafe \
+    if [ "${WITH_CAFE}" = "true" ] && [ -d /mnt/cafe ]; then cp -a /mnt/cafe/. /; fi
+
 # uv reads the system trust store, which carries the mitmproxy CA (installed below).
 ENV UV_SYSTEM_CERTS=1
 
@@ -246,6 +271,11 @@ RUN ldconfig \
  && if [ -x /usr/local/bin/git ]; then /usr/local/bin/git --version; fi \
  && if [ -x /usr/local/bin/ruby ]; then /usr/local/bin/ruby --version; fi \
  && if [ -x /usr/local/bin/t3 ]; then /usr/local/bin/t3 --version; fi \
+ && if [ -x /usr/local/bin/gh ]; then /usr/local/bin/gh --version; fi \
+ && if [ -x /usr/local/bin/glab ]; then /usr/local/bin/glab --version; fi \
+ && if [ -x /usr/local/bin/tea ]; then /usr/local/bin/tea --version; fi \
+ && if [ -x /usr/local/bin/az ]; then /usr/local/bin/az --version; fi \
+ && if [ -x /usr/local/bin/cafe ]; then /usr/local/bin/cafe --version || true; fi \
  && cat /usr/local/share/pi-container/toolchain-versions.d/*.txt \
       | sort > /usr/local/share/pi-container/toolchain-versions.txt \
  && cat /usr/local/share/pi-container/toolchain-versions.txt
@@ -402,6 +432,7 @@ ENV PI_CONTAINER_HOST_IP=169.254.1.2
 
 COPY pi-coding-agent/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY pi-coding-agent/t3-advertise-host.cjs /usr/local/share/pi-container/t3-advertise-host.cjs
+COPY pi-coding-agent/t3-policy.json /etc/t3code/policy.json
 
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
