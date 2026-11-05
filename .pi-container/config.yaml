@@ -118,6 +118,20 @@ egress:
     tcp_ports: []
     udp_ports: []
 
+# Git configuration inside the agent container.
+git:
+  safe_directory: true
+  rewrite_ssh_to_https: true
+
+# Source control credentials and provider integrations.
+source_control:
+  enabled: true
+  auto_detect_host_cli: false
+  setup_git_credentials: true
+  providers:
+    github:
+      keyring_var: PI_CONTAINER_T3_GH_TOKEN
+
 # Security hardening configuration.
 security:
   read_only_git_hooks: true

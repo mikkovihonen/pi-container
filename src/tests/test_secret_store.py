@@ -70,3 +70,16 @@ def test_delete_secret_failure():
     with patch("keyring.delete_password", side_effect=RuntimeError("Cannot delete")):
         res = secret_store.delete_secret("MY_KEY")
         assert res is False
+
+
+def test_get_keyring_secret_success():
+    with patch("keyring.get_password", return_value="secret_pwd") as mock_get:
+        val = secret_store.get_keyring_secret("my_account", service="my_service")
+        assert val == "secret_pwd"
+        mock_get.assert_called_once_with("my_service", "my_account")
+
+
+def test_get_keyring_secret_failure():
+    with patch("keyring.get_password", side_effect=RuntimeError("Keyring unavailable")):
+        val = secret_store.get_keyring_secret("my_account")
+        assert val is None

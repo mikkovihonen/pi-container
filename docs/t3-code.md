@@ -169,6 +169,58 @@ tools:
 ```
 
 
+### Git Operations & Remote Rewriting
+
+T3 Code periodically inspects local git branches and checks upstream remotes in the background (`branchPullRequest.remotes`, `fetchRemoteForStatus`). By default, `pi-container` automatically optimizes Git operations inside `/workspace`:
+
+- **Safe Directory (`git.safe_directory: true`)**: Permitted by default to ensure Git commands run cleanly despite UID differences between the host filesystem and the container unprivileged user.
+- **SSH-to-HTTPS Rewrites (`git.rewrite_ssh_to_https: true`)**: Transparently redirects `git@github.com:...` and other SSH remotes to `https://github.com/...`, allowing background status fetches to egress through the proxy without copying host SSH keys into the sandbox.
+
+
+### Source Control Authentication & Token Forwarding
+
+T3 Code background PR inspection and Git operations across all 6 providers require authentication tokens to query PR lists (`gh pr list`, etc.) and authenticate private HTTPS remotes.
+
+`pi-container` resolves tokens securely and exclusively from the host OS keyring (or host CLI sessions), strictly rejecting `.env` files and host environment variables to prevent credential leakage:
+
+```yaml
+source_control:
+    # Forward resolved provider tokens into the container. Default: false.
+    enabled: false
+
+    # Automatically query host CLI sessions (e.g. host `gh auth token`). Default: false.
+    auto_detect_host_cli: false
+
+    # Configure Git credential helpers (e.g. `gh auth setup-git`). Default: true.
+    setup_git_credentials: true
+
+    # Provider overrides or specific tokens.
+    providers: {}
+```
+
+#### Saving Provider Tokens in OS Keyring
+
+The recommended method to supply tokens is the secure OS keyring via `uv run keyring set pi-container <VAR>`:
+- **GitHub**: `uv run keyring set pi-container GH_TOKEN`
+- **GitLab**: `uv run keyring set pi-container GITLAB_TOKEN`
+- **Forgejo / Gitea**: `uv run keyring set pi-container GITEA_TOKEN`
+- **Azure DevOps**: `uv run keyring set pi-container AZURE_DEVOPS_EXT_PAT`
+- **Bitbucket**: `uv run keyring set pi-container BITBUCKET_TOKEN`
+- **GitCafe**: `uv run keyring set pi-container GITCAFE_TOKEN`
+
+You can also configure custom keyring variable names per workspace (e.g. `keyring_var: PI_CONTAINER_T3_GH_TOKEN`), allowing multiple distinct tokens per provider across projects instead of a single global token:
+
+```yaml
+source_control:
+    enabled: true
+    providers:
+        github:
+            keyring_var: PI_CONTAINER_T3_GH_TOKEN
+```
+
+When tokens are present and `setup_git_credentials: true`, `entrypoint.sh` automatically runs `gh auth setup-git` and `glab auth setup-git` inside the container so Git HTTPS operations succeed without password prompts.
+
+
 ### Network Allowlist (`allowlist.yaml`)
 
 Ensure upstream rules for T3 Code and your desired source control hosts are present in `.pi-container/allowlist.yaml`:

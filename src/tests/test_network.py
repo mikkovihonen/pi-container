@@ -1350,3 +1350,32 @@ class TestScanVolumePaths:
         )
         paths = scan_volume_paths(tmp_path)
         assert paths == ["/workspace/a", "/workspace/b"]
+
+
+class TestReadGitConfig:
+    def test_defaults_when_omitted(self, tmp_path):
+        from network import read_git_config
+
+        (tmp_path / "config.yaml").write_text("{}\n")
+        cfg = read_git_config(tmp_path)
+        assert cfg == {"safe_directory": True, "rewrite_ssh_to_https": True}
+
+    def test_explicit_false(self, tmp_path):
+        import yaml
+
+        from network import read_git_config
+
+        (tmp_path / "config.yaml").write_text(
+            yaml.dump({"git": {"safe_directory": False, "rewrite_ssh_to_https": False}})
+        )
+        cfg = read_git_config(tmp_path)
+        assert cfg == {"safe_directory": False, "rewrite_ssh_to_https": False}
+
+    def test_string_boolean_values(self, tmp_path):
+        import yaml
+
+        from network import read_git_config
+
+        (tmp_path / "config.yaml").write_text(yaml.dump({"git": {"safe_directory": "0", "rewrite_ssh_to_https": "1"}}))
+        cfg = read_git_config(tmp_path)
+        assert cfg == {"safe_directory": False, "rewrite_ssh_to_https": True}

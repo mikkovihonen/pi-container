@@ -187,6 +187,48 @@ egress:
     tcp_ports: []         # arbitrary extra TCP ports, e.g. [2222, 8443]
     udp_ports: []         # arbitrary extra UDP ports, e.g. [51820]
 
+# Git configuration inside the agent container.
+git:
+  # Configure git safe.directory to permit git operations inside the mounted workspace directory,
+  # preventing "dubious ownership" errors caused by UID differences between host and container.
+  # When true, runs `git config --system --add safe.directory '*'` on startup. Default: true.
+  safe_directory: true
+
+  # Automatically rewrite SSH git remotes (git@github.com:, etc.) to HTTPS so fetch and pull
+  # operations succeed through the proxy without needing host SSH keys. Default: true.
+  rewrite_ssh_to_https: true
+
+# Source control credentials and provider integrations.
+source_control:
+  # Enable forwarding resolved source control tokens to the agent container.
+  # When false, no provider tokens are forwarded into the container. Default: false.
+  enabled: false
+
+  # Automatically discover tokens from active host CLI sessions (e.g. host `gh auth token`).
+  # Default: false.
+  auto_detect_host_cli: false
+
+  # Automatically configure Git credential helpers inside the container (e.g. `gh auth setup-git`)
+  # so Git HTTPS operations (clone, fetch, pull) seamlessly authenticate using the token. Default: true.
+  setup_git_credentials: true
+
+  # Per-provider configuration, overrides, and enterprise host mappings.
+  # The keyring variable name is configurable per provider so different projects
+  # can use different scoped tokens instead of a single global token:
+  #   providers:
+  #     github:
+  #       keyring_var: PI_CONTAINER_T3_GH_TOKEN   # or list: [MY_TOKEN, GH_TOKEN]
+  #
+  # Save tokens in the OS keyring under service "pi-container":
+  #   uv run keyring set pi-container GH_TOKEN
+  #   uv run keyring set pi-container PI_CONTAINER_T3_GH_TOKEN
+  #   uv run keyring set pi-container GITLAB_TOKEN
+  #   uv run keyring set pi-container GITEA_TOKEN
+  #   uv run keyring set pi-container AZURE_DEVOPS_EXT_PAT
+  #   uv run keyring set pi-container BITBUCKET_TOKEN
+  #   uv run keyring set pi-container GITCAFE_TOKEN
+  providers: {}
+
 # Security hardening configuration.
 security:
   # Automatically lock .git/hooks inside /workspace as read-only.

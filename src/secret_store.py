@@ -14,6 +14,24 @@ logger = logging.getLogger(__name__)
 DEFAULT_KEYRING_SERVICE = "pi-container"
 
 
+def get_keyring_secret(
+    account: str,
+    service: str = DEFAULT_KEYRING_SERVICE,
+) -> str | None:
+    """Retrieve a secret directly from the OS keyring without checking environment variables."""
+    try:
+        import keyring
+
+        secret = keyring.get_password(service, account)
+        if secret:
+            logger.debug(f"Resolved secret from keyring (service='{service}', account='{account}')")
+            return secret
+    except Exception as e:
+        logger.debug(f"Keyring lookup failed for service='{service}', account='{account}': {e}")
+
+    return None
+
+
 def resolve_secret(
     var_name: str,
     service: str = DEFAULT_KEYRING_SERVICE,

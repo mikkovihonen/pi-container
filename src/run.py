@@ -44,6 +44,7 @@ from network import (
     read_agent_mode,
     read_agent_ports,
     read_flow_export_enabled,
+    read_git_config,
     read_llama_config,
     read_nested_containers_config,
     read_network_config,
@@ -56,6 +57,7 @@ from network import (
 from runtimes import ContainerRuntime
 from security import read_security_config, validate_mount_paths
 from server import Server
+from source_control import read_source_control_config, resolve_source_control_tokens
 from util import (
     EnvironmentError,
     extract_ipv4_from_ip_addr,
@@ -197,6 +199,9 @@ def main() -> None:
     agent_extras = read_agent_extras(pi_container_dir)
     read_only_pi_container = read_read_only_pi_container(pi_container_dir)
     security_cfg = read_security_config(pi_container_dir)
+    git_cfg = read_git_config(pi_container_dir)
+    sc_cfg = read_source_control_config(pi_container_dir)
+    sc_tokens = resolve_source_control_tokens(pi_container_dir, log=logger)
 
     mount_errors = validate_mount_paths(agent_extras["mounts"], security_cfg["blocked_mount_paths"])
     if mount_errors:
@@ -591,8 +596,14 @@ def main() -> None:
                 f"LLAMA_PORTS={portconfig}",
                 "--env",
                 f"HOST_GIT_CONFIG={get_sanitized_git_config_json(logger=logger, allowlist=security_cfg.get('git_config_allowlist'))}",
+                "--env",
+                f"GIT_SAFE_DIRECTORY={'true' if git_cfg['safe_directory'] else 'false'}",
+                "--env",
+                f"GIT_REWRITE_SSH={'true' if git_cfg['rewrite_ssh_to_https'] else 'false'}",
+                "--env",
+                f"SETUP_GIT_CREDENTIALS={'true' if sc_cfg['setup_git_credentials'] else 'false'}",
                 *(["--env", f"PI_CONTAINER_VERSION={schema_version}"] if schema_version else []),
-                *[flag for k, v in agent_extras["env"].items() for flag in ("--env", f"{k}={v}")],
+                *[flag for k, v in {**sc_tokens, **agent_extras["env"]}.items() for flag in ("--env", f"{k}={v}")],
                 *[flag for m in agent_extras["mounts"] for flag in ("--volume", m)],
                 *[flag for c in agent_extras["capabilities"] for flag in ("--cap-add", c)],
                 *[flag for d in agent_extras["devices"] for flag in ("--device", d)],

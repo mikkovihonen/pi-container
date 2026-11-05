@@ -22,23 +22,16 @@ venv/
 # Node
 .npm
 
-# llama.cpp
-llama-server/.locks
-llama-server/.locks/**
-llama-server/models
-llama-server/models/**
-llama-server/logs
-llama-server/logs/**
-
 # Claude
 .claude
 .claude/**
 
-# Pi
+# Pi / T3
 pi-coding-agent/logs
 pi-coding-agent/logs/**
 .pi-container/agent/bin
 .pi-container/agent/sessions
+.pi-container/agent/t3
 .pi-container/agent/trust.json
 .pi-container/agent/models-store.json
 

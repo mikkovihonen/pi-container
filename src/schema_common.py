@@ -157,6 +157,24 @@ SCHEMA: dict = {
             "allow": {"type": dict},
         },
     },
+    "git": {
+        "type": dict,
+        "required": False,
+        "keys": {
+            "safe_directory": {"type": (bool, str, int), "required": False},
+            "rewrite_ssh_to_https": {"type": (bool, str, int), "required": False},
+        },
+    },
+    "source_control": {
+        "type": dict,
+        "required": False,
+        "keys": {
+            "enabled": {"type": (bool, str, int), "required": False},
+            "auto_detect_host_cli": {"type": (bool, str, int), "required": False},
+            "setup_git_credentials": {"type": (bool, str, int), "required": False},
+            "providers": {"type": dict, "required": False},
+        },
+    },
     "security": {
         "type": dict,
         "required": False,

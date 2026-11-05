@@ -387,6 +387,31 @@ def read_agent_advertise_host(config_dir: Path | None = None) -> str | None:
     return host or None
 
 
+_DEFAULT_GIT_CONFIG = {
+    "safe_directory": True,
+    "rewrite_ssh_to_https": True,
+}
+
+
+def read_git_config(config_dir: Path | None = None) -> dict[str, bool]:
+    """Git settings from config.yaml ``git``.
+
+    Returns ``{"safe_directory": <bool>, "rewrite_ssh_to_https": <bool>}`` —
+    whether to mark /workspace as safe.directory to prevent UID mismatch errors,
+    and whether to rewrite SSH git remote URLs to HTTPS. Missing values fall
+    back to :data:`_DEFAULT_GIT_CONFIG` (both True).
+    """
+    section = load_project_config(config_dir).get("git") or {}
+    safe_dir = section.get("safe_directory")
+    rewrite_ssh = section.get("rewrite_ssh_to_https")
+    return {
+        "safe_directory": _egress_truthy(safe_dir) if safe_dir is not None else _DEFAULT_GIT_CONFIG["safe_directory"],
+        "rewrite_ssh_to_https": (
+            _egress_truthy(rewrite_ssh) if rewrite_ssh is not None else _DEFAULT_GIT_CONFIG["rewrite_ssh_to_https"]
+        ),
+    }
+
+
 # ─── Token Replacer Config Scanner (duplicated from pi-coding-agent-proxy/addons/token_replacer)
 #
 # run.py lives outside pi-coding-agent-proxy and must not import from it.

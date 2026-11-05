@@ -463,6 +463,57 @@ volumes:
     - /workspace/target
 ```
 
+### Git configuration
+
+The `git` section in `config.yaml` controls Git repository safety and protocol redirection inside the container sandbox:
+
+```yaml
+git:
+    # Configure git safe.directory to permit git operations inside the mounted workspace directory,
+    # preventing "dubious ownership" errors caused by UID differences between host and container.
+    # Default: true.
+    safe_directory: true
+
+    # Automatically rewrite SSH remote URLs (git@github.com:, git@gitlab.com:, etc.) to HTTPS
+    # so fetch and pull operations succeed through the proxy without exposing host SSH keys.
+    # Default: true.
+    rewrite_ssh_to_https: true
+```
+
+- **`safe_directory`**: Marks `/workspace` as safe for Git (running `git config --system --add safe.directory '*'`). This prevents Git 2.35.2+ dubious ownership errors when `/workspace` is mounted from a host user UID differing from container UID `1000`.
+- **`rewrite_ssh_to_https`**: Automatically redirects SSH git remotes for GitHub, GitLab, and Codeberg to HTTPS URLs. This allows background Git operations (such as T3 Code upstream branch checks) to fetch cleanly through the HTTP/HTTPS proxy allowlist without requiring host SSH keys or the `ssh` binary.
+
+### Source control integration
+
+The `source_control` section in `config.yaml` manages credentials and authentication for Git hosting providers (GitHub, GitLab, Forgejo/Gitea, Azure DevOps, Bitbucket, GitCafe):
+
+```yaml
+source_control:
+    # Enable forwarding resolved source control tokens to the agent container.
+    # Default: false.
+    enabled: false
+
+    # Automatically discover tokens from active host CLI sessions (e.g. host `gh auth token`).
+    # Default: false.
+    auto_detect_host_cli: false
+
+    # Automatically configure Git credential helpers inside the container (e.g. `gh auth setup-git`)
+    # so Git HTTPS operations seamlessly authenticate using the token.
+    # Default: true.
+    setup_git_credentials: true
+
+    # Provider overrides, custom keyring variable names, or explicit tokens.
+    providers:
+        github:
+            keyring_var: PI_CONTAINER_T3_GH_TOKEN  # or list: [VAR1, VAR2]
+```
+
+#### Credential Storage
+
+For security, `.env` files and host process environment variables are strictly rejected as credential stores. Tokens are resolved exclusively from:
+1. **OS Keyring** (service `"pi-container"` looking up configured `keyring_var`, falling back to default provider account names).
+2. **Host CLI active sessions** (only if `auto_detect_host_cli: true`).
+
 ### Security hardening
 
 The `security` section in `config.yaml` provides defense-in-depth safeguards against malicious code execution, credential exfiltration, and host infiltration:

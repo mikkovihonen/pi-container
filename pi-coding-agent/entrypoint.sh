@@ -68,6 +68,24 @@ if [ "${PI_CONTAINER_NESTED}" = "true" ]; then
     done
 fi
 
+# ─── Git workspace safety & protocol rewriting (config.yaml git.*) ───────────
+if [ "${GIT_SAFE_DIRECTORY:-true}" = "true" ]; then
+    git config --system --add safe.directory '*'
+fi
+
+if [ "${GIT_REWRITE_SSH:-true}" = "true" ]; then
+    git config --system --add url."https://github.com/".insteadOf "git@github.com:"
+    git config --system --add url."https://github.com/".insteadOf "ssh://git@github.com/"
+    git config --system --add url."https://gitlab.com/".insteadOf "git@gitlab.com:"
+    git config --system --add url."https://gitlab.com/".insteadOf "ssh://git@gitlab.com/"
+    git config --system --add url."https://codeberg.org/".insteadOf "git@codeberg.org:"
+    git config --system --add url."https://codeberg.org/".insteadOf "ssh://git@codeberg.org/"
+    git config --system --add url."https://bitbucket.org/".insteadOf "git@bitbucket.org:"
+    git config --system --add url."https://bitbucket.org/".insteadOf "ssh://git@bitbucket.org/"
+    git config --system --add url."https://git.cafe/".insteadOf "git@git.cafe:"
+    git config --system --add url."https://git.cafe/".insteadOf "ssh://git@git.cafe/"
+fi
+
 if [ -n "$HOST_GIT_CONFIG" ]; then
     while IFS=$'\t' read -r key value; do
         if [[ -n "$key" ]]; then
@@ -78,6 +96,20 @@ fi
 
 exec gosu pi bash -c '
     set -a; source /etc/environment; set +a;
+
+    # ─── Source control credential helpers (SETUP_GIT_CREDENTIALS) ────────────
+    if [ "${SETUP_GIT_CREDENTIALS:-true}" = "true" ]; then
+        if [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]; then
+            if command -v gh >/dev/null 2>&1; then
+                gh auth setup-git >/dev/null 2>&1 || true
+            fi
+        fi
+        if [ -n "${GITLAB_TOKEN:-}" ] || [ -n "${GLAB_TOKEN:-}" ]; then
+            if command -v glab >/dev/null 2>&1; then
+                glab auth setup-git >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
 
     if [ -x .pi-container/dependencies/pi/commands.sh ]; then
         .pi-container/dependencies/pi/commands.sh

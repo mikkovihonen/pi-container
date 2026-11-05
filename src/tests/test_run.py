@@ -91,6 +91,53 @@ class TestAgentLaunchSecurityOpts:
         assert opts == []
 
 
+class TestAgentLaunchGitFlags:
+    def test_git_safe_directory_and_rewrite_flags_enabled(self):
+        git_cfg = {"safe_directory": True, "rewrite_ssh_to_https": True}
+        flags = [
+            "--env",
+            f"GIT_SAFE_DIRECTORY={'true' if git_cfg['safe_directory'] else 'false'}",
+            "--env",
+            f"GIT_REWRITE_SSH={'true' if git_cfg['rewrite_ssh_to_https'] else 'false'}",
+        ]
+        assert flags == [
+            "--env",
+            "GIT_SAFE_DIRECTORY=true",
+            "--env",
+            "GIT_REWRITE_SSH=true",
+        ]
+
+    def test_git_safe_directory_and_rewrite_flags_disabled(self):
+        git_cfg = {"safe_directory": False, "rewrite_ssh_to_https": False}
+        flags = [
+            "--env",
+            f"GIT_SAFE_DIRECTORY={'true' if git_cfg['safe_directory'] else 'false'}",
+            "--env",
+            f"GIT_REWRITE_SSH={'true' if git_cfg['rewrite_ssh_to_https'] else 'false'}",
+        ]
+        assert flags == [
+            "--env",
+            "GIT_SAFE_DIRECTORY=false",
+            "--env",
+            "GIT_REWRITE_SSH=false",
+        ]
+
+
+class TestAgentLaunchSourceControlFlags:
+    def test_setup_git_credentials_flag(self):
+        sc_cfg = {"setup_git_credentials": True}
+        flag = f"SETUP_GIT_CREDENTIALS={'true' if sc_cfg['setup_git_credentials'] else 'false'}"
+        assert flag == "SETUP_GIT_CREDENTIALS=true"
+
+    def test_token_env_forwarding_and_override(self):
+        sc_tokens = {"GH_TOKEN": "gho_auto", "GITHUB_TOKEN": "gho_auto"}
+        agent_env = {"GH_TOKEN": "gho_user_override", "OTHER_VAR": "val"}
+        merged = {**sc_tokens, **agent_env}
+        assert merged["GH_TOKEN"] == "gho_user_override"
+        assert merged["GITHUB_TOKEN"] == "gho_auto"
+        assert merged["OTHER_VAR"] == "val"
+
+
 class TestVolumeMountOptions:
     def test_shadow_volumes_have_nodev_nosuid(self):
         vol_name = "pi-vol-12345-venv"

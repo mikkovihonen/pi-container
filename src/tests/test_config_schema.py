@@ -949,3 +949,60 @@ class TestToolsSchema:
         errors = validate_project_yaml(tmp_path)
         assert len(errors) == 1
         assert "duplicate key" in errors[0].lower()
+
+    def test_git_config_valid(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["git"] = {"safe_directory": True, "rewrite_ssh_to_https": False}
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is True
+        assert errors == []
+
+    def test_git_config_invalid_type(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["git"] = {"safe_directory": ["invalid"]}
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is False
+        assert any("git.safe_directory" in e for e in errors)
+
+    def test_source_control_config_valid(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["source_control"] = {
+            "enabled": True,
+            "auto_detect_host_cli": False,
+            "setup_git_credentials": True,
+            "providers": {"github": {"token": "ghp_123"}},
+        }
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is True
+        assert errors == []
+
+    def test_source_control_config_invalid_type(self, valid_config: Path):
+        from config_schema import validate_config
+
+        with valid_config.open("r") as f:
+            data = yaml.safe_load(f)
+        data["source_control"] = {"enabled": ["invalid"]}
+        valid_config.write_text(yaml.dump(data))
+
+        with patch("config_schema.get_app_version", return_value=None):
+            is_valid, errors, _ = validate_config(valid_config)
+        assert is_valid is False
+        assert any("source_control.enabled" in e for e in errors)

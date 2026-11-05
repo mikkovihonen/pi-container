@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+- **Source control provider integration (`source_control`).** Added `src/source_control.py` with `read_source_control_config()` and `resolve_source_control_tokens()`. Tokens for GitHub, GitLab, Forgejo/Gitea, Azure DevOps, Bitbucket, and GitCafe are resolved exclusively from the OS keyring (service `"pi-container"`) or active host CLI sessions (`auto_detect_host_cli: true`). Host environment variables and `agent.env` are strictly rejected as credential stores. Configurable per-provider `keyring_var` (single name or fallback list) and `keyring_service`. Resolved tokens are injected into the container together with secondary alias variables (e.g. `GH_TOKEN` + `GITHUB_TOKEN`). Added `get_keyring_secret()` to `src/secret_store.py` for direct keyring lookup without environment fallback. Added `src/tests/test_source_control.py` and extended `src/tests/test_secret_store.py`.
+- **`git` configuration section.** Added `git.safe_directory` and `git.rewrite_ssh_to_https` to `config.yaml` and `src/schema_common.py`. `safe_directory: true` runs `git config --system --add safe.directory '*'` on startup to prevent UID-mismatch errors. `rewrite_ssh_to_https: true` adds system-level `url.insteadOf` rules to redirect SSH remotes for GitHub, GitLab, Codeberg, Bitbucket, and GitCafe to HTTPS so Git operations succeed through the proxy. Added `read_git_config()` to `src/network.py`, wired into `src/run.py`, and documented in `docs/configuration.md`. Added tests in `src/tests/test_network.py` and `src/tests/test_run.py`.
+- **`source_control` configuration section.** Added `source_control` to `config.yaml`, `pi-coding-agent/default/config.yaml`, and `src/schema_common.py`. Added `source_control` and `git` documentation to `docs/configuration.md` and `docs/t3-code.md`. Added schema validation tests in `src/tests/test_config_schema.py`.
+- **Git credential helper setup in `entrypoint.sh`.** When `SETUP_GIT_CREDENTIALS=true` and `GH_TOKEN` / `GITHUB_TOKEN` or `GITLAB_TOKEN` / `GLAB_TOKEN` are present, `entrypoint.sh` runs `gh auth setup-git` and `glab auth setup-git` so Git HTTPS operations authenticate without prompts.
+- **Source control CLI toolchains for T3 Code.** Added optional buildable toolchains for GitHub (`gh`), GitLab (`glab`), Forgejo/Gitea (`tea`), Azure DevOps (`az`), and GitCafe (`cafe`) under `pi-coding-agent-builder/tools/`. Registered upstream resolvers in the upgrade-toolchains skill. Added proxy egress allowlist rules for all six source control hosts in `.pi-container/allowlist.yaml` and `pi-coding-agent/default/allowlist.yaml`.
+- **T3 Code Pi agent specialisation.** Enforced Pi agent exclusivity via `/etc/t3code/policy.json`, added persistent session storage under `--base-dir /home/pi/.pi/agent/t3`, and seeded `settings.json` on first start. Updated `docs/t3-code.md` and `docs/configuration.md` with new options and test coverage ≥ 90%.
+- **T3 Code `advertise_host` setting.** Added `t3.advertise_host` to `config.yaml` and `schema_common.py` so T3 Code connection URLs show `localhost` or a custom hostname instead of the internal container address. Added `t3-advertise-host.cjs` script, wired it into `entrypoint.sh` and `src/run.py`, and added tests in `src/tests/test_config_schema.py`, `src/tests/test_network.py`, and `src/tests/test_run.py`.
+- **T3 Code settings seeder script.** Extracted the inline settings seed from `entrypoint.sh` into a dedicated `t3-seed-settings.cjs` script (installed to `/usr/local/share/pi-container/`) to avoid single-quote collisions inside the `gosu bash -c` command. Added a regression test in `src/tests/test_run.py`.
+
+### Fixed
+- **`SO_REUSEADDR` on host-port probe socket.** Set `SO_REUSEADDR` on the preflight probe socket in `src/containers.py` to prevent false-positive port conflicts caused by sockets in `FIN_WAIT_2` / `CLOSE_WAIT` / `TIME_WAIT`. Added tests in `src/tests/test_containers.py`.
+
+### Changed
+- **Cleaned up `.gitignore`.** Removed stale `llama-server/` entries. Added `.pi-container/agent/t3` to the ignore list for T3 Code persistent session storage. Renamed the `# Pi` comment block to `# Pi / T3`.
+
 ## [0.6.3] - 2026-11-05
 
 ### Added
