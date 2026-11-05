@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.6.2] - 2026-11-05
+
 ### Added
 - **On-demand source-built toolchains with declarative inclusion.** Added `tools.include` to `config.yaml` and `src/config_schema.py`, supporting declarative selection of 16 source-built toolchains: compilers and linkers (`go`, `rust`, `mold`), search and AST tools (`ripgrep`, `fd`, `ast-grep`, `tree-sitter-cli`, `colgrep`), vector storage (`qdrant`, `sqlite-vec`), language servers (`rust-analyzer`, `gopls`, `clangd`, `zls`), and VCS and language runtimes (`git`, `ruby`). Added dedicated per-tool `build.sh` recipes under `pi-coding-agent-builder/tools/`, build-context mounts in `pi-coding-agent/Containerfile`, hash tracking and on-demand building in `src/images.py` and `src/run.py`, and a full test suite in `src/tests/test_toolchains.py`.
 - **Toolchain-upgrade maintenance skill.** Added `.pi/skills/upgrade-toolchains/SKILL.md` and supporting scripts (`check_upgrades.py`, upstream resolvers for GitHub releases, GitHub git tags, and PyPI) to automate auditing and upgrading of all source-compiled tools and runtimes in the builder image.
