@@ -83,3 +83,10 @@ def test_get_keyring_secret_failure():
     with patch("keyring.get_password", side_effect=RuntimeError("Keyring unavailable")):
         val = secret_store.get_keyring_secret("my_account")
         assert val is None
+
+
+def test_get_keyring_secret_for_admin_password():
+    with patch("keyring.get_password", return_value="secure_admin_pass") as mock_get:
+        val = secret_store.get_keyring_secret("ADMIN_PASSWORD")
+        assert val == "secure_admin_pass"
+        mock_get.assert_called_once_with(secret_store.DEFAULT_KEYRING_SERVICE, "ADMIN_PASSWORD")

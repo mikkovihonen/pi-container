@@ -14,7 +14,13 @@ from yaml_strict import load_yaml_strict
 
 logger = logging.getLogger(__name__)
 
-_IMAGE_DEFINITION_FILES = ("Containerfile", "entrypoint.sh")
+_IMAGE_DEFINITION_FILES = (
+    "Containerfile",
+    "entrypoint.sh",
+    "t3-advertise-host.cjs",
+    "t3-seed-settings.cjs",
+    "t3-policy.json",
+)
 _PROXY_IMAGE_DEFINITION_FILES = ("Containerfile", "entrypoint.sh")
 _SHARED_SOURCE_IMAGES = (PROXY_IMAGE_TAG, "pi-coding-agent-builder:local")
 _PROTECTED_IMAGE_TAGS = frozenset({IMAGE_TAG, *_SHARED_SOURCE_IMAGES})

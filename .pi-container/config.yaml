@@ -52,7 +52,6 @@ agent:
   mounts: []
   read_only_pi_container: true
   mode: cli
-  # advertise_host: localhost  # "localhost", "external" (host LAN IP), or custom IP/domain
   ports:
     expose: localhost  # "localhost" (127.0.0.1) or "lan" (0.0.0.0)
     publish: []

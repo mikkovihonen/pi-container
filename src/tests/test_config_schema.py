@@ -904,32 +904,6 @@ class TestToolsSchema:
         assert is_valid is False
         assert any("expected string tool name" in e for e in errors)
 
-    def test_agent_advertise_host_valid(self, valid_config: Path):
-        from config_schema import validate_config
-
-        with valid_config.open("r") as f:
-            data = yaml.safe_load(f)
-        data["agent"]["advertise_host"] = "192.168.1.100"
-        valid_config.write_text(yaml.dump(data))
-
-        with patch("config_schema.get_app_version", return_value=None):
-            is_valid, errors, _ = validate_config(valid_config)
-        assert is_valid is True
-        assert errors == []
-
-    def test_agent_advertise_host_invalid_type(self, valid_config: Path):
-        from config_schema import validate_config
-
-        with valid_config.open("r") as f:
-            data = yaml.safe_load(f)
-        data["agent"]["advertise_host"] = 12345
-        valid_config.write_text(yaml.dump(data))
-
-        with patch("config_schema.get_app_version", return_value=None):
-            is_valid, errors, _ = validate_config(valid_config)
-        assert is_valid is False
-        assert any("agent.advertise_host" in e for e in errors)
-
     def test_duplicate_key_error_handling(self, tmp_path: Path):
         from config_schema import validate_config
 

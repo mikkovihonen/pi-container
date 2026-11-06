@@ -7,10 +7,13 @@ The application uses a `.env` file to store environment-specific settings. See `
 
 ### Security
 
-- **`ADMIN_PASSWORD`** MUST be changed from the default `CHANGEME` before running.
-  The proxy's mitmweb UI will refuse to start with a default or empty password.
+- **`ADMIN_PASSWORD`** MUST be stored in the OS keyring before running:
+    ```bash
+    uv run keyring set pi-container ADMIN_PASSWORD
+    ```
+    The proxy's mitmweb UI will refuse to start with an unset or empty password. Host environment variables are strictly rejected.
 - **Model integrity**: Set `sha256` in `models.json` to verify downloaded model files.
-  The download skips integrity checks without a checksum.
+    The download skips integrity checks without a checksum.
 
 ### Run Configuration
 
@@ -24,7 +27,6 @@ The following environment variables are used by `build.sh` and `run.sh` to confi
 | `BRIDGE_INTERFACE` | Host bridge interface for container networking | `podman0` |
 | `PROXY_UPSTREAM_NETWORK` | The upstream network the proxy connects to for internet access | `podman` |
 | `LOG_LEVEL` | Log level | `INFO` |
-| `ADMIN_PASSWORD` | Password for mitmproxy Web UI | `CHANGEME` |
 | `BUILDER_IMAGE_TAG` | The tag of the toolchain image that the agent image copies node/python/podman from | `pi-coding-agent-builder:local` |
 | `NODE_SOURCE` | `build` compiles Node from source in the toolchain image (~1 hour) instead of staging the official tarball | `prebuilt` |
 | `PYTHON_OPTIMIZE` | `0` skips the PGO CPython build in the toolchain image: a fraction of the memory and time, ~10-20% slower Python | `1` (PGO on) |
@@ -326,7 +328,6 @@ agent:
   devices: []                 # device passthroughs (e.g., /dev/video0:/dev/video0)
   read_only_pi_container: true # lock .pi-container inside /workspace as read-only
   mode: cli                   # agent mode: cli | t3
-  advertise_host: localhost   # pairing link advertised host: localhost | external | IP
   ports:
     expose: localhost         # agent host bind: localhost | lan
     publish: []               # host ports for agent services (e.g. [3773])
@@ -445,16 +446,14 @@ Subdirectories mounted under separate container paths (such as `/home/pi/.pi/age
 
 ### Agent execution mode, host advertising, and ports
 
-The `agent` section controls the execution mode (`cli` vs `t3`), advertised pairing host, and directly published host ports:
+The `agent` section controls the execution mode (`cli` vs `t3`) and directly published host ports:
 
 - `agent.mode` (string, default `cli`): Mode of operation. `"cli"` launches the standard interactive Pi terminal. `"t3"` starts the headless T3 Code server inside the container. Can also be invoked on demand with `./run.sh --t3`.
-- `agent.advertise_host` (string, default `localhost`): The host address or domain displayed in T3 Code connection links, pairing URLs, and terminal QR codes.
-    - Set to `"localhost"` to generate local links (`http://localhost:3773/...`).
-    - Set to `"external"` (or pass `--t3-external-ip`) to automatically resolve the host machine's primary outbound IPv4 address.
-    - Set to an explicit hostname or IP (e.g. `"192.168.1.100"`, `"my-box.local"`) to override.
 - `agent.ports`: Inbound port publishing directly from the agent container (independent of `nested_containers.ports`).
     - `expose`: `"localhost"` (binds `127.0.0.1`, default) or `"lan"` (binds `0.0.0.0`, all interfaces). Can also be elevated on the CLI with `--t3-lan`.
     - `publish`: List of ports to map from the host to the agent container (e.g. `[3773]` or `["13773:3773"]`). When running in `t3` mode, port 3773 is claimed automatically.
+
+*Note: Remote pairing hosts and secure tunnels (Tailscale or Cloudflare) are configured at runtime strictly via command-line flags (e.g. `--t3-tunnel <type>` or `--t3-advertise-host <host>`) to keep `config.yaml` free of personal endpoints and remote access topology.*
 
 ### Transient `tmpfs` mounts
 

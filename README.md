@@ -27,11 +27,12 @@ A containerized environment for running the [`pi-coding-agent`](https://pi.dev) 
 ## Quick start
 
 ```bash
-cp .env.example .env       # then set ADMIN_PASSWORD to a complex value
-./build.sh                 # build the proxy, toolchain and agent images
-alias pi="$PWD/run.sh"     # useful alias
-cd /path/to/your/project   # any workspace
-pi                         # launch the agent for that workspace
+cp .env.example .env
+uv run keyring set pi-container ADMIN_PASSWORD  # set mitmweb UI password
+./build.sh                                     # build the proxy, toolchain and agent images
+alias pi="$PWD/run.sh"                         # useful alias
+cd /path/to/your/project                       # any workspace
+pi                                             # launch the agent for that workspace
 ```
 
 See **[Getting Started](docs/getting-started.md)** for prerequisites, hardware requirements, and platform-specific notes.

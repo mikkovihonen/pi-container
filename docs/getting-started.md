@@ -83,7 +83,11 @@ Copy the example environment file, then edit it:
 cp .env.example .env
 ```
 
-At minimum, **change `ADMIN_PASSWORD`** from `CHANGEME` to a strong password before running — the proxy's mitmweb UI will refuse to start with the default value.
+Set **`ADMIN_PASSWORD`** in your OS keyring before running — the proxy's mitmweb UI requires a password:
+
+```bash
+uv run keyring set pi-container ADMIN_PASSWORD
+```
 
 See [Configuration](configuration.md) for the full list of environment variables.
 

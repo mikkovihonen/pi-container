@@ -93,6 +93,19 @@ class TestComputeImageHash:
 
         assert hash1 != hash2
 
+    def test_t3_shim_content_different_hash(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        fake_agent_dir = tmp_path / "fake_repo" / "pi-coding-agent"
+        fake_agent_dir.mkdir(parents=True, exist_ok=True)
+        (fake_agent_dir / "Containerfile").write_text("FROM scratch\n")
+        (fake_agent_dir / "t3-advertise-host.cjs").write_text("// v1")
+
+        hash1 = images.compute_image_hash(repo, repo_root=tmp_path / "fake_repo")
+        (fake_agent_dir / "t3-advertise-host.cjs").write_text("// v2")
+        hash2 = images.compute_image_hash(repo, repo_root=tmp_path / "fake_repo")
+        assert hash1 != hash2
+
     def test_empty_commands_skipped(self, tmp_path):
         repo = tmp_path / "repo"
         deps = repo / ".pi-container" / "dependencies"

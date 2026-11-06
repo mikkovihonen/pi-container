@@ -124,6 +124,9 @@ exec gosu pi bash -c '
         echo "=================================================================="
         echo "  Starting T3 Code server for Pi inside pi-container..."
         echo "  Web UI: https://t3.codes"
+        if [ -n "${T3_PUBLIC_URL:-}" ]; then
+            echo "  Tunnel URL: ${T3_PUBLIC_URL}"
+        fi
         echo "=================================================================="
         _shim=""
         if [ -f /usr/local/share/pi-container/t3-advertise-host.cjs ]; then

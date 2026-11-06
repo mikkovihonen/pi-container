@@ -936,26 +936,6 @@ class TestReadAgentMode:
         assert read_agent_mode(tmp_path) == "t3"
 
 
-class TestReadAgentAdvertiseHost:
-    def test_default_advertise_host_none(self, tmp_path):
-        from network import read_agent_advertise_host
-
-        (tmp_path / "config.yaml").write_text("agent: {}\n")
-        assert read_agent_advertise_host(tmp_path) is None
-
-    def test_explicit_advertise_host(self, tmp_path):
-        from network import read_agent_advertise_host
-
-        (tmp_path / "config.yaml").write_text("agent:\n  advertise_host: 192.168.1.50\n")
-        assert read_agent_advertise_host(tmp_path) == "192.168.1.50"
-
-    def test_whitespace_advertise_host(self, tmp_path):
-        from network import read_agent_advertise_host
-
-        (tmp_path / "config.yaml").write_text("agent:\n  advertise_host: '  '\n")
-        assert read_agent_advertise_host(tmp_path) is None
-
-
 class TestTokenReplacerSecretsResolution:
     def _make_mgr(self, tmp_path):
         from network import ContainerNetworkManager

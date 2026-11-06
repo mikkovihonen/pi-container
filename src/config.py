@@ -19,6 +19,7 @@ from pathlib import Path
 
 from huggingface_hub.constants import HF_HUB_CACHE
 
+from secret_store import get_keyring_secret
 from util import load_dotenv
 
 # ─── Paths ──────────────────────────────────────────────────────────────────
@@ -37,6 +38,7 @@ load_dotenv(DOTENV_PATH)
 log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
 logging.basicConfig(level=log_level, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 # ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -53,7 +55,10 @@ LLAMA_SERVER_LOCK_DIR: Path = GLOBAL_CACHE_DIR / "locks" / "servers"
 PROXY_LOCK_DIR: Path = GLOBAL_CACHE_DIR / "locks" / "proxies"
 LOGS_DIR: Path = GLOBAL_CACHE_DIR / "logs"
 TOKENS_DIR: Path = GLOBAL_CACHE_DIR / "tokens"
-ADMIN_PASSWORD: str = os.environ.get("ADMIN_PASSWORD", "")
+if "ADMIN_PASSWORD" in os.environ:
+    logger.warning("ADMIN_PASSWORD in host environment is ignored; credentials must be stored in the OS keyring.")
+    del os.environ["ADMIN_PASSWORD"]
+ADMIN_PASSWORD: str = get_keyring_secret("ADMIN_PASSWORD") or ""
 
 # Directory on the host where the proxy container's config files live.
 # The token_replacer config is mounted into the container at runtime so that

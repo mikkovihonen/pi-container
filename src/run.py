@@ -39,7 +39,6 @@ from flow_export import export_mitmweb_flows, poll_agent_container_ips, recover_
 from models import Model
 from network import (
     ContainerNetworkManager,
-    read_agent_advertise_host,
     read_agent_extras,
     read_agent_mode,
     read_agent_ports,
@@ -71,6 +70,8 @@ from util import (
 
 logger = logging.getLogger(__name__)
 
+CONTAINER_RUNTIME: str = "podman"
+
 
 # ─── Startup validation ───────────────────────────────────────────────────────
 
@@ -83,7 +84,9 @@ def _init_runtime() -> None:
     """
     if not ADMIN_PASSWORD or ADMIN_PASSWORD == "CHANGEME":
         logger.error(
-            "ERROR: ADMIN_PASSWORD must be set to a non-default value. Update .env with a strong password before running."
+            "ERROR: ADMIN_PASSWORD must be set to a non-default value in the OS keyring "
+            "(uv run keyring set pi-container ADMIN_PASSWORD). "
+            "Host environment variables are not accepted."
         )
         sys.exit(1)
         return
@@ -262,6 +265,13 @@ def main() -> None:
     cli_t3 = False
     cli_t3_advertise_host: str | None = None
     cli_lan = False
+    cli_t3_tunnel: str | None = None
+    cli_t3_tunnel_domain: str | None = None
+    cli_t3_tunnel_quick: bool = False
+    cli_t3_tunnel_runner: str = "auto"
+    cli_t3_tunnel_keyring_account: str = "CLOUDFLARE_TUNNEL_TOKEN"
+    cli_t3_tunnel_tailscale_mode: str = "serve"
+    cli_t3_public_url: str | None = None
     container_argv: list[str] = []
     _arg_i = 0
     _raw_args = sys.argv[1:]
@@ -287,16 +297,93 @@ def main() -> None:
             cli_t3_advertise_host = _arg.split("=", 1)[1]
             _arg_i += 1
             continue
+        if _arg in ("--t3-tunnel", "--tunnel") and _arg_i + 1 < len(_raw_args):
+            cli_t3_tunnel = _raw_args[_arg_i + 1]
+            cli_t3 = True
+            _arg_i += 2
+            continue
+        if _arg.startswith("--t3-tunnel=") or _arg.startswith("--tunnel="):
+            cli_t3_tunnel = _arg.split("=", 1)[1]
+            cli_t3 = True
+            _arg_i += 1
+            continue
+        if _arg in ("--t3-tunnel-domain", "--tunnel-domain") and _arg_i + 1 < len(_raw_args):
+            cli_t3_tunnel_domain = _raw_args[_arg_i + 1]
+            cli_t3 = True
+            _arg_i += 2
+            continue
+        if _arg.startswith("--t3-tunnel-domain=") or _arg.startswith("--tunnel-domain="):
+            cli_t3_tunnel_domain = _arg.split("=", 1)[1]
+            cli_t3 = True
+            _arg_i += 1
+            continue
+        if _arg in ("--t3-tunnel-quick", "--tunnel-quick"):
+            cli_t3_tunnel_quick = True
+            cli_t3 = True
+            _arg_i += 1
+            continue
+        if _arg in ("--t3-tunnel-runner", "--tunnel-runner") and _arg_i + 1 < len(_raw_args):
+            cli_t3_tunnel_runner = _raw_args[_arg_i + 1]
+            cli_t3 = True
+            _arg_i += 2
+            continue
+        if _arg.startswith("--t3-tunnel-runner=") or _arg.startswith("--tunnel-runner="):
+            cli_t3_tunnel_runner = _arg.split("=", 1)[1]
+            cli_t3 = True
+            _arg_i += 1
+            continue
+        if _arg in ("--t3-tunnel-keyring-account", "--tunnel-keyring-account") and _arg_i + 1 < len(_raw_args):
+            cli_t3_tunnel_keyring_account = _raw_args[_arg_i + 1]
+            cli_t3 = True
+            _arg_i += 2
+            continue
+        if _arg.startswith("--t3-tunnel-keyring-account=") or _arg.startswith("--tunnel-keyring-account="):
+            cli_t3_tunnel_keyring_account = _arg.split("=", 1)[1]
+            cli_t3 = True
+            _arg_i += 1
+            continue
+        if _arg in ("--t3-tunnel-tailscale-mode", "--tunnel-tailscale-mode") and _arg_i + 1 < len(_raw_args):
+            cli_t3_tunnel_tailscale_mode = _raw_args[_arg_i + 1]
+            cli_t3 = True
+            _arg_i += 2
+            continue
+        if _arg.startswith("--t3-tunnel-tailscale-mode=") or _arg.startswith("--tunnel-tailscale-mode="):
+            cli_t3_tunnel_tailscale_mode = _arg.split("=", 1)[1]
+            cli_t3 = True
+            _arg_i += 1
+            continue
+        if _arg in ("--t3-public-url", "--public-url") and _arg_i + 1 < len(_raw_args):
+            cli_t3_public_url = _raw_args[_arg_i + 1]
+            cli_t3 = True
+            _arg_i += 2
+            continue
+        if _arg.startswith("--t3-public-url=") or _arg.startswith("--public-url="):
+            cli_t3_public_url = _arg.split("=", 1)[1]
+            cli_t3 = True
+            _arg_i += 1
+            continue
         container_argv.append(_arg)
         _arg_i += 1
 
+    if cli_t3_tunnel:
+        from tunnel import TunnelValidationError, validate_tunnel_prerequisites
+
+        try:
+            validate_tunnel_prerequisites(
+                tunnel_type=cli_t3_tunnel,
+                domain=cli_t3_tunnel_domain,
+                quick=cli_t3_tunnel_quick,
+                runner=cli_t3_tunnel_runner,
+                keyring_account=cli_t3_tunnel_keyring_account,
+                tailscale_mode=cli_t3_tunnel_tailscale_mode,
+                runtime=CONTAINER_RUNTIME,
+            )
+        except TunnelValidationError as err:
+            logger.error(str(err))
+            sys.exit(1)
+
     is_t3_mode = cli_t3 or (read_agent_mode(pi_container_dir) == "t3")
-    raw_adv_host = (
-        cli_t3_advertise_host
-        or os.environ.get("T3_ADVERTISE_HOST")
-        or read_agent_advertise_host(pi_container_dir)
-        or "localhost"
-    )
+    raw_adv_host = cli_t3_advertise_host or os.environ.get("T3_ADVERTISE_HOST") or "localhost"
     if raw_adv_host.strip().lower() in ("external", "external_ip", "auto"):
         t3_advertise_host = get_host_external_ip()
     else:
@@ -310,7 +397,12 @@ def main() -> None:
         claimed_agent_ports = {agent for _, agent in agent_ports["publish"]}
         if 3773 not in claimed_agent_ports:
             agent_ports["publish"].append((3773, 3773))
-        if t3_advertise_host not in ("localhost", "127.0.0.1", "::1") and agent_ports.get("expose") != "lan":
+        has_active_tunnel = bool(cli_t3_tunnel or cli_t3_public_url)
+        if (
+            not has_active_tunnel
+            and t3_advertise_host not in ("localhost", "127.0.0.1", "::1")
+            and agent_ports.get("expose") != "lan"
+        ):
             logger.warning(
                 f"T3 Code advertised host is an external address ({t3_advertise_host}), "
                 f"but agent.ports.expose is 'localhost'. Inbound connections from other devices "
@@ -381,6 +473,47 @@ def main() -> None:
             run_id = uuid.uuid4().hex[:12]
             agent_container_name = f"pi-coding-agent-{run_id}"
             proxy_name, network_name = project.project_scope(PROJECT_DIR)
+
+            t3_public_url = cli_t3_public_url
+            if is_t3_mode and cli_t3_tunnel:
+                ttype = cli_t3_tunnel.strip().lower()
+                if ttype == "tailscale":
+                    from tunnel import TailscaleTunnelManager
+
+                    ts_mgr = TailscaleTunnelManager(mode=cli_t3_tunnel_tailscale_mode, port=3773)
+                    pub_url, adv_host = ts_mgr.start(stack)
+                    t3_public_url = t3_public_url or pub_url
+                    t3_advertise_host = adv_host
+                elif ttype == "cloudflare":
+                    from tunnel import CloudflareTunnelManager
+
+                    cf_mgr = CloudflareTunnelManager(
+                        domain=cli_t3_tunnel_domain,
+                        quick=cli_t3_tunnel_quick,
+                        runner=cli_t3_tunnel_runner,
+                        keyring_account=cli_t3_tunnel_keyring_account,
+                        port=3773,
+                        runtime=CONTAINER_RUNTIME,
+                        run_id=run_id,
+                    )
+                    pub_url, adv_host = cf_mgr.start(stack)
+                    t3_public_url = t3_public_url or pub_url
+                    t3_advertise_host = adv_host
+
+            if is_t3_mode and t3_public_url:
+                from tunnel import normalize_tunnel_url
+
+                t3_public_url = normalize_tunnel_url(t3_public_url)
+                if not cli_t3_advertise_host and not cli_t3_tunnel:
+                    t3_advertise_host = urlparse(t3_public_url).hostname or t3_advertise_host
+
+                logger.info(
+                    f"\n=================================================================="
+                    f"\n  T3 Code Remote Access Tunnel Active"
+                    f"\n  Public URL: {t3_public_url}"
+                    f"\n  Protocol:   HTTPS (WSS) - Standard Port (443)"
+                    f"\n=================================================================="
+                )
 
             ensure_proxy_image(CONTAINER_RUNTIME, repo_root=REPO_ROOT)
 
@@ -593,6 +726,7 @@ def main() -> None:
                         "PI_CONTAINER_MODE=t3",
                         "--env",
                         f"T3_ADVERTISE_HOST={t3_advertise_host}",
+                        *(["--env", f"T3_PUBLIC_URL={t3_public_url}"] if t3_public_url else []),
                         *(["--env", "T3_LAN=true"] if agent_ports["expose"] == "lan" else []),
                     ]
                     if is_t3_mode

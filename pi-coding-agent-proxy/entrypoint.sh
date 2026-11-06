@@ -4,7 +4,7 @@ set -e
 # ─── Validate ADMIN_PASSWORD ─────────────────────────────────────────────────
 if [ -z "$ADMIN_PASSWORD" ] || [ "$ADMIN_PASSWORD" = "CHANGEME" ]; then
     echo "ERROR: ADMIN_PASSWORD must be set to a non-default value."
-    echo "Update the .env file on the host before running."
+    echo "Set ADMIN_PASSWORD in the OS keyring (uv run keyring set pi-container ADMIN_PASSWORD) on the host before running."
     exit 1
 fi
 

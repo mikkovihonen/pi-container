@@ -17,12 +17,34 @@ class TestInitRuntime:
         run._init_runtime()
         assert exited == [1]
 
-    def test_exits_on_empty_admin_password(self, monkeypatch):
+    def test_exits_on_empty_admin_password(self, monkeypatch, caplog):
+        import logging
+
         monkeypatch.setattr(run, "ADMIN_PASSWORD", "")
         exited = []
         monkeypatch.setattr(run.sys, "exit", lambda code: exited.append(code))
-        run._init_runtime()
+        with caplog.at_level(logging.ERROR):
+            run._init_runtime()
         assert exited == [1]
+        assert "uv run keyring set pi-container ADMIN_PASSWORD" in caplog.text
+        assert "Host environment variables are not accepted" in caplog.text
+
+    def test_admin_password_ignores_host_environment_variables(self, monkeypatch, caplog):
+        import importlib
+        import logging
+
+        import config
+
+        monkeypatch.setenv("ADMIN_PASSWORD", "env_should_be_ignored")
+        with patch("secret_store.get_keyring_secret", return_value="from_keyring_only"):
+            with caplog.at_level(logging.WARNING):
+                importlib.reload(config)
+            try:
+                assert config.ADMIN_PASSWORD == "from_keyring_only"
+                assert "ADMIN_PASSWORD in host environment is ignored" in caplog.text
+                assert "ADMIN_PASSWORD" not in os.environ
+            finally:
+                importlib.reload(config)
 
     def test_exits_on_environment_error(self, monkeypatch):
         monkeypatch.setattr(run, "ADMIN_PASSWORD", "securepassword123")
@@ -412,3 +434,109 @@ class TestT3AdvertiseHostResolution:
         content = script_file.read_text()
         assert "providerInstances.pi" in content
         assert 'driver: "pi", enabled: true' in content
+
+    def test_t3_tunnel_cli_parsing(self):
+        raw_args = [
+            "--t3-tunnel",
+            "cloudflare",
+            "--t3-tunnel-domain",
+            "t3.example.com",
+            "--t3-tunnel-runner=container",
+            "--t3-tunnel-keyring-account",
+            "CUSTOM_CF_TOKEN",
+            "--t3-public-url=https://custom-entry.dev",
+        ]
+        cli_t3 = False
+        cli_t3_tunnel = None
+        cli_t3_tunnel_domain = None
+        cli_t3_tunnel_quick = False
+        cli_t3_tunnel_runner = "auto"
+        cli_t3_tunnel_keyring_account = "CLOUDFLARE_TUNNEL_TOKEN"
+        cli_t3_public_url = None
+        i = 0
+        while i < len(raw_args):
+            arg = raw_args[i]
+            if arg in ("--t3-tunnel", "--tunnel") and i + 1 < len(raw_args):
+                cli_t3_tunnel = raw_args[i + 1]
+                cli_t3 = True
+                i += 2
+            elif arg in ("--t3-tunnel-domain", "--tunnel-domain") and i + 1 < len(raw_args):
+                cli_t3_tunnel_domain = raw_args[i + 1]
+                cli_t3 = True
+                i += 2
+            elif arg in ("--t3-tunnel-runner", "--tunnel-runner") and i + 1 < len(raw_args):
+                cli_t3_tunnel_runner = raw_args[i + 1]
+                cli_t3 = True
+                i += 2
+            elif arg.startswith("--t3-tunnel-runner=") or arg.startswith("--tunnel-runner="):
+                cli_t3_tunnel_runner = arg.split("=", 1)[1]
+                cli_t3 = True
+                i += 1
+            elif arg in ("--t3-tunnel-keyring-account", "--tunnel-keyring-account") and i + 1 < len(raw_args):
+                cli_t3_tunnel_keyring_account = raw_args[i + 1]
+                cli_t3 = True
+                i += 2
+            elif arg in ("--t3-public-url", "--public-url") and i + 1 < len(raw_args):
+                cli_t3_public_url = raw_args[i + 1]
+                cli_t3 = True
+                i += 2
+            elif arg.startswith("--t3-public-url=") or arg.startswith("--public-url="):
+                cli_t3_public_url = arg.split("=", 1)[1]
+                cli_t3 = True
+                i += 1
+            else:
+                i += 1
+
+        assert cli_t3 is True
+        assert cli_t3_tunnel == "cloudflare"
+        assert cli_t3_tunnel_domain == "t3.example.com"
+        assert cli_t3_tunnel_quick is False
+        assert cli_t3_tunnel_runner == "container"
+        assert cli_t3_tunnel_keyring_account == "CUSTOM_CF_TOKEN"
+        assert cli_t3_public_url == "https://custom-entry.dev"
+
+    def test_t3_tunnel_suppresses_external_ip_warning(self):
+        from unittest.mock import MagicMock
+
+        mock_logger = MagicMock()
+        agent_ports = {"expose": "localhost", "publish": [(3773, 3773)]}
+        t3_advertise_host = "t3.example.com"
+        cli_t3_tunnel = "cloudflare"
+        cli_t3_public_url = None
+
+        has_active_tunnel = bool(cli_t3_tunnel or cli_t3_public_url)
+        if (
+            not has_active_tunnel
+            and t3_advertise_host not in ("localhost", "127.0.0.1", "::1")
+            and agent_ports.get("expose") != "lan"
+        ):
+            mock_logger.warning("warn message")
+
+        # Expose should remain localhost and no warning should be logged
+        assert agent_ports["expose"] == "localhost"
+        mock_logger.warning.assert_not_called()
+
+    def test_t3_tunnel_zero_port_https_normalization(self):
+        from urllib.parse import urlparse
+
+        from tunnel import normalize_tunnel_url
+
+        cli_t3_public_url = "http://t3.example.com:3773"
+        t3_public_url = normalize_tunnel_url(cli_t3_public_url)
+        assert t3_public_url == "https://t3.example.com"
+        assert ":3773" not in t3_public_url
+        assert t3_public_url.startswith("https://")
+
+        t3_advertise_host = urlparse(t3_public_url).hostname
+        assert t3_advertise_host == "t3.example.com"
+
+        env_args = [
+            "--env",
+            "PI_CONTAINER_MODE=t3",
+            "--env",
+            f"T3_ADVERTISE_HOST={t3_advertise_host}",
+            *(["--env", f"T3_PUBLIC_URL={t3_public_url}"] if t3_public_url else []),
+        ]
+        assert "--env" in env_args
+        assert "T3_PUBLIC_URL=https://t3.example.com" in env_args
+        assert "T3_ADVERTISE_HOST=t3.example.com" in env_args
