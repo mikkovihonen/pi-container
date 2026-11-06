@@ -281,11 +281,11 @@ def main() -> None:
             cli_t3 = True
             _arg_i += 1
             continue
-        if _arg in ("--t3-lan", "--lan"):
+        if _arg == "--t3-lan":
             cli_lan = True
             _arg_i += 1
             continue
-        if _arg in ("--t3-external-ip", "--t3-advertise-external-ip"):
+        if _arg == "--t3-external-ip":
             cli_t3_advertise_host = "external"
             _arg_i += 1
             continue
@@ -297,67 +297,71 @@ def main() -> None:
             cli_t3_advertise_host = _arg.split("=", 1)[1]
             _arg_i += 1
             continue
-        if _arg in ("--t3-tunnel", "--tunnel") and _arg_i + 1 < len(_raw_args):
+        if _arg == "--t3-tunnel" and _arg_i + 1 < len(_raw_args):
             cli_t3_tunnel = _raw_args[_arg_i + 1]
             cli_t3 = True
             _arg_i += 2
             continue
-        if _arg.startswith("--t3-tunnel=") or _arg.startswith("--tunnel="):
+        if _arg.startswith("--t3-tunnel="):
             cli_t3_tunnel = _arg.split("=", 1)[1]
             cli_t3 = True
             _arg_i += 1
             continue
-        if _arg in ("--t3-tunnel-domain", "--tunnel-domain") and _arg_i + 1 < len(_raw_args):
+        if _arg == "--t3-tunnel-domain" and _arg_i + 1 < len(_raw_args):
             cli_t3_tunnel_domain = _raw_args[_arg_i + 1]
             cli_t3 = True
             _arg_i += 2
             continue
-        if _arg.startswith("--t3-tunnel-domain=") or _arg.startswith("--tunnel-domain="):
+        if _arg.startswith("--t3-tunnel-domain="):
             cli_t3_tunnel_domain = _arg.split("=", 1)[1]
             cli_t3 = True
             _arg_i += 1
             continue
-        if _arg in ("--t3-tunnel-quick", "--tunnel-quick"):
+        if _arg == "--t3-tunnel-quick":
             cli_t3_tunnel_quick = True
             cli_t3 = True
             _arg_i += 1
             continue
-        if _arg in ("--t3-tunnel-runner", "--tunnel-runner") and _arg_i + 1 < len(_raw_args):
+        if _arg == "--t3-tunnel-runner" and _arg_i + 1 < len(_raw_args):
             cli_t3_tunnel_runner = _raw_args[_arg_i + 1]
             cli_t3 = True
             _arg_i += 2
             continue
-        if _arg.startswith("--t3-tunnel-runner=") or _arg.startswith("--tunnel-runner="):
+        if _arg.startswith("--t3-tunnel-runner="):
             cli_t3_tunnel_runner = _arg.split("=", 1)[1]
             cli_t3 = True
             _arg_i += 1
             continue
-        if _arg in ("--t3-tunnel-keyring-account", "--tunnel-keyring-account") and _arg_i + 1 < len(_raw_args):
+        if _arg == "--t3-tunnel-keyring-account" and _arg_i + 1 < len(_raw_args):
             cli_t3_tunnel_keyring_account = _raw_args[_arg_i + 1]
             cli_t3 = True
             _arg_i += 2
             continue
-        if _arg.startswith("--t3-tunnel-keyring-account=") or _arg.startswith("--tunnel-keyring-account="):
+        if _arg.startswith("--t3-tunnel-keyring-account="):
             cli_t3_tunnel_keyring_account = _arg.split("=", 1)[1]
             cli_t3 = True
             _arg_i += 1
             continue
-        if _arg in ("--t3-tunnel-tailscale-mode", "--tunnel-tailscale-mode") and _arg_i + 1 < len(_raw_args):
+        if _arg == "--t3-tunnel-tailscale-mode" and _arg_i + 1 < len(_raw_args):
             cli_t3_tunnel_tailscale_mode = _raw_args[_arg_i + 1]
             cli_t3 = True
             _arg_i += 2
             continue
-        if _arg.startswith("--t3-tunnel-tailscale-mode=") or _arg.startswith("--tunnel-tailscale-mode="):
+        if _arg.startswith("--t3-tunnel-tailscale-mode="):
             cli_t3_tunnel_tailscale_mode = _arg.split("=", 1)[1]
             cli_t3 = True
             _arg_i += 1
             continue
-        if _arg in ("--t3-public-url", "--public-url") and _arg_i + 1 < len(_raw_args):
+        if _arg == "--t3-public-url" and _arg_i + 1 < len(_raw_args):
             cli_t3_public_url = _raw_args[_arg_i + 1]
             cli_t3 = True
             _arg_i += 2
             continue
-        if _arg.startswith("--t3-public-url=") or _arg.startswith("--public-url="):
+        if _arg.startswith("--t3-public-url="):
+            cli_t3_public_url = _arg.split("=", 1)[1]
+            cli_t3 = True
+            _arg_i += 1
+            continue
             cli_t3_public_url = _arg.split("=", 1)[1]
             cli_t3 = True
             _arg_i += 1

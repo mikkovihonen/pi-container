@@ -140,6 +140,7 @@ class TestServerIsExistingServerHealthy:
             lock_dir=tmp_path / "locks",
             repo_root=tmp_path,
             server_id="test",
+            logs_dir=tmp_path / "logs",
         )
         s.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
         return s
@@ -223,6 +224,7 @@ class TestServerStartNewProcess:
             lock_dir=tmp_path / "locks",
             repo_root=tmp_path,
             server_id="test",
+            logs_dir=tmp_path / "logs",
         )
         return s
 
@@ -316,6 +318,7 @@ class TestServerStop:
             lock_dir=tmp_path / "locks",
             repo_root=tmp_path,
             server_id="test",
+            logs_dir=tmp_path / "logs",
         )
         s.paths["lock_dir"].mkdir(parents=True, exist_ok=True)
         return s
@@ -491,6 +494,29 @@ class TestConfigFingerprint:
         )
         assert s.paths["log_file"].parent == custom_logs / s.instance_key
 
+    def test_default_logs_dir_uses_config_logs_dir(self, tmp_path):
+        from config import LOGS_DIR
+
+        mc = ModelConfig.from_dict(
+            {
+                "fileFlag": "--model",
+                "repo": "o/r",
+                "file": "m.gguf",
+                "additionalServerFlags": [],
+                "sha256": None,
+            }
+        )
+        s = Server(
+            config=ServerConfig(hf_models={"main": mc}, flags=[]),
+            models_dir=tmp_path / "models",
+            llama_bin="/bin/true",
+            lock_dir=tmp_path / "locks",
+            repo_root=tmp_path,
+            server_id="test",
+        )
+        assert s.logs_dir == LOGS_DIR
+        assert s.paths["log_file"].parent == LOGS_DIR / s.instance_key
+
     def test_alias_uses_plain_server_id_not_instance_key(self, tmp_path):
         mc = ModelConfig.from_dict(
             {
@@ -531,5 +557,6 @@ class TestServerStartupTuning:
             lock_dir=tmp_path / "locks",
             repo_root=tmp_path,
             server_id="test",
+            logs_dir=tmp_path / "logs",
         )
         assert (s.startup_timeout, s.startup_attempts) == (180, 2)

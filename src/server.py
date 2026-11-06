@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from config import LOGS_DIR
 from models import Model, ServerConfig
 from util import (
     get_free_port,
@@ -71,7 +72,7 @@ class Server:
         self.llama_bin: str = llama_bin or ""
         self.lock_dir: Path = lock_dir
         self.repo_root: Path = repo_root
-        self.logs_dir: Path = logs_dir if logs_dir is not None else (self.repo_root / "llama-server" / "logs")
+        self.logs_dir: Path = logs_dir if logs_dir is not None else LOGS_DIR
         # llama-server startup tuning (config.yaml llama.*). Large models load
         # slowly; ``startup_timeout`` is the /health wait per attempt and
         # ``startup_attempts`` the number of (re)launches before giving up.

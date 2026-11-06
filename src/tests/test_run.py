@@ -279,10 +279,10 @@ class TestT3LaunchConfiguration:
             if arg == "--t3":
                 cli_t3 = True
                 i += 1
-            elif arg in ("--t3-lan", "--lan"):
+            elif arg == "--t3-lan":
                 cli_lan = True
                 i += 1
-            elif arg in ("--t3-external-ip", "--t3-advertise-external-ip"):
+            elif arg == "--t3-external-ip":
                 cli_t3_advertise_host = "external"
                 i += 1
             elif arg == "--t3-advertise-host" and i + 1 < len(raw_args):
@@ -311,10 +311,10 @@ class TestT3LaunchConfiguration:
             if arg == "--t3":
                 cli_t3 = True
                 i += 1
-            elif arg in ("--t3-lan", "--lan"):
+            elif arg == "--t3-lan":
                 cli_lan = True
                 i += 1
-            elif arg in ("--t3-external-ip", "--t3-advertise-external-ip"):
+            elif arg == "--t3-external-ip":
                 cli_t3_advertise_host = "external"
                 i += 1
             elif arg == "--t3-advertise-host" and i + 1 < len(raw_args_flags):
@@ -330,23 +330,26 @@ class TestT3LaunchConfiguration:
         assert cli_t3_advertise_host == "external"
         assert cli_lan is True
 
-        # Short flags (--lan, --t3-advertise-external-ip)
-        raw_args_short = ["--lan", "--t3-advertise-external-ip"]
+        # Unprefixed flags (--lan, --tunnel, etc.) are treated as container argv
+        raw_args_unprefixed = ["--lan", "--tunnel", "cf", "--public-url", "https://example.com"]
         cli_lan = False
-        cli_t3_advertise_host = None
+        cli_t3_tunnel = None
+        container_argv_unprefixed = []
         i = 0
-        while i < len(raw_args_short):
-            arg = raw_args_short[i]
-            if arg in ("--t3-lan", "--lan"):
+        while i < len(raw_args_unprefixed):
+            arg = raw_args_unprefixed[i]
+            if arg == "--t3-lan":
                 cli_lan = True
                 i += 1
-            elif arg in ("--t3-external-ip", "--t3-advertise-external-ip"):
-                cli_t3_advertise_host = "external"
-                i += 1
+            elif arg == "--t3-tunnel" and i + 1 < len(raw_args_unprefixed):
+                cli_t3_tunnel = raw_args_unprefixed[i + 1]
+                i += 2
             else:
+                container_argv_unprefixed.append(arg)
                 i += 1
-        assert cli_lan is True
-        assert cli_t3_advertise_host == "external"
+        assert cli_lan is False
+        assert cli_t3_tunnel is None
+        assert container_argv_unprefixed == ["--lan", "--tunnel", "cf", "--public-url", "https://example.com"]
 
     def test_t3_policy_content(self):
         import json
@@ -456,31 +459,31 @@ class TestT3AdvertiseHostResolution:
         i = 0
         while i < len(raw_args):
             arg = raw_args[i]
-            if arg in ("--t3-tunnel", "--tunnel") and i + 1 < len(raw_args):
+            if arg == "--t3-tunnel" and i + 1 < len(raw_args):
                 cli_t3_tunnel = raw_args[i + 1]
                 cli_t3 = True
                 i += 2
-            elif arg in ("--t3-tunnel-domain", "--tunnel-domain") and i + 1 < len(raw_args):
+            elif arg == "--t3-tunnel-domain" and i + 1 < len(raw_args):
                 cli_t3_tunnel_domain = raw_args[i + 1]
                 cli_t3 = True
                 i += 2
-            elif arg in ("--t3-tunnel-runner", "--tunnel-runner") and i + 1 < len(raw_args):
+            elif arg == "--t3-tunnel-runner" and i + 1 < len(raw_args):
                 cli_t3_tunnel_runner = raw_args[i + 1]
                 cli_t3 = True
                 i += 2
-            elif arg.startswith("--t3-tunnel-runner=") or arg.startswith("--tunnel-runner="):
+            elif arg.startswith("--t3-tunnel-runner="):
                 cli_t3_tunnel_runner = arg.split("=", 1)[1]
                 cli_t3 = True
                 i += 1
-            elif arg in ("--t3-tunnel-keyring-account", "--tunnel-keyring-account") and i + 1 < len(raw_args):
+            elif arg == "--t3-tunnel-keyring-account" and i + 1 < len(raw_args):
                 cli_t3_tunnel_keyring_account = raw_args[i + 1]
                 cli_t3 = True
                 i += 2
-            elif arg in ("--t3-public-url", "--public-url") and i + 1 < len(raw_args):
+            elif arg == "--t3-public-url" and i + 1 < len(raw_args):
                 cli_t3_public_url = raw_args[i + 1]
                 cli_t3 = True
                 i += 2
-            elif arg.startswith("--t3-public-url=") or arg.startswith("--public-url="):
+            elif arg.startswith("--t3-public-url="):
                 cli_t3_public_url = arg.split("=", 1)[1]
                 cli_t3 = True
                 i += 1

@@ -127,7 +127,7 @@ When T3 Code runs inside a container, `t3 serve` must bind to `--host 0.0.0.0` s
     - **Secure Tunnels**: For internet and mobile access, use automated tunnels via `--t3-tunnel <tailscale|cloudflare>` which automatically configure the advertised host and public HTTPS URL without touching `config.yaml`.
 - **LAN Elevation (`agent.ports.expose`)**:
     - **Default (`localhost`)**: Port `3773` is published exclusively on `127.0.0.1:3773:3773`.
-    - **LAN Access (`lan`)**: To allow pairing and connection from other devices on your local network (e.g. phone, tablet, or another machine), explicitly set `agent.ports.expose: lan` in `config.yaml` or pass `--t3-lan` (or `--lan`) on the CLI.
+    - **LAN Access (`lan`)**: To allow pairing and connection from other devices on your local network (e.g. phone, tablet, or another machine), explicitly set `agent.ports.expose: lan` in `config.yaml` or pass `--t3-lan` on the CLI.
     - **Security Note**: Advertising an external IP without enabling LAN elevation will log a warning, as inbound connections from outside the host machine will be refused by the `127.0.0.1` bind. (This warning is automatically suppressed when a secure tunnel or `--t3-public-url` is active).
 
 

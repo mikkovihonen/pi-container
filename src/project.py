@@ -34,8 +34,8 @@ def ensure_project_config(project_dir: Path | None = None, repo_root: Path | Non
 
     Seeds ``{project_dir}/.pi-container`` from ``{repo_root}/pi-coding-agent/default``:
     the ``agent/`` and ``chat-templates/`` subtrees plus ``config.yaml`` and the proxy
-    addon configs ``allowlist.yaml``/``token_replacer.yaml``. Also seeds ``entrypoint.sh``
-    into ``.pi-container/agent/`` and dependency command templates if present.
+    addon configs ``allowlist.yaml``/``token_replacer.yaml``. Also seeds dependency command
+    templates if present.
 
     Returns the agent launch-config dir (``{project_dir}/.pi-container/agent``).
     """
@@ -59,12 +59,6 @@ def ensure_project_config(project_dir: Path | None = None, repo_root: Path | Non
             dst.parent.mkdir(parents=True, exist_ok=True)
             logger.info(f"Seeding {dst} from {src}.")
             shutil.copy2(src, dst)
-
-    ep_src = template_root / "entrypoint.sh"
-    ep_dst = project_root / "agent" / "entrypoint.sh"
-    if ep_src.exists() and not ep_dst.exists():
-        logger.info(f"Seeding {ep_dst} from {ep_src}.")
-        shutil.copy2(ep_src, ep_dst)
 
     deps_template_root = template_root / "dependencies"
     deps_project_root = project_root / "dependencies"

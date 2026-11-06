@@ -702,7 +702,7 @@ class ContainerNetworkManager:
                                 logger=logger,
                             )
                             project_hash = proxy_name.removeprefix("pi-proxy-")
-                            network_name = f"pi-net-{project_hash}"
+                            network_name = f"pi-isolated-net-{project_hash}"
                             logger.info(f"Removing orphaned proxy network {network_name}...")
                             run_quiet(
                                 [runtime_bin, "network", "rm", network_name],

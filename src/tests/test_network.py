@@ -326,8 +326,8 @@ class TestCleanupOrphanedProxies:
         assert mock_run_quiet.call_count == 2
         # First call: rm -f proxy_name
         assert mock_run_quiet.call_args_list[0][0][0] == ["podman", "rm", "-f", proxy_name]
-        # Second call: network rm pi-net-abcdef1234
-        assert mock_run_quiet.call_args_list[1][0][0] == ["podman", "network", "rm", "pi-net-abcdef1234"]
+        # Second call: network rm pi-isolated-net-abcdef1234
+        assert mock_run_quiet.call_args_list[1][0][0] == ["podman", "network", "rm", "pi-isolated-net-abcdef1234"]
         assert not (lock_dir / f".{proxy_name}.clients.json").exists()
         assert not (lock_dir / f".{proxy_name}.lock").exists()
         assert not lock_dir.exists()
