@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.6.6] - 2026-11-06
+
+### Fixed
+- **Orphaned network cleanup identifier.** Aligned cleanup in `src/network.py` from `pi-net-{project_hash}` to canonical `pi-isolated-net-{project_hash}`.
+- **Server logs directory default.** Defaulted `Server.logs_dir` in `src/server.py` to `config.LOGS_DIR` instead of obsolete `llama-server/logs/`.
+
+### Removed
+- **Dead `entrypoint.sh` template seeding.** Removed obsolete `entrypoint.sh` template copy logic from `src/project.py` and pruned associated unit tests.
+- **Unprefixed CLI flag aliases.** Removed unprefixed `--lan`, `--tunnel*`, and `--public-url` aliases from `src/run.py` to enforce canonical `--t3-*` options.
+- **Duplicate T3 builder scripts & redundant fallback paths.** Removed duplicate T3 script copies and simplified `pi-coding-agent/entrypoint.sh` and builder `build.sh` to use `/usr/local/share/pi-container/` directly.
+- **Obsolete `llama-server` tmpfs mounts.** Removed obsolete `llama-server` `.locks`, `logs`, and `models` mounts from `.pi-container/config.yaml`.
+
 ## [0.6.5] - 2026-11-06
 
 ### Added
