@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.6.5] - 2026-11-06
+
+### Added
+- **T3 remote tunnel support.** Added `src/tunnel.py` with orchestration for Tailscale Serve and Cloudflare Zero Trust tunnels, launched via `cloudflared` container. CLI flags: `--t3-tunnel`, `--t3-tunnel-domain`, etc. Added full test suite in `src/tests/test_tunnel.py`.
+- **`get_host_external_ip()` utility.** Added `src/util.py` with UDP routing probe for external IP resolution, with hostname and loopback fallbacks.
+
+### Fixed
+- **ADMIN_PASSWORD moved to keyring exclusively.** Removed ADMIN_PASSWORD from `.env` files. Resolved exclusively from the OS keyring via `secret_store.get_keyring_secret()`. Host environment variables are strictly rejected. Updated startup validation error messages and documentation in `README.md`, `docs/getting-started.md`, and `docs/configuration.md`.
+- **T3 default model name in settings seed.** Changed model field from `"pi"` to `"default"` in `textGenerationModelSelection` in both `t3-seed-settings.cjs` files.
+- **External IP advertising and LAN elevation.** Made external IP advertising (`agent.advertise_host: external`, `--t3-external-ip`) and LAN elevation (`--t3-lan`, `agent.ports.expose: lan`) explicit settings. Avoids implicit elevation when external IP is advertised, logs a warning when bound only to localhost.
+
+### Changed
+- **Removed `agent.advertise_host` from config.yaml.** Moved to runtime CLI flags.
+
+### Dependency Updates
+- **huggingface-hub 2.1.1 → 2.4.0.**
+
 ## [0.6.4] - 2026-11-05
 
 ### Added
