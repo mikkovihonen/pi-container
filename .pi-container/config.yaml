@@ -85,9 +85,6 @@ tmpfs:
     - /workspace/.pytest_cache
     - /workspace/.ruff_cache
     - /workspace/src/__pycache__
-    - /workspace/llama-server/.locks
-    - /workspace/llama-server/logs
-    - /workspace/llama-server/models
     - /workspace/pi-coding-agent-proxy/.locks
     - /workspace/pi-coding-agent-proxy/.pytest_cache
     - /workspace/pi-coding-agent-proxy/__pycache__
